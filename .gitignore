@@ -1,0 +1,23 @@
+# 비밀값 — 절대 커밋 금지
+.env
+*.key
+config/config.yaml          # 실계좌 설정. config.example.yaml만 추적한다
+
+# 런타임 산출물
+data/
+logs/
+*.db
+*.sqlite3
+KILL
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage

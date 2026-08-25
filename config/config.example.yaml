@@ -1,0 +1,41 @@
+# dorothy-brew 설정 예시
+# 복사해서 쓰세요:  cp config/config.example.yaml config/config.yaml
+#
+# ⚠ API 키는 여기 적지 마세요. 환경변수(.env)로만 넣습니다.
+
+mode: paper                       # backtest | paper | live
+initial_equity: 1000.0            # 백테스트/페이퍼 시작 자본 (USDT)
+poll_interval_sec: 15             # 실시간 루프 주기(초)
+db_path: data/dorothy.db
+kill_switch_file: KILL            # 이 파일을 만들면 봇이 포지션을 정리하고 멈춘다
+
+exchange:
+  name: bitget
+  symbol: "BTC/USDT:USDT"         # ccxt 무기한선물 표기법
+  timeframe: "5m"                 # 1m 3m 5m 15m 30m 1h 2h 4h 1d
+  leverage: 2.0                   # 낮게 시작하세요. 높은 배율은 실력이 아니라 시간 문제입니다
+  margin_mode: isolated           # isolated 권장 (한 종목 사고가 계좌 전체로 번지지 않음)
+  taker_fee: 0.0006               # 실제 등급별 수수료로 맞추세요. 백테스트 신뢰도가 여기 달렸습니다
+  maker_fee: 0.0002
+  slippage: 0.0005                # 시장가 체결 밀림 가정치. 넉넉히 잡는 편이 안전합니다
+
+risk:
+  risk_per_trade: 0.01            # 1회 매매에서 감수할 자본 비율 (1% 권장, 2% 초과 비권장)
+  max_position_pct: 0.30          # 명목가 상한 (자본 대비)
+  max_daily_loss_pct: 0.03        # 하루 3% 잃으면 당일 매매 중단
+  max_consecutive_losses: 4       # 4연패 시 당일 중단 (다음 날 자동 재개)
+  max_open_positions: 1
+  max_leverage: 3.0               # exchange.leverage가 이보다 크면 여기로 깎임
+
+strategy:
+  name: ema_cross                 # 샘플 전략. 자기 전략으로 교체하는 것이 전제입니다
+  params:
+    fast: 20
+    slow: 50
+    atr_period: 14
+    atr_stop_mult: 2.0            # 손절 = 진입가 ∓ ATR × 2
+    atr_target_mult: 3.0          # 익절 = 진입가 ± ATR × 3
+    allow_short: true
+
+notify:
+  telegram_enabled: false         # true로 하려면 .env에 토큰/챗ID 필요
