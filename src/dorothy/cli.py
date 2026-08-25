@@ -14,6 +14,7 @@ import logging
 import sys
 
 from . import __version__
+from .backtest import diagnostics
 from .backtest import engine as backtest_engine
 from .config import Config, load_config
 from .data import loader
@@ -34,6 +35,10 @@ def _build_config(args) -> Config:
         cfg.exchange.timeframe = args.timeframe
     if getattr(args, "equity", None):
         cfg.initial_equity = args.equity
+    if getattr(args, "strategy", None):
+        cfg.strategy.name = args.strategy
+        if args.config is None:
+            cfg.strategy.params = {}   # 설정 파일 없이 전략만 바꾸면 기본 파라미터를 쓴다
     return cfg
 
 
@@ -67,6 +72,44 @@ def cmd_backtest(args) -> int:
 
     result = backtest_engine.run(candles, strategy, cfg)
     print(result.report())
+    return 0
+
+
+def cmd_diagnose(args) -> int:
+    """진입이 왜 안 나오는지 단계별로 보여준다."""
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+    log.info("전략: %s %s", strategy.name, cfg.strategy.params or "(기본값)")
+    print(diagnostics.funnel(candles, strategy, step=args.step).report())
+    return 0
+
+
+def cmd_ablate(args) -> int:
+    """요소를 하나씩 꺼가며 기여도를 측정한다."""
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    log.info("제거 실험 시작 — 구성 %d개를 각각 백테스트합니다", len(diagnostics.ABLATIONS))
+    rows = diagnostics.ablate(candles, cfg)
+    print(diagnostics.ablation_report(rows))
+    return 0
+
+
+def cmd_repaint(args) -> int:
+    """엘리엇 카운트가 얼마나 자주 바뀌는지 실측한다.
+
+    파동 카운트를 전략에 넣기 전에 이 숫자를 먼저 보라는 취지의 명령이다.
+    """
+    from .analysis.elliott import measure_repainting
+    from .analysis.swings import find_swings
+
+    cfg = _build_config(args)
+    candles = _load_candles(args, cfg)
+    swings = find_swings(candles)
+    log.info("스윙 %d개로 카운트 안정성을 측정합니다", len(swings))
+    print(measure_repainting(candles, swings, start=args.start, step=args.step).report())
     return 0
 
 
@@ -190,10 +233,26 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--symbol")
         sp.add_argument("--timeframe")
         sp.add_argument("--equity", type=float, help="시작 자본")
+        sp.add_argument("--strategy", help="전략 이름 (ema_cross / ict_confluence)")
 
     bt = sub.add_parser("backtest", parents=[common], help="과거 데이터로 전략 검증")
     add_data_args(bt)
     bt.set_defaults(func=cmd_backtest)
+
+    dg = sub.add_parser("diagnose", parents=[common], help="진입 조건 깔때기 분석")
+    add_data_args(dg)
+    dg.add_argument("--step", type=int, default=1, help="몇 봉마다 평가할지 (크면 빠름)")
+    dg.set_defaults(func=cmd_diagnose)
+
+    ab = sub.add_parser("ablate", parents=[common], help="요소별 기여도 측정 (제거 실험)")
+    add_data_args(ab)
+    ab.set_defaults(func=cmd_ablate)
+
+    rp = sub.add_parser("repaint", parents=[common], help="엘리엇 카운트 안정성 측정")
+    add_data_args(rp)
+    rp.add_argument("--start", type=int, default=150, help="측정 시작 봉")
+    rp.add_argument("--step", type=int, default=1)
+    rp.set_defaults(func=cmd_repaint)
 
     ft = sub.add_parser("fetch", parents=[common], help="과거 캔들 수집 후 CSV 저장")
     ft.add_argument("--days", type=int, default=180)

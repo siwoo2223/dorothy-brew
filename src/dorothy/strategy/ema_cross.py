@@ -25,12 +25,11 @@ class EmaCrossStrategy(Strategy):
         atr_stop_mult: float = 2.0,
         atr_target_mult: float = 3.0,
         allow_short: bool = True,
-        **extra,
     ) -> None:
         super().__init__(
             fast=fast, slow=slow, atr_period=atr_period,
             atr_stop_mult=atr_stop_mult, atr_target_mult=atr_target_mult,
-            allow_short=allow_short, **extra,
+            allow_short=allow_short,
         )
         if fast >= slow:
             raise ValueError("fast는 slow보다 작아야 합니다.")

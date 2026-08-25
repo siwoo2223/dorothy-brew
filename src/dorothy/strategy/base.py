@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 
 from ..models import Candle, Position, Signal
@@ -38,9 +39,26 @@ def register(cls: type[Strategy]) -> type[Strategy]:
     return cls
 
 
+def known_params(cls: type[Strategy]) -> set[str]:
+    """전략이 받는 파라미터 이름들."""
+    sig = inspect.signature(cls.__init__)
+    return {n for n, p_ in sig.parameters.items() if n != "self" and p_.kind is not p_.VAR_KEYWORD}
+
+
 def get_strategy(name: str, **params) -> Strategy:
-    from . import ema_cross  # noqa: F401  등록을 위한 임포트
+    # 등록을 위한 임포트. 전략 파일을 추가하면 여기에 한 줄 넣는다.
+    from . import ema_cross, ict_confluence  # noqa: F401
 
     if name not in _REGISTRY:
         raise KeyError(f"알 수 없는 전략: {name} (사용 가능: {sorted(_REGISTRY)})")
-    return _REGISTRY[name](**params)
+
+    cls = _REGISTRY[name]
+    # 모르는 파라미터를 조용히 삼키면 설정 파일 오타가 영원히 드러나지 않는다.
+    # (실제로 이것 때문에 제거 실험이 전 항목 동일한 결과를 냈다)
+    unknown = set(params) - known_params(cls)
+    if unknown:
+        raise ValueError(
+            f"전략 '{name}'이 모르는 파라미터: {sorted(unknown)}\n"
+            f"  사용 가능: {sorted(known_params(cls))}"
+        )
+    return cls(**params)

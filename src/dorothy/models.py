@@ -54,6 +54,8 @@ class Signal:
     reason: str = ""
     stop_loss: float | None = None    # 손절 가격 (진입 신호일 때 필수에 가깝다)
     take_profit: float | None = None
+    # 진단용 부가 정보(합류 점수, 근거 등). 매매 판단에는 쓰이지 않는다.
+    meta: dict = field(default_factory=dict)
 
     @property
     def is_entry(self) -> bool:
