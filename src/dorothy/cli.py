@@ -14,8 +14,10 @@ import logging
 import sys
 
 from . import __version__
+from .backtest import compare as compare_mod
 from .backtest import diagnostics
 from .backtest import engine as backtest_engine
+from .backtest import walkforward
 from .config import Config, load_config
 from .data import loader
 from .engine import TradingEngine
@@ -94,6 +96,34 @@ def cmd_ablate(args) -> int:
     log.info("제거 실험 시작 — 구성 %d개를 각각 백테스트합니다", len(diagnostics.ABLATIONS))
     rows = diagnostics.ablate(candles, cfg)
     print(diagnostics.ablation_report(rows))
+    return 0
+
+
+def cmd_compare(args) -> int:
+    """여러 전략을 기준선과 함께 나란히 돌린다."""
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+
+    entries = None
+    if args.only:
+        entries = {name: {} for name in args.only}
+    rows = compare_mod.compare(candles, cfg, entries=entries)
+    print(compare_mod.comparison_report(rows))
+    return 0
+
+
+def cmd_walkforward(args) -> int:
+    """학습 구간에서 파라미터를 고르고, 보지 않은 구간에서 성과를 잰다."""
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    name = args.strategy or cfg.strategy.name
+    log.info("워크포워드: %s (구간 %d개)", name, args.folds)
+    result = walkforward.run(
+        candles, cfg, strategy_name=name, folds=args.folds, train_ratio=args.train_ratio
+    )
+    print(result.report())
     return 0
 
 
@@ -247,6 +277,17 @@ def build_parser() -> argparse.ArgumentParser:
     ab = sub.add_parser("ablate", parents=[common], help="요소별 기여도 측정 (제거 실험)")
     add_data_args(ab)
     ab.set_defaults(func=cmd_ablate)
+
+    cp = sub.add_parser("compare", parents=[common], help="전략 비교 (기준선 포함)")
+    add_data_args(cp)
+    cp.add_argument("--only", nargs="+", help="비교할 전략 이름들 (생략 시 전체)")
+    cp.set_defaults(func=cmd_compare)
+
+    wf = sub.add_parser("walkforward", parents=[common], help="워크포워드 검증 (과최적화 탐지)")
+    add_data_args(wf)
+    wf.add_argument("--folds", type=int, default=4, help="구간 수")
+    wf.add_argument("--train-ratio", type=float, default=0.7, help="구간 내 학습 비율")
+    wf.set_defaults(func=cmd_walkforward)
 
     rp = sub.add_parser("repaint", parents=[common], help="엘리엇 카운트 안정성 측정")
     add_data_args(rp)

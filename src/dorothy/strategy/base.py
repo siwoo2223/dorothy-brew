@@ -45,9 +45,31 @@ def known_params(cls: type[Strategy]) -> set[str]:
     return {n for n, p_ in sig.parameters.items() if n != "self" and p_.kind is not p_.VAR_KEYWORD}
 
 
+def load_all() -> dict[str, type[Strategy]]:
+    """strategy 패키지의 모든 모듈을 임포트해 레지스트리를 채운다.
+
+    임포트 목록을 손으로 관리하면 파일을 추가하고 등록을 빠뜨린다
+    (실제로 그랬다). 자동 탐색이면 @register만 붙이면 끝난다.
+    """
+    import importlib
+    import pkgutil
+    import sys
+
+    package = __name__.rsplit(".", 1)[0]
+    paths = list(getattr(sys.modules[package], "__path__", []))
+    for info in pkgutil.iter_modules(paths):
+        if info.name in ("base", "common"):
+            continue
+        importlib.import_module(f"{package}.{info.name}")
+    return dict(_REGISTRY)
+
+
+def available() -> list[str]:
+    return sorted(load_all())
+
+
 def get_strategy(name: str, **params) -> Strategy:
-    # 등록을 위한 임포트. 전략 파일을 추가하면 여기에 한 줄 넣는다.
-    from . import ema_cross, ict_confluence  # noqa: F401
+    load_all()
 
     if name not in _REGISTRY:
         raise KeyError(f"알 수 없는 전략: {name} (사용 가능: {sorted(_REGISTRY)})")
