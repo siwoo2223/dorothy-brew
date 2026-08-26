@@ -10,7 +10,7 @@ import logging
 import time
 from typing import Any
 
-from ..models import Account, Candle, Position, Side
+from ..models import Account, Candle, Position, Side, Trade
 from .base import Exchange, OrderError
 
 log = logging.getLogger(__name__)
@@ -46,6 +46,10 @@ class BitgetExchange(Exchange):
         if sandbox:
             self.client.set_sandbox_mode(True)
         self._markets_loaded = False
+
+        # poll_closed_trades 상태: 마지막으로 본 포지션과 그때의 '포지션 없는 자본'
+        self._watched: Position | None = None
+        self._equity_before: float = 0.0
 
     @property
     def name(self) -> str:
@@ -202,3 +206,95 @@ class BitgetExchange(Exchange):
             self._call(self.client.cancel_all_orders, symbol)
         except OrderError as exc:
             log.warning("미체결 주문 정리 실패(무시): %s", exc)
+
+    # --- 청산 감지 ------------------------------------------------------
+    def poll_closed_trades(self, symbol: str) -> list[Trade]:
+        """포지션이 사라졌는지 확인하고, 사라졌으면 매매 기록을 만든다.
+
+        거래소 스탑으로 청산되면 봇은 주문을 낸 적이 없어 그 사실을 모른다.
+        그래서 매 틱 포지션 유무를 비교하는 방식으로 청산을 감지한다.
+
+        **손익은 체결 내역이 아니라 자본 변화에서 뽑는다.** 체결 파싱은
+        부분체결·수수료·펀딩비 때문에 틀리기 쉽고 거래소마다 형식이 다르다.
+        자본은 숫자 하나뿐이라 항상 맞다. 안전장치가 취약한 쪽에 의존하면 안 된다.
+        """
+        current = self.fetch_position(symbol)
+        equity = self._equity()
+
+        # 포지션을 처음 관측했다 (신규 진입이든, 봇 재시작 후든)
+        if current is not None and self._watched is None:
+            price = self.fetch_price(symbol)
+            # 미실현 손익을 빼면 '진입 시점의 자본'이 나온다.
+            # 재시작 직후에 관측해도 값이 맞는다는 게 이 방식의 장점이다.
+            self._equity_before = equity - current.unrealized_pnl(price)
+            self._watched = current
+            log.info("포지션 관측 시작: %s %s (기준자본 %.2f)",
+                     current.side.value, current.size, self._equity_before)
+            return []
+
+        if current is None and self._watched is not None:
+            closed = self._build_trade(symbol, self._watched, equity)
+            self._watched = None
+            return [closed]
+
+        # 방향이나 수량이 바뀌었다 = 청산 후 재진입으로 본다 (보수적)
+        if (
+            current is not None
+            and self._watched is not None
+            and (current.side is not self._watched.side
+                 or abs(current.size - self._watched.size) > 1e-9)
+        ):
+            price = self.fetch_price(symbol)
+            closed = self._build_trade(symbol, self._watched, equity - current.unrealized_pnl(price))
+            self._equity_before = equity - current.unrealized_pnl(price)
+            self._watched = current
+            return [closed]
+
+        return []
+
+    def _build_trade(self, symbol: str, position: Position, equity_now: float) -> Trade:
+        pnl = equity_now - self._equity_before
+        exit_price = self._exit_price(symbol, position)
+        log.info("청산 감지: %s %s @ %.4f · 손익 %+.2f",
+                 symbol, position.side.value, exit_price, pnl)
+        return Trade(
+            symbol=symbol,
+            side=position.side,
+            size=position.size,
+            entry_price=position.entry_price,
+            exit_price=exit_price,
+            opened_at=position.opened_at,
+            closed_at=int(time.time() * 1000),
+            # 수수료·펀딩비는 이미 자본 변화에 반영돼 있다.
+            # 여기서 또 빼면 이중 계산이 되므로 0으로 둔다.
+            fee=0.0,
+            funding=0.0,
+            realized_pnl=pnl,   # ← 가격 역산이 아니라 이 값이 쓰인다
+            reason="거래소 청산 (스탑/익절/수동)",
+        )
+
+    def _exit_price(self, symbol: str, position: Position) -> float:
+        """청산 가격. 기록용이며 손익 계산에는 쓰지 않는다.
+
+        체결 내역에서 못 가져오면 현재가로 대체한다 — 손익은 자본에서
+        이미 정확히 나왔으므로 이 값이 조금 어긋나도 안전장치는 멀쩡하다.
+        """
+        try:
+            fills = self._call(
+                self.client.fetch_my_trades, symbol, position.opened_at or None, 20, retries=1
+            )
+            if fills:
+                last = fills[-1]
+                price = last.get("price")
+                if price:
+                    return float(price)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("체결 내역 조회 실패, 현재가로 대체: %s", exc)
+        try:
+            return self.fetch_price(symbol)
+        except OrderError:
+            return position.entry_price
+
+    def _equity(self) -> float:
+        bal = self._call(self.client.fetch_balance)
+        return float((bal.get("USDT") or {}).get("total") or 0.0)

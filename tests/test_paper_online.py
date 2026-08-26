@@ -41,6 +41,9 @@ class FakeSource(Exchange):
     def cancel_all(self, symbol):
         pass
 
+    def poll_closed_trades(self, symbol):
+        return []
+
 
 class TestOnlinePaperStops(unittest.TestCase):
     def test_stop_triggers_from_live_feed(self):

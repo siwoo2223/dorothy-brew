@@ -34,6 +34,7 @@ class PaperExchange(Exchange):
         self._price: float = 0.0
         self._candles: list[Candle] = []
         self.trades: list[Trade] = []
+        self._reported = 0        # poll_closed_trades 커서
         self.equity_curve: list[tuple[int, float]] = []
         self._now_ms: int = 0
 
@@ -127,6 +128,12 @@ class PaperExchange(Exchange):
 
     def cancel_all(self, symbol: str) -> None:
         pass
+
+    def poll_closed_trades(self, symbol: str) -> list[Trade]:
+        """_settle()이 쌓아둔 체결 중 아직 보고하지 않은 것."""
+        fresh = self.trades[self._reported:]
+        self._reported = len(self.trades)
+        return list(fresh)
 
     # --- 내부 ----------------------------------------------------------
     def _fill_price(self, side: Side) -> float:

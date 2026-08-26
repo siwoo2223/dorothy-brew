@@ -103,6 +103,10 @@ class Trade:
     fee: float = 0.0
     funding: float = 0.0
     reason: str = ""
+    # 거래소가 알려준 실현 손익. 실전에서는 자본 변화에서 뽑는다.
+    # 가격으로 역산하면 부분체결·수수료·펀딩비가 빠져 실제와 어긋나므로,
+    # 값이 있으면 이쪽을 우선한다.
+    realized_pnl: float | None = None
 
     @property
     def gross_pnl(self) -> float:
@@ -110,6 +114,8 @@ class Trade:
 
     @property
     def net_pnl(self) -> float:
+        if self.realized_pnl is not None:
+            return self.realized_pnl
         return self.gross_pnl - self.fee - self.funding
 
     @property

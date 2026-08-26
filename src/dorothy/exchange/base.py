@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models import Account, Candle, Position, Side
+from ..models import Account, Candle, Position, Side, Trade
 
 
 class OrderError(RuntimeError):
@@ -59,3 +59,15 @@ class Exchange(ABC):
     @abstractmethod
     def cancel_all(self, symbol: str) -> None:
         """미체결 주문(스탑 포함) 정리. 청산 후 잔여 주문이 남는 사고를 막는다."""
+
+    @abstractmethod
+    def poll_closed_trades(self, symbol: str) -> list[Trade]:
+        """지난 호출 이후 새로 청산된 매매를 돌려준다.
+
+        **이 메서드가 안전장치의 생명선이다.**
+        일일 손실 한도와 연속 손실 차단은 '청산된 매매'를 세어야 작동하는데,
+        거래소 스탑으로 청산되면 봇은 주문을 낸 적이 없어 그 사실을 모른다.
+        매 틱 이걸 호출해 포지션이 사라졌는지 확인해야 한다.
+
+        구현체는 반환한 매매를 다시 반환하지 않아야 한다(커서를 들고 있을 것).
+        """

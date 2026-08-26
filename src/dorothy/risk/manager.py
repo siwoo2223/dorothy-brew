@@ -96,6 +96,8 @@ class RiskManager:
             self.state.consecutive_losses += 1
         else:
             self.state.consecutive_losses = 0
+        # open_positions는 sync_open_positions()가 실제 상태로 맞춘다.
+        # 여기서도 줄이면 이중 감소가 된다.
         self.state.open_positions = max(0, self.state.open_positions - 1)
 
     # --- 차단 조건 -------------------------------------------------------
@@ -112,11 +114,21 @@ class RiskManager:
 
         base = self.state.day_start_equity or equity
         if base > 0:
-            loss_pct = -self.state.realized_pnl / base
+            # 두 가지로 재고 더 나쁜 쪽을 택한다.
+            #
+            # 1) 기록된 실현손익 — 정확하지만 '청산이 기록되었을 때'만 맞다.
+            # 2) 자본 낙폭 — 거래소가 준 숫자 하나뿐이라 항상 맞다.
+            #
+            # 실전에서 청산 감지가 어긋나도 2번은 살아 있다.
+            # 안전장치를 취약한 경로 하나에만 걸어두면 안 된다.
+            by_trades = -self.state.realized_pnl / base
+            by_equity = (base - equity) / base
+            loss_pct = max(by_trades, by_equity)
             if loss_pct >= self.cfg.max_daily_loss_pct:
+                source = "실현손익" if by_trades >= by_equity else "자본 낙폭"
                 return (
                     f"일일 손실 한도 초과 ({loss_pct:.2%} ≥ "
-                    f"{self.cfg.max_daily_loss_pct:.2%}) — 오늘은 여기까지"
+                    f"{self.cfg.max_daily_loss_pct:.2%}, {source} 기준) — 오늘은 여기까지"
                 )
 
         if self.state.open_positions >= self.cfg.max_open_positions:
@@ -193,3 +205,14 @@ class RiskManager:
     def release(self) -> None:
         """진입이 실패했을 때 예약해둔 포지션 슬롯을 되돌린다."""
         self.state.open_positions = max(0, self.state.open_positions - 1)
+
+    def sync_open_positions(self, actual: int) -> None:
+        """실제 거래소 포지션 수로 카운터를 맞춘다.
+
+        카운터를 자체적으로 증감시키면 어긋날 수 있고, 어긋나는 방향이
+        하필 '한도 도달'이면 봇이 조용히 매매를 멈춘다(실제로 그랬다).
+        매 틱 실제 상태로 덮어쓰면 그 실패 모드가 사라진다.
+        """
+        if actual != self.state.open_positions:
+            log.debug("포지션 카운터 보정: %d → %d", self.state.open_positions, actual)
+        self.state.open_positions = actual

@@ -167,6 +167,9 @@ class TradingEngine:
         self.risk.roll_day(account.equity)
         self.journal.record_equity(last.ts, account.equity)
 
+        # 카운터를 자체 증감에 맡기지 않고 실제 포지션 수로 맞춘다.
+        self.risk.sync_open_positions(1 if position is not None else 0)
+
         sig = self.strategy.generate(candles, position)
         if sig.action is not Action.HOLD:
             log.info("신호: %s (%s)", sig.action.value, sig.reason)
@@ -187,21 +190,19 @@ class TradingEngine:
             self.notifier.send(f"📉 청산 {symbol}\n사유: {sig.reason}")
 
     def _sync_closed_trades(self) -> None:
-        """페이퍼 거래소가 만든 체결 기록을 저널·리스크에 반영한다.
+        """청산된 매매를 리스크 매니저와 저널에 반영한다.
 
-        실거래소에서는 체결 내역 조회로 대체해야 한다 (TODO).
+        일일 손실 한도와 연속 손실 차단은 여기가 돌아야 작동한다.
+        거래소 스탑으로 청산되면 봇은 주문을 낸 적이 없어 그 사실을 모르므로,
+        거래소 구현이 포지션 소멸을 감지해 알려준다.
         """
-        trades = getattr(self.exchange, "trades", None)
-        if trades is None:
-            return
-        while self._reported_trades < len(trades):
-            trade = trades[self._reported_trades]
+        for trade in self.exchange.poll_closed_trades(self.cfg.exchange.symbol):
             self.risk.record_trade(trade)
             self.journal.record_trade(trade)
+            self._reported_trades += 1
             emoji = "✅" if trade.net_pnl > 0 else "❌"
             self.notifier.send(
                 f"{emoji} 청산 {trade.symbol} {trade.side.value}\n"
                 f"손익 {trade.net_pnl:+,.2f} USDT ({trade.return_pct:+.2f}%)\n"
                 f"사유: {trade.reason}"
             )
-            self._reported_trades += 1
