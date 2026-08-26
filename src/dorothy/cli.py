@@ -99,6 +99,21 @@ def cmd_ablate(args) -> int:
     return 0
 
 
+def cmd_journal(args) -> int:
+    """실제 매매일지를 분석해 내 우위가 어디에 있는지 본다."""
+    from .journal.analyze import Analysis, report
+    from .journal.records import load_csv, load_json
+
+    path = args.file
+    trades = load_json(path) if str(path).endswith(".json") else load_csv(path)
+    if not trades:
+        log.error("읽어들인 매매 기록이 없습니다: %s", path)
+        return 1
+    log.info("매매 기록 %d건 로드", len(trades))
+    print(report(Analysis(trades)))
+    return 0
+
+
 def cmd_compare(args) -> int:
     """여러 전략을 기준선과 함께 나란히 돌린다."""
     cfg = _build_config(args)
@@ -277,6 +292,10 @@ def build_parser() -> argparse.ArgumentParser:
     ab = sub.add_parser("ablate", parents=[common], help="요소별 기여도 측정 (제거 실험)")
     add_data_args(ab)
     ab.set_defaults(func=cmd_ablate)
+
+    jn = sub.add_parser("journal", parents=[common], help="매매일지 분석 (내 실제 우위 찾기)")
+    jn.add_argument("file", help="노션에서 내보낸 CSV, 또는 JSON")
+    jn.set_defaults(func=cmd_journal)
 
     cp = sub.add_parser("compare", parents=[common], help="전략 비교 (기준선 포함)")
     add_data_args(cp)
