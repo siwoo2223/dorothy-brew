@@ -15,8 +15,22 @@ from dorothy.journal.records import JournalTrade, from_rows, load_csv, load_json
 
 SAMPLE = Path(__file__).resolve().parent.parent / "examples" / "journal_sample.csv"
 
+CHECKLIST_HEADER = "자동화 전에 채워야 할 것:"
 
-def trade(pnl, *, margin=100.0, side="롱", tags=None, risk=0.0, day=1, lev=10.0, index=0):
+
+def checklist_of(text: str) -> str:
+    """리포트에서 체크리스트 구간만 잘라낸다.
+
+    리포트는 같은 단어가 여러 섹션에 나온다("손절액 기록" vs "손절액 기록됨").
+    전체 텍스트를 상대로 assertNotIn을 걸면 엉뚱한 곳에 걸려 테스트가 거짓 실패한다.
+    """
+    if CHECKLIST_HEADER not in text:
+        return ""
+    return text.split(CHECKLIST_HEADER, 1)[1]
+
+
+def trade(pnl, *, margin=100.0, side="롱", tags=None, risk=0.0, day=1, lev=10.0,
+          index=0, rationale=""):
     return JournalTrade(
         index=index,
         traded_on=date(2026, 1, day),
@@ -29,6 +43,7 @@ def trade(pnl, *, margin=100.0, side="롱", tags=None, risk=0.0, day=1, lev=10.0
         pnl=pnl,
         planned_risk=risk,
         tags=list(tags or []),
+        rationale=rationale,
     )
 
 
@@ -98,6 +113,57 @@ class TestTradeMetrics(unittest.TestCase):
 
     def test_zero_margin_does_not_crash(self):
         self.assertEqual(JournalTrade(margin=0, pnl=5).return_pct, 0.0)
+
+
+class TestSetupExtraction(unittest.TestCase):
+    """매매일지 스킬이 남기는 `[셋업이름]` 접두사를 읽어낸다.
+
+    이 형식이 있어야 '어떤 진입이 통하는가'를 그룹으로 묶을 수 있다.
+    자유 서술만으로는 분류가 불가능하다.
+    """
+
+    def test_extracts_bracketed_setup(self):
+        t = trade(1.0, rationale="[유동성스윕] 전일 저가 쓸고 반등")
+        self.assertEqual(t.setup, "유동성스윕")
+        self.assertTrue(t.has_setup)
+
+    def test_setup_without_description(self):
+        self.assertEqual(trade(1.0, rationale="[되돌림]").setup, "되돌림")
+
+    def test_free_text_is_unclassified(self):
+        t = trade(1.0, rationale="그냥 느낌으로 진입")
+        self.assertEqual(t.setup, "(미분류)")
+        self.assertFalse(t.has_setup)
+
+    def test_empty_rationale(self):
+        t = trade(1.0, rationale="")
+        self.assertEqual(t.setup, "(없음)")
+        self.assertFalse(t.has_setup)
+
+    def test_leading_whitespace_is_tolerated(self):
+        self.assertEqual(trade(1.0, rationale="  [돌파] 설명").setup, "돌파")
+
+    def test_absurdly_long_bracket_is_not_a_setup(self):
+        """대괄호 안이 너무 길면 셋업 이름이 아니라 그냥 문장이다."""
+        t = trade(1.0, rationale="[" + "가" * 40 + "] 설명")
+        self.assertFalse(t.has_setup)
+
+    def test_grouping_by_setup(self):
+        trades = [
+            trade(10.0, rationale="[유동성스윕] a"),
+            trade(5.0, rationale="[유동성스윕] b"),
+            trade(-3.0, rationale="[감] c"),
+        ]
+        groups = {g.label: g for g in Analysis(trades).by_setup()}
+        self.assertEqual(groups["유동성스윕"].n, 2)
+        self.assertAlmostEqual(groups["유동성스윕"].total_pnl, 15.0)
+
+    def test_setup_coverage(self):
+        trades = [trade(1.0, rationale="[돌파] x"), trade(1.0, rationale="자유 서술")]
+        self.assertAlmostEqual(Analysis(trades).setup_coverage, 50.0)
+
+    def test_coverage_is_zero_without_rationale(self):
+        self.assertEqual(Analysis([trade(1.0)]).setup_coverage, 0.0)
 
 
 class TestPermutationTest(unittest.TestCase):
@@ -239,6 +305,40 @@ class TestReport(unittest.TestCase):
 
     def test_empty_journal_does_not_crash(self):
         self.assertIn("없습니다", report(Analysis([])))
+
+    def test_setup_section_appears_when_setups_recorded(self):
+        text = report(Analysis(load_csv(SAMPLE)))
+        self.assertIn("표기된 비율", text)      # 섹션 머리말 고유 문구
+        self.assertIn("유동성스윕", text)
+
+    def test_setup_section_is_skipped_without_setups(self):
+        """셋업 표기가 없으면 표를 그리지 않는다.
+
+        (경고 문구에도 '셋업별'이 들어가므로 섹션 고유 문구로 확인한다.)
+        """
+        trades = [trade(10.0, day=d) for d in range(1, 6)]
+        self.assertNotIn("표기된 비율", report(Analysis(trades)))
+
+    def test_checklist_only_lists_actual_gaps(self):
+        """이미 갖춘 항목까지 '채우라'고 하면 리포트를 믿지 않게 된다."""
+        items = checklist_of(report(Analysis(load_csv(SAMPLE))))
+        self.assertNotIn("손절액 기록", items)         # 샘플은 손절액 100% 기록됨
+        self.assertNotIn("[셋업] 표기", items)         # 샘플은 셋업 100% 표기됨
+        self.assertIn("건 더 쌓기", items)             # 표본만 부족하다
+
+    def test_checklist_lists_missing_stops(self):
+        trades = [trade(10.0, day=d, rationale="[돌파] x") for d in range(1, 6)]
+        self.assertIn("손절액 기록", checklist_of(report(Analysis(trades))))
+
+    def test_missing_setup_is_warned(self):
+        trades = [trade(10.0, day=d, risk=5.0) for d in range(1, 6)]
+        self.assertIn("[셋업] 표기", checklist_of(report(Analysis(trades))))
+
+    def test_no_stop_tag_counts_as_a_bad_habit(self):
+        """스킬이 붙이는 '손절 미설정' 태그도 나쁜 습관으로 추적되어야 한다."""
+        trades = [trade(50.0, tags=["손절 미설정"]), trade(30.0, tags=["손절 미설정"])]
+        flagged = [g.label for g in Analysis(trades).rewarded_bad_habits()]
+        self.assertIn("손절 미설정", flagged)
 
 
 if __name__ == "__main__":

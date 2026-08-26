@@ -21,7 +21,10 @@ from dataclasses import dataclass, field
 from .records import JournalTrade
 
 # 이 태그가 붙은 매매는 '지키지 못한 매매'다
-NEGATIVE_TAGS = {"뇌동매매", "추격매수", "손절 늦음", "과도한 레버리지", "분할 실패", "FOMO", "익절 조급"}
+NEGATIVE_TAGS = {
+    "뇌동매매", "추격매수", "손절 늦음", "과도한 레버리지",
+    "분할 실패", "FOMO", "익절 조급", "손절 미설정",
+}
 POSITIVE_TAGS = {"계획대로"}
 
 
@@ -228,6 +231,17 @@ class Analysis:
 
         return self.by(bucket)
 
+    def by_setup(self) -> list[GroupStat]:
+        """셋업별 기대값 — '어떤 진입이 통하는가'에 답하는 유일한 그룹."""
+        return self.by(lambda t: t.setup)
+
+    @property
+    def setup_coverage(self) -> float:
+        """진입 근거에 셋업 이름이 붙은 비율(%)."""
+        if not self.trades:
+            return 0.0
+        return sum(1 for t in self.trades if t.has_setup) / len(self.trades) * 100
+
     def by_weekday(self) -> list[GroupStat]:
         return self.by(lambda t: t.weekday)
 
@@ -316,6 +330,11 @@ def report(analysis: Analysis) -> str:
     lines += _group_table("규율별", a.by_discipline())
     lines += _group_table("실수 태그별", a.by_tag())
 
+    if a.setup_coverage > 0:
+        lines += _group_table(
+            f"셋업별  (진입 근거에 [셋업] 표기된 비율 {a.setup_coverage:.0f}%)", a.by_setup()
+        )
+
     # --- R 분석 (손절액이 기록된 경우에만) ---
     if a.r_multiples:
         overruns = a.stop_overruns
@@ -397,6 +416,15 @@ def report(analysis: Analysis) -> str:
             "",
         ]
 
+    if a.setup_coverage < 50:
+        warnings += [
+            f"  ⚠ 진입 근거에 [셋업] 표기가 {a.setup_coverage:.0f}%뿐입니다.",
+            "     셋업별 기대값을 낼 수 없습니다 — '어떤 진입이 통하는가'는",
+            "     자동화로 넘어갈 때 가장 먼저 필요한 답입니다.",
+            "     매매일지 스킬이 `[유동성스윕] 설명` 형식으로 남기게 되어 있습니다.",
+            "",
+        ]
+
     if a.margin_variation > 0.5:
         warnings += [
             f"  ⚠ 베팅 크기가 들쭉날쭉합니다 (변동계수 {a.margin_variation:.2f}).",
@@ -435,13 +463,48 @@ def report(analysis: Analysis) -> str:
             "    다만 위 검정 결과를 먼저 보세요. p가 크면 아직 우연입니다.",
             "",
         ]
-    lines += [
-        "  자동화 전에 채워야 할 것:",
-        "  1. 손절액을 매 기록에 남기세요 → R 분석이 열립니다",
-        "  2. 진입 근거를 짧게라도 남기세요 → 어떤 셋업이 통하는지 분류됩니다",
-        "  3. 증거금을 자본의 고정 비율로 → 매매 간 비교가 가능해집니다",
-        "",
-        "  이 셋이 갖춰지고 50건이 쌓이면, 그때 '내 우위'를 코드로 옮길 수 있습니다.",
-        "  지금은 데이터가 그 질문에 답할 만큼 쌓이지 않았습니다.",
-    ]
+    setups = [g for g in a.by_setup() if g.n >= 5 and not g.label.startswith("(")]
+    if setups:
+        best = setups[0]
+        lines += [
+            f"  · 셋업 '{best.label}': {best.n}건에서 {best.total_pnl:+,.2f}"
+            f" (1회 기대 {best.expectancy_pct:+.1f}%, 승률 {best.win_rate:.0f}%)",
+            "    셋업 단위로 기대값이 잡히면 그게 곧 코드로 옮길 규칙입니다.",
+            "",
+        ]
+
+    # 이미 갖춘 항목까지 '채우라'고 하면 리포트를 믿지 않게 된다. 빠진 것만 남긴다.
+    todo: list[str] = []
+    if a.missing_stop_ratio > 20:
+        todo.append(
+            f"손절액 기록 (현재 {100 - a.missing_stop_ratio:.0f}%) → R 분석이 열립니다"
+        )
+    if a.setup_coverage < 80:
+        todo.append(
+            f"진입 근거에 [셋업] 표기 (현재 {a.setup_coverage:.0f}%)"
+            " → 어떤 진입이 통하는지 분류됩니다"
+        )
+    if a.margin_variation > 0.5:
+        todo.append(
+            f"증거금을 자본의 고정 비율로 (현재 변동계수 {a.margin_variation:.2f})"
+            " → 매매 간 비교가 가능해집니다"
+        )
+    if o.n < 50:
+        todo.append(f"기록 {50 - o.n}건 더 쌓기 (현재 {o.n}건)")
+
+    if todo:
+        lines.append("  자동화 전에 채워야 할 것:")
+        lines += [f"  {i}. {item}" for i, item in enumerate(todo, 1)]
+        lines += [
+            "",
+            "  이게 갖춰지면 그때 '내 우위'를 코드로 옮길 수 있습니다.",
+            "  그 전에는 데이터가 그 질문에 답할 만큼 쌓이지 않은 상태입니다.",
+        ]
+    else:
+        lines += [
+            "  ✓ 기록 품질과 표본이 자동화를 검토할 만한 수준입니다.",
+            "    위에서 기대값이 잡힌 셋업을 전략으로 옮긴 뒤,",
+            "    반드시 워크포워드로 검증하세요:",
+            "      python -m dorothy walkforward --csv <시세> --strategy <전략>",
+        ]
     return "\n".join(lines)

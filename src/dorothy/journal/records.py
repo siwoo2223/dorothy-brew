@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -79,6 +80,23 @@ class JournalTrade:
             return 0.0
         raw = (self.exit_price - self.entry_price) / self.entry_price * 100
         return raw if self.side == "롱" else -raw
+
+    @property
+    def setup(self) -> str:
+        """진입 근거의 `[셋업이름]` 접두사.
+
+        매매일지 스킬이 `[유동성스윕] 전일 저가 쓸고 반등` 형식으로 저장한다.
+        이 접두사가 있어야 셋업별로 묶어 기대값을 낼 수 있다.
+        자유 서술만 있으면 그룹화가 불가능하다 — 그래서 형식을 강제한다.
+        """
+        match = re.match(r"\s*\[([^\]]{1,20})\]", self.rationale or "")
+        if match:
+            return match.group(1).strip()
+        return "(미분류)" if self.rationale else "(없음)"
+
+    @property
+    def has_setup(self) -> bool:
+        return not self.setup.startswith("(")
 
     @property
     def weekday(self) -> str:
