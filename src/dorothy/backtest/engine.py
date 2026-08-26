@@ -33,6 +33,8 @@ def run(candles: list[Candle], strategy: Strategy, config: Config) -> metrics_mo
         equity=config.initial_equity,
         taker_fee=config.exchange.taker_fee,
         slippage=config.exchange.slippage,
+        min_size=config.exchange.min_order_size,
+        size_step=config.exchange.size_step,
     )
     # 백테스트에서는 '지금'이 캔들 시각이다. 이래야 일일 손실 한도가 날짜별로 리셋된다.
     clock_holder = {"ts": candles[0].ts}
@@ -47,6 +49,8 @@ def run(candles: list[Candle], strategy: Strategy, config: Config) -> metrics_mo
         risk,
         symbol=config.exchange.symbol,
         leverage=config.exchange.leverage,
+        min_size=config.exchange.min_order_size,
+        size_step=config.exchange.size_step,
     )
 
     settled = 0

@@ -126,6 +126,27 @@ class BitgetExchange(Exchange):
             )
         return None
 
+    def market_limits(self, symbol: str) -> tuple[float, float]:
+        """거래소가 알려주는 (최소 주문 수량, 수량 단위).
+
+        설정 파일에 적어둔 값은 추측이고 거래소 정책은 바뀐다.
+        실전에서는 반드시 이쪽을 써야 한다.
+        """
+        self._ensure_markets()
+        market = self.client.market(symbol)
+        limits = (market.get("limits") or {}).get("amount") or {}
+        min_size = float(limits.get("min") or 0.0)
+
+        precision = (market.get("precision") or {}).get("amount")
+        if precision is None:
+            step = min_size
+        elif isinstance(precision, int) or float(precision).is_integer() and precision >= 1:
+            # ccxt는 거래소에 따라 소수 자릿수(4) 또는 단위(0.0001)로 준다
+            step = 10 ** -int(precision)
+        else:
+            step = float(precision)
+        return min_size, (step or min_size)
+
     def set_leverage(self, symbol: str, leverage: float, margin_mode: str) -> None:
         self._ensure_markets()
         try:

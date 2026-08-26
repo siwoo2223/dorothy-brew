@@ -14,6 +14,7 @@ import logging
 from ..exchange.base import Exchange, OrderError
 from ..models import Position, Signal, Trade
 from ..risk.manager import RiskManager
+from .sizing import normalize
 
 log = logging.getLogger(__name__)
 
@@ -27,12 +28,14 @@ class Executor:
         symbol: str,
         leverage: float = 1.0,
         min_size: float = 0.0,
+        size_step: float = 0.0,
     ) -> None:
         self.exchange = exchange
         self.risk = risk
         self.symbol = symbol
         self.leverage = leverage
         self.min_size = min_size
+        self.size_step = size_step
         self._last_entry_candle_ts: int = 0
 
     def handle(
@@ -73,12 +76,23 @@ class Executor:
             log.info("진입 거부: %s", decision.reason)
             return None
 
+        # 거래소 단위로 내림한다. 내림 후 최소 수량에 못 미치면 주문하지 않는다.
+        # 최소 수량까지 억지로 올리면 감수하기로 한 리스크를 넘게 된다.
+        size = normalize(decision.size, min_size=self.min_size, step=self.size_step)
+        if size <= 0:
+            self.risk.release()
+            log.info(
+                "진입 거부: 계산 수량 %.8f이 거래소 최소(%.8f)에 미달합니다",
+                decision.size, self.min_size,
+            )
+            return None
+
         client_id = f"db-{self.symbol.split('/')[0]}-{candle_ts}"
         try:
             pos = self.exchange.open_position(
                 self.symbol,
                 side,
-                decision.size,
+                size,
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit,
                 client_id=client_id,

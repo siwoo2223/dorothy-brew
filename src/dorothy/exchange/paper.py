@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 
+from ..execution.sizing import normalize
 from ..models import Account, Candle, Position, Side, Trade
 from .base import Exchange, OrderError
 
@@ -23,12 +24,16 @@ class PaperExchange(Exchange):
         equity: float = 1000.0,
         taker_fee: float = 0.0006,
         slippage: float = 0.0005,
+        min_size: float = 0.0,
+        size_step: float = 0.0,
         source: Exchange | None = None,
     ) -> None:
         self.equity = equity
         self.initial_equity = equity
         self.taker_fee = taker_fee
         self.slippage = slippage
+        self.min_size = min_size
+        self.size_step = size_step
         self.source = source          # 실시세를 빌려올 거래소 (없으면 수동 주입)
         self._position: Position | None = None
         self._price: float = 0.0
@@ -104,6 +109,17 @@ class PaperExchange(Exchange):
             raise OrderError("이미 포지션이 있습니다 (페이퍼는 심볼당 1개만 지원).")
         if size <= 0:
             raise OrderError(f"잘못된 주문 수량: {size}")
+
+        # 거래소 제약을 여기서도 확인한다(다중 방어).
+        # 실행기가 이미 맞춰 보내지만, 백테스트가 불가능한 주문을 체결시키면
+        # 소액 구간 결과가 통째로 거짓이 되므로 마지막 관문을 둔다.
+        allowed = normalize(size, min_size=self.min_size, step=self.size_step)
+        if allowed <= 0:
+            raise OrderError(
+                f"최소 주문 수량 미만: {size:.8f} < {self.min_size} "
+                f"(자본이 부족하거나 손절폭이 너무 넓습니다)"
+            )
+        size = allowed
 
         fill = self._fill_price(side)
         self.equity -= fill * size * self.taker_fee

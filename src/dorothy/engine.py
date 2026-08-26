@@ -53,6 +53,8 @@ class TradingEngine:
             self.risk,
             symbol=config.exchange.symbol,
             leverage=config.exchange.leverage,
+            min_size=config.exchange.min_order_size,
+            size_step=config.exchange.size_step,
         )
         self._running = False
         self._last_candle_ts = 0
@@ -90,6 +92,25 @@ class TradingEngine:
             f"모드: {self.cfg.mode} / {self.cfg.exchange.symbol} {self.cfg.exchange.timeframe}\n"
             f"자본: {account.equity:,.2f} USDT"
         )
+
+        # 설정 파일의 최소 수량은 추측이다. 실전에서는 거래소가 알려주는 값으로 덮어쓴다.
+        limits = getattr(self.exchange, "market_limits", None)
+        if limits is not None:
+            try:
+                min_size, step = limits(self.cfg.exchange.symbol)
+                if min_size > 0:
+                    self.executor.min_size = min_size
+                    self.executor.size_step = step
+                    log.info("거래소 주문 제약: 최소 %s, 단위 %s", min_size, step)
+                    notional = min_size * self.exchange.fetch_price(self.cfg.exchange.symbol)
+                    if notional > account.equity * self.cfg.exchange.leverage * 0.5:
+                        log.warning(
+                            "자본 대비 최소 주문이 큽니다 (최소 명목가 %.2f, 자본 %.2f). "
+                            "대부분의 신호가 수량 미달로 거부될 수 있습니다.",
+                            notional, account.equity,
+                        )
+            except Exception:  # noqa: BLE001
+                log.warning("거래소 주문 제약 조회 실패 — 설정값을 사용합니다", exc_info=True)
 
         if self.cfg.mode == "live":
             self.exchange.set_leverage(

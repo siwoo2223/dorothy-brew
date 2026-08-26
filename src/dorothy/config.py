@@ -22,6 +22,11 @@ class ExchangeConfig:
     taker_fee: float = 0.0006       # 0.06% — 백테스트에 반드시 반영
     maker_fee: float = 0.0002
     slippage: float = 0.0005        # 시장가 체결 밀림 가정치
+    # 거래소 주문 제약. 반영하지 않으면 소액 계좌 백테스트가 거짓말이 된다
+    # (실제로는 나가지도 못할 주문을 체결시킨다).
+    # live 모드에서는 거래소가 알려주는 실제 값으로 덮어쓴다.
+    min_order_size: float = 0.0001  # Bitget BTCUSDT 무기한 기준
+    size_step: float = 0.0001       # 수량 단위 (이 배수만 주문 가능)
 
 
 @dataclass
