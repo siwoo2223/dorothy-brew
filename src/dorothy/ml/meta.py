@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import statistics
 import unicodedata
 from dataclasses import dataclass, field
 
@@ -102,10 +104,21 @@ class EdgeCheck:
     count: int
     gross_per_trade: float    # 수수료 전 1회 기대수익 (%)
     net_per_trade: float      # 수수료 후 (%)
+    t_stat: float = 0.0       # 수수료 후 기대수익이 0과 다른가 (|t|>2면 우연으로 보기 어렵다)
+
+    @property
+    def profitable(self) -> bool:
+        """수수료를 넘겼는가. 이것만으로는 부족하다 — survives를 쓰세요."""
+        return self.net_per_trade > 0
 
     @property
     def survives(self) -> bool:
-        return self.net_per_trade > 0
+        """수수료를 넘겼고, 그게 우연이라고 보기 어려운가.
+
+        평균만 보면 안 된다. 1회 수익의 표준편차가 3.5%인데 평균이 +0.05%면
+        표본을 다시 뽑을 때마다 부호가 바뀐다. t를 함께 봐야 판단이 선다.
+        """
+        return self.net_per_trade > 0 and self.t_stat >= 2.0
 
 
 @dataclass
@@ -168,15 +181,22 @@ class MetaResult:
                 f"  왕복 비용 {self.round_trip_cost * 100:.3f}%  ← 1회 기대수익이 이걸 넘어야 번다",
                 "  " + "─" * 66,
                 "  " + _pad("구분", 4) + " " * 8 + _pad("건수", 7)
-                + _pad("1회(수수료 전)", 16) + _pad("1회(수수료 후)", 16),
+                + _pad("1회(수수료 전)", 16) + _pad("1회(수수료 후)", 16) + _pad("t", 8),
             ]
             for edge in self.edges:
-                mark = "✓" if edge.survives else "✗"
+                if edge.survives:
+                    mark = "✓"
+                elif edge.profitable:
+                    mark = "?"      # 수수료는 넘었지만 우연과 구별이 안 된다
+                else:
+                    mark = "✗"
                 label = edge.label + " " * max(0, 12 - _display_width(edge.label))
                 lines.append(
                     f"  {label}{edge.count:>7}"
-                    f"{edge.gross_per_trade:>+15.3f}%{edge.net_per_trade:>+15.3f}% {mark}"
+                    f"{edge.gross_per_trade:>+15.3f}%{edge.net_per_trade:>+15.3f}%"
+                    f"{edge.t_stat:>8.2f} {mark}"
                 )
+            lines.append("  ✓ 통과   ? 수수료는 넘었으나 우연과 구별 불가(|t|<2)   ✗ 손실")
             lines.append("═" * 70)
 
         lines += self._verdict()
@@ -192,30 +212,66 @@ class MetaResult:
             return ["  ⚠ 승률만으로는 판단할 수 없습니다. train()에 candles를 넘겨 손익을 보세요."]
 
         base = self.edges[0]
-        best = max(self.edges[1:], key=lambda e: e.net_per_trade, default=None)
+        candidates = self.edges[1:]
+        passing = [e for e in candidates if e.survives]
+        best = max(passing or candidates, key=lambda e: e.net_per_trade, default=None)
         if best is None:
             return ["  ✗ 모델이 취한 신호가 없습니다."]
 
         out = []
         if best.survives:
-            out.append(f"  ✓ 필터 후 1회 기대수익이 +{best.net_per_trade:.3f}%로 비용을 넘겼습니다"
-                       f" ({best.label}, {best.count}건).")
-            out.append("  ※ 그래도 백테스트·몬테카를로로 한 번 더 확인하세요. 표본이 적습니다.")
+            out.append(f"  ✓ 필터 후 1회 기대수익 +{best.net_per_trade:.3f}%, t={best.t_stat:.2f}"
+                       f" ({best.label}, {best.count}건). 우연으로 보기 어렵습니다.")
+            out += self._monotonicity_warning()
+            out.append("  ※ 그래도 --seed를 바꿔가며 재현되는지, 백테스트·몬테카를로가 같은 말을"
+                       " 하는지 확인하세요.")
             return out
+
+        if best.profitable:
+            out.append(f"  ? 수수료는 넘었지만 우연과 구별되지 않습니다"
+                       f" ({best.label}: {best.net_per_trade:+.3f}%/회, t={best.t_stat:.2f}).")
+            out.append(f"  1회 수익의 흔들림에 비해 평균이 너무 작습니다. {best.count}건으로는"
+                       " 부호조차 확신할 수 없습니다.")
+            out.append("  → 여기서 실전에 넣지 마세요. 할 일은 둘입니다:")
+            out.append("     1) --seed를 여러 개 돌려 평균이 유지되는지 본다"
+                       " (한 번의 +값은 표본 추출 운입니다)")
+            out.append(f"     2) 비용을 깎는다. 메이커로 넣어 왕복 {self.round_trip_cost * 100:.2f}%를"
+                       " 줄이면 같은 우위가 살아납니다")
+            return out + self._monotonicity_warning()
 
         out.append(f"  ✗ 어떤 임계값에서도 비용을 넘지 못했습니다"
                    f" (최선 {best.label}: {best.net_per_trade:+.3f}%/회).")
-        if base.gross_per_trade < self.round_trip_cost * 100:
-            need = self.round_trip_cost * 100 / max(base.gross_per_trade, 1e-9)
+        cost_pct = self.round_trip_cost * 100
+        if base.gross_per_trade <= 0:
+            out.append(f"  원인: 1차 전략은 수수료를 빼기 전에도 지고 있습니다"
+                       f" ({base.gross_per_trade:+.3f}%/회).")
+            out.append("  필터로 고칠 수 있는 문제가 아닙니다. 방향 자체가 틀렸다는 뜻입니다.")
+            out.append("  → 반대로 뒤집어도 수수료 때문에 못 법니다. 다른 신호를 찾으세요.")
+        elif base.gross_per_trade < cost_pct:
+            need = cost_pct / base.gross_per_trade
             out.append(f"  원인: 1차 전략의 수수료 전 우위가 {base.gross_per_trade:+.3f}%/회뿐입니다.")
-            out.append(f"  비용을 넘으려면 모델이 우위를 {need:.1f}배로 키워야 하는데, 그건 필터가 할 수 있는 일이 아닙니다.")
+            out.append(f"  비용을 넘으려면 모델이 우위를 {need:.1f}배로 키워야 하는데,"
+                       " 그건 필터가 할 수 있는 일이 아닙니다.")
             out.append("  → 모델을 손보지 말고 **1차 전략의 수수료 전 우위**부터 만드세요.")
-        if len(self.edges) > 2:
-            tail = self.edges[1:]
-            if tail[-1].gross_per_trade < tail[0].gross_per_trade:
-                out.append("  경고: 임계값을 올릴수록 성적이 나빠집니다. 모델의 확신이 실제 우위와"
-                           " 무관하다는 신호입니다(잡음 학습).")
-        return out
+        return out + self._monotonicity_warning()
+
+    def _monotonicity_warning(self) -> list[str]:
+        """임계값을 올릴수록 나빠지면, 합격이든 불합격이든 반드시 말해야 한다.
+
+        합격 판정 뒤에 숨기면 도구가 스스로를 속인다.
+        모델의 확신이 높을수록 성적이 나쁘다는 건 확신이 실제 우위와 무관하다는 뜻이다.
+        """
+        tail = self.edges[1:]
+        if len(tail) < 3 or tail[-1].gross_per_trade >= tail[0].gross_per_trade:
+            return []
+        return [
+            "  ⚠ 경고: 임계값을 올릴수록 성적이 나빠집니다"
+            f" ({tail[0].label} {tail[0].gross_per_trade:+.3f}%"
+            f" → {tail[-1].label} {tail[-1].gross_per_trade:+.3f}%, 수수료 전).",
+            "     모델이 확신할수록 결과가 나쁘다는 건, 그 확신이 실제 우위와 무관하다는 신호입니다.",
+            "     낮은 임계값의 좋은 성적은 실력이 아니라 표본 추출 운일 수 있습니다.",
+            "     판단 전에 --seed를 바꿔가며 결과가 유지되는지 반드시 확인하세요.",
+        ]
 
 
 def _gross_returns(candles: list[Candle], samples: list[Sample]) -> list[float]:
@@ -243,8 +299,15 @@ def _measure_edges(
     def check(label: str, selected: list[int]) -> EdgeCheck | None:
         if not selected:
             return None
-        gross = sum(returns[i] for i in selected) / len(selected)
-        return EdgeCheck(label, len(selected), gross * 100, (gross - cost) * 100)
+        values = [returns[i] for i in selected]
+        gross = statistics.fmean(values)
+        net = gross - cost
+        t_stat = 0.0
+        if len(values) > 2:
+            spread = statistics.stdev(values)
+            if spread > 0:
+                t_stat = net / (spread / math.sqrt(len(values)))
+        return EdgeCheck(label, len(selected), gross * 100, net * 100, t_stat)
 
     edges = [check("필터 없음", indices)]
     for threshold in thresholds:

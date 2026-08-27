@@ -183,12 +183,15 @@ class SampleTests(unittest.TestCase):
 class EdgeVerdictTests(unittest.TestCase):
     """승률이 올라도 수수료를 못 넘으면 실패라고 말해야 한다."""
 
-    def build(self, edges, lift=5.0):
+    def build(self, edges, lift=5.0, t=3.0):
+        """edges: (라벨, 건수, 수수료 전 1회수익%) 목록. t는 전부 같은 값으로 준다."""
         from dorothy.ml.meta import EdgeCheck, FoldResult, MetaResult
 
         result = MetaResult(round_trip_cost=0.0022)
         result.folds = [FoldResult(0, 100, 50, 40.0, 40.0 + lift, 20, lift)]
-        result.edges = [EdgeCheck(label, n, gross, gross - 0.22) for label, n, gross in edges]
+        result.edges = [
+            EdgeCheck(label, n, gross, gross - 0.22, t) for label, n, gross in edges
+        ]
         return result
 
     def test_flags_failure_when_fees_eat_the_lift(self):
@@ -202,6 +205,12 @@ class EdgeVerdictTests(unittest.TestCase):
         self.assertGreater(result.mean_lift, 3)
         self.assertIn("✗", result.report())
 
+    def test_negative_base_edge_is_not_a_multiplier(self):
+        """1차 전략이 수수료 전에도 지고 있으면 '몇 배로 키우면 된다'는 말이 성립하지 않는다."""
+        report = self.build([("필터 없음", 550, -0.016), ("임계 0.70", 105, 0.085)]).report()
+        self.assertIn("수수료를 빼기 전에도 지고", report)
+        self.assertNotIn("배로 키워야", report)
+
     def test_names_the_real_cause(self):
         """1차 전략에 우위가 없으면 모델이 아니라 전략을 고치라고 해야 한다."""
         report = self.build([("필터 없음", 2000, 0.028), ("임계 0.50", 400, 0.118)]).report()
@@ -212,14 +221,68 @@ class EdgeVerdictTests(unittest.TestCase):
         report = self.build([
             ("필터 없음", 2000, 0.028),
             ("임계 0.50", 400, 0.118),
+            ("임계 0.60", 186, 0.025),
             ("임계 0.70", 70, -0.307),
         ]).report()
-        self.assertIn("잡음 학습", report)
+        self.assertIn("임계값을 올릴수록 성적이 나빠집니다", report)
+        self.assertIn("실제 우위와 무관", report)
 
-    def test_passes_when_net_is_positive(self):
-        report = self.build([("필터 없음", 2000, 0.10), ("임계 0.60", 300, 0.55)]).report()
-        self.assertIn("비용을 넘겼습니다", report)
+    def test_two_points_are_not_a_trend(self):
+        """임계값 2개로는 추세를 말할 수 없다. 섣부른 경고는 경고를 무의미하게 만든다."""
+        report = self.build([("필터 없음", 2000, 0.028), ("임계 0.70", 70, -0.307)]).report()
+        self.assertNotIn("임계값을 올릴수록", report)
+
+    def test_passes_when_net_is_positive_and_significant(self):
+        report = self.build([("필터 없음", 2000, 0.10), ("임계 0.60", 300, 0.55)], t=3.0).report()
+        self.assertIn("우연으로 보기 어렵습니다", report)
         self.assertNotIn("비용을 넘지 못했습니다", report)
+
+    def test_profitable_but_insignificant_is_not_a_pass(self):
+        """이게 핵심이다. 4시간봉에서 t=1.5짜리 +0.238%를 합격이라고 불렀다가
+        시드를 바꾸니 -0.096%가 나왔다. 평균만 보면 이 함정에 걸린다."""
+        report = self.build(
+            [("필터 없음", 1230, -0.003), ("임계 0.50", 363, 0.458)], t=1.5
+        ).report()
+        self.assertIn("우연과 구별되지 않습니다", report)
+        self.assertNotIn("우연으로 보기 어렵습니다", report)
+        self.assertIn("실전에 넣지 마세요", report)
+        self.assertIn("메이커", report)
+
+    def test_prefers_a_significant_edge_over_a_bigger_lucky_one(self):
+        """t가 받쳐주는 쪽을 고른다. 더 큰 평균이 항상 나은 게 아니다."""
+        from dorothy.ml.meta import EdgeCheck
+
+        result = self.build([("필터 없음", 2000, 0.10)])
+        result.edges += [
+            EdgeCheck("임계 0.50", 800, 0.40, 0.18, 2.6),
+            EdgeCheck("임계 0.70", 40, 0.90, 0.68, 1.1),
+        ]
+        report = result.report()
+        self.assertIn("임계 0.50", report.split("✓ 필터 후")[1].split("\n")[0])
+
+    def test_pass_does_not_hide_the_monotonicity_warning(self):
+        """합격 판정이 나와도 '확신할수록 나빠진다'는 사실을 숨기면 안 된다.
+
+        실제로 4시간봉 채널10에서 이 조합이 나왔다. 합격 뒤에 경고가 묻혔다.
+        """
+        report = self.build([
+            ("필터 없음", 1230, -0.003),
+            ("임계 0.50", 363, 0.458),
+            ("임계 0.60", 168, 0.171),
+            ("임계 0.70", 62, -0.290),
+        ], t=3.0).report()
+        self.assertIn("우연으로 보기 어렵습니다", report)
+        self.assertIn("임계값을 올릴수록 성적이 나빠집니다", report)
+        self.assertIn("--seed", report)
+
+    def test_no_warning_when_thresholds_behave(self):
+        report = self.build([
+            ("필터 없음", 1000, 0.10),
+            ("임계 0.50", 400, 0.30),
+            ("임계 0.60", 200, 0.45),
+            ("임계 0.70", 90, 0.60),
+        ]).report()
+        self.assertNotIn("임계값을 올릴수록", report)
 
     def test_without_candles_it_refuses_to_judge(self):
         from dorothy.ml.meta import FoldResult, MetaResult
@@ -229,11 +292,28 @@ class EdgeVerdictTests(unittest.TestCase):
         report = result.report()
         self.assertIn("승률만으로는 판단할 수 없습니다", report)
 
-    def test_survives_property(self):
+    def test_survives_needs_both_profit_and_significance(self):
         from dorothy.ml.meta import EdgeCheck
 
-        self.assertTrue(EdgeCheck("x", 10, 0.5, 0.28).survives)
-        self.assertFalse(EdgeCheck("x", 10, 0.5, -0.01).survives)
+        self.assertTrue(EdgeCheck("x", 10, 0.5, 0.28, 2.5).survives)
+        self.assertFalse(EdgeCheck("x", 10, 0.5, -0.01, 2.5).survives)   # 손실
+        self.assertFalse(EdgeCheck("x", 10, 0.5, 0.28, 1.5).survives)    # 우연과 구별 불가
+        self.assertTrue(EdgeCheck("x", 10, 0.5, 0.28, 1.5).profitable)   # 벌긴 벌었다
+
+    def test_t_stat_is_computed_from_spread_not_assumed(self):
+        from dorothy.ml.meta import _measure_edges
+
+        # 전부 같은 값이면 흔들림이 0 → t를 낼 수 없다
+        flat = _measure_edges([0.01] * 50, {i: 0.9 for i in range(50)}, 0.0, (0.5,))
+        self.assertEqual(flat[0].t_stat, 0.0)
+
+        # 흔들림이 크면 같은 평균이라도 t가 작아진다
+        noisy = [0.01 + (0.5 if i % 2 else -0.5) for i in range(50)]
+        quiet = [0.01 + (0.02 if i % 2 else -0.02) for i in range(50)]
+        oos = {i: 0.9 for i in range(50)}
+        t_noisy = _measure_edges(noisy, oos, 0.0, (0.5,))[0].t_stat
+        t_quiet = _measure_edges(quiet, oos, 0.0, (0.5,))[0].t_stat
+        self.assertLess(abs(t_noisy), abs(t_quiet))
 
 
 class GrossReturnTests(unittest.TestCase):
