@@ -143,6 +143,21 @@ def cmd_walkforward(args) -> int:
     return 0
 
 
+def cmd_fetch_funding(args) -> int:
+    """거래소에서 과거 펀딩률을 받아 CSV로 저장한다 (API 키 불필요)."""
+    from .data import funding as funding_mod
+
+    cfg = _build_config(args)
+    series = funding_mod.fetch_history(cfg.exchange.symbol, days=args.days)
+    funding_mod.save_csv(series, args.out)
+    print(f"펀딩률 {len(series)}개 저장 완료: {args.out}")
+    if series:
+        first, last = series.points[0], series.points[-1]
+        print(f"  기간: {first.ts} ~ {last.ts}")
+        print(f"  최근 펀딩률: {last.rate * 100:.4f}%")
+    return 0
+
+
 def cmd_session(args) -> int:
     """전략이 어떤 시간대에서 벌고 잃는지 분해한다 (다중검정 보정 포함)."""
     from .backtest import session_report
@@ -380,6 +395,12 @@ def build_parser() -> argparse.ArgumentParser:
     wf.add_argument("--folds", type=int, default=4, help="구간 수")
     wf.add_argument("--train-ratio", type=float, default=0.7, help="구간 내 학습 비율")
     wf.set_defaults(func=cmd_walkforward)
+
+    ff = sub.add_parser("fetch-funding", parents=[common], help="과거 펀딩률 수집")
+    ff.add_argument("--days", type=int, default=365)
+    ff.add_argument("--out", default="data/funding.csv")
+    ff.add_argument("--symbol")
+    ff.set_defaults(func=cmd_fetch_funding)
 
     se = sub.add_parser("session", parents=[common], help="시간대별 성과 분해")
     add_data_args(se)

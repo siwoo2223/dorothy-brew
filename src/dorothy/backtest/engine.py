@@ -23,7 +23,13 @@ from . import metrics as metrics_mod
 log = logging.getLogger(__name__)
 
 
-def run(candles: list[Candle], strategy: Strategy, config: Config) -> metrics_mod.Metrics:
+def run(
+    candles: list[Candle],
+    strategy: Strategy,
+    config: Config,
+    *,
+    funding_series=None,
+) -> metrics_mod.Metrics:
     if len(candles) <= strategy.warmup:
         raise ValueError(
             f"캔들이 부족합니다: {len(candles)}개 (전략 워밍업 {strategy.warmup}개 필요)"
@@ -37,6 +43,7 @@ def run(candles: list[Candle], strategy: Strategy, config: Config) -> metrics_mo
         size_step=config.exchange.size_step,
         funding_rate=config.exchange.funding_rate,
         funding_interval_hours=config.exchange.funding_interval_hours,
+        funding_series=funding_series,
     )
     # 백테스트에서는 '지금'이 캔들 시각이다. 이래야 일일 손실 한도가 날짜별로 리셋된다.
     clock_holder = {"ts": candles[0].ts}

@@ -28,6 +28,7 @@ class PaperExchange(Exchange):
         size_step: float = 0.0,
         funding_rate: float = 0.0,
         funding_interval_hours: int = 8,
+        funding_series=None,          # FundingSeries — 있으면 실제 과거 값을 쓴다
         source: Exchange | None = None,
     ) -> None:
         self.equity = equity
@@ -37,6 +38,7 @@ class PaperExchange(Exchange):
         self.min_size = min_size
         self.size_step = size_step
         self.funding_rate = funding_rate
+        self.funding_series = funding_series
         self.funding_interval_ms = max(funding_interval_hours, 1) * 3_600_000
         self._funding_accrued = 0.0
         self._last_ts: int | None = None
@@ -209,8 +211,15 @@ class PaperExchange(Exchange):
         if events <= 0:
             return
 
+        # 실제 과거 펀딩률이 있으면 그걸 쓴다. 고정값은 근사치일 뿐이다.
+        rate = self.funding_rate
+        if self.funding_series is not None:
+            actual = self.funding_series.rate_at(candle.ts)
+            if actual is not None:
+                rate = actual
+
         notional = abs(position.size) * candle.close
-        charge = notional * self.funding_rate * events * position.side.sign
+        charge = notional * rate * events * position.side.sign
         self.equity -= charge
         self._funding_accrued += charge
 
