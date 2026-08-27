@@ -182,6 +182,45 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_collect(args) -> int:
+    """거래소 체결·호가를 실시간으로 모은다. API 키가 필요 없습니다."""
+    from .collect.runner import CollectSpec, run
+    from .collect.store import Store
+
+    spec = CollectSpec(
+        venue=args.venue, symbol=args.symbol,
+        trades=not args.no_trades, book=not args.no_book,
+        book_speed=args.speed, max_seconds=args.seconds,
+    )
+    print(f"거래소 {spec.venue}  종목 {spec.symbol}")
+    print(f"스트림 {', '.join(spec.streams())}")
+    print(f"저장   {args.db}")
+    if args.probe:
+        print("\n점검 모드 — 몇 초만 받아보고 끝냅니다.\n")
+
+    with Store(args.db) as store:
+        try:
+            run(spec, store, probe=args.probe)
+        except KeyboardInterrupt:
+            print("\n중단 — 저장하고 종료합니다.")
+        print()
+        print(store.summary())
+    return 0
+
+
+def cmd_collect_status(args) -> int:
+    """모아둔 데이터가 얼마나 되는지 본다."""
+    from .collect.store import Store
+
+    with Store(args.db) as store:
+        print(store.summary())
+        for key in ("venue", "symbol", "streams"):
+            value = store.get_meta(key)
+            if value:
+                print(f"  {key:<10}  {value}")
+    return 0
+
+
 def cmd_grid(args) -> int:
     """격자 매매 — 방향을 맞히지 않고 진동을 먹는다. 전부 지정가."""
     from .strategy.grid import GridSpec, simulate
@@ -523,6 +562,26 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    co = sub.add_parser("collect", parents=[common],
+                        help="실시간 체결·호가 수집 (websockets 필요, API 키 불필요)")
+    co.add_argument("--db", default="data/collect.db", help="저장할 SQLite 경로")
+    co.add_argument("--venue", default="binance-futures",
+                    choices=("binance-futures", "binance-spot"))
+    co.add_argument("--symbol", default="BTCUSDT")
+    co.add_argument("--speed", default="100ms", choices=("100ms", "250ms", "500ms"),
+                    help="호가 갱신 주기. 느릴수록 용량이 작습니다")
+    co.add_argument("--no-trades", action="store_true", help="체결 수집 끄기")
+    co.add_argument("--no-book", action="store_true",
+                    help="호가 수집 끄기 (용량이 1/100로 줄어듭니다)")
+    co.add_argument("--seconds", type=float, help="이 시간 뒤 종료 (미지정이면 계속)")
+    co.add_argument("--probe", action="store_true",
+                    help="몇 초만 받아보고 눈으로 확인 — 처음엔 이걸로 시작하세요")
+    co.set_defaults(func=cmd_collect)
+
+    cs = sub.add_parser("collect-status", parents=[common], help="모은 데이터 현황")
+    cs.add_argument("--db", default="data/collect.db")
+    cs.set_defaults(func=cmd_collect_status)
 
     gd = sub.add_parser("grid", parents=[common],
                         help="격자 매매 — 지정가만 쓰고 진동을 먹는다")
