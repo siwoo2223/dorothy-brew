@@ -182,6 +182,18 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_side(args) -> int:
+    """전략 신호를 롱/숏으로 갈라 어느 쪽이 우위를 내는지 본다."""
+    from .backtest import side_report
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+    print(side_report.analyse(candles, strategy, cfg, max_bars=args.max_bars).report())
+    return 0
+
+
 def cmd_metalabel(args) -> int:
     """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
     from .ml.meta import build_dataset, train
@@ -450,6 +462,11 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    sd = sub.add_parser("side", parents=[common], help="롱/숏 방향별 우위 분해")
+    add_data_args(sd)
+    sd.add_argument("--max-bars", type=int, default=168, help="삼중 배리어 시간 한도(봉)")
+    sd.set_defaults(func=cmd_side)
 
     ml = sub.add_parser("metalabel", parents=[common],
                         help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")
