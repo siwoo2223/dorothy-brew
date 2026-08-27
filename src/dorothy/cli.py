@@ -143,6 +143,18 @@ def cmd_walkforward(args) -> int:
     return 0
 
 
+def cmd_regime(args) -> int:
+    """전략이 어떤 시장 국면에서 벌고 잃는지 분해한다."""
+    from .backtest import regime_report
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+    print(regime_report.analyse(candles, strategy, cfg, window=args.window).report())
+    return 0
+
+
 def cmd_montecarlo(args) -> int:
     """백테스트 매매를 재배열해 결과 분포를 본다."""
     from .backtest.engine import PaperExchange  # noqa: F401
@@ -356,6 +368,11 @@ def build_parser() -> argparse.ArgumentParser:
     wf.add_argument("--folds", type=int, default=4, help="구간 수")
     wf.add_argument("--train-ratio", type=float, default=0.7, help="구간 내 학습 비율")
     wf.set_defaults(func=cmd_walkforward)
+
+    rg = sub.add_parser("regime", parents=[common], help="국면별 성과 분해")
+    add_data_args(rg)
+    rg.add_argument("--window", type=int, default=200, help="국면 판정에 쓸 봉 수")
+    rg.set_defaults(func=cmd_regime)
 
     mc = sub.add_parser("montecarlo", parents=[common], help="매매 재배열로 결과 분포 추정")
     add_data_args(mc)
