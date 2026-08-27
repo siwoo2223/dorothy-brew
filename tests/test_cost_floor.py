@@ -172,3 +172,63 @@ class AnalyseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScenarioTests(unittest.TestCase):
+    """체결 방식별 비용. 여기가 틀리면 '메이커로 바꾸면 된다'는 잘못된 결론이 난다."""
+
+    def setUp(self):
+        from dorothy.backtest.cost_floor import scenarios
+        self.cfg = Config()
+        self.scenarios = scenarios(self.cfg)
+        self.by_label = {s.label: s for s in self.scenarios}
+
+    def test_taker_is_the_most_expensive(self):
+        costs = [s.cost for s in self.scenarios]
+        self.assertEqual(self.scenarios[0].cost, max(costs))
+
+    def test_maker_entry_saves_exactly_one_side(self):
+        cfg = self.cfg.exchange
+        expected = (cfg.maker_fee + cfg.taker_fee + cfg.slippage) * 100
+        self.assertAlmostEqual(self.by_label["진입만 지정가"].cost, expected)
+
+    def test_blended_cost_rises_as_win_rate_falls(self):
+        """지는 매매가 많을수록 손절(시장가)이 자주 나가 비용이 오른다."""
+        from dorothy.backtest.cost_floor import scenarios
+
+        high = [s for s in scenarios(self.cfg, win_rate=0.70) if "익절" in s.label][0]
+        low = [s for s in scenarios(self.cfg, win_rate=0.30) if "익절" in s.label][0]
+        self.assertLess(high.cost, low.cost)
+
+    def test_blended_sits_between_the_two_extremes(self):
+        blended = [s for s in self.scenarios if "익절" in s.label][0]
+        self.assertLess(blended.cost, self.by_label["시장가 (테이커)"].cost)
+        self.assertGreater(blended.cost, self.by_label["손절 포기 (메이커 전용)"].cost)
+
+    def test_no_two_scenarios_share_a_cost(self):
+        """값이 같은 줄이 둘이면 표가 아무것도 알려주지 않는다."""
+        costs = [round(s.cost, 6) for s in self.scenarios]
+        self.assertEqual(len(costs), len(set(costs)), costs)
+
+    def test_stopless_row_is_marked_as_giving_up_risk_control(self):
+        """가장 싸 보이는 줄이 사실 가장 위험하다. 그걸 반드시 말해야 한다."""
+        row = self.by_label["손절 포기 (메이커 전용)"]
+        self.assertEqual(row.cost, min(s.cost for s in self.scenarios))
+        self.assertIn("손실 한도를 포기", row.caveat)
+
+    def test_every_scenario_states_its_catch(self):
+        for scenario in self.scenarios:
+            self.assertTrue(scenario.caveat, f"{scenario.label}에 단서가 없습니다")
+
+    def test_report_includes_the_scenario_table(self):
+        from dorothy.backtest.cost_floor import analyse
+
+        closes, price, state = [], 100.0, 7
+        for _ in range(3000):
+            state = (1103515245 * state + 12345) % (1 << 31)
+            price *= 1 + (0.004 if (state >> 20) & 1 else -0.004)
+            closes.append(price)
+        candles = [Candle(i * 3600_000, c, c, c, c, 1.0) for i, c in enumerate(closes)]
+        report = analyse(candles, self.cfg, timeframes=("1h", "4h")).report()
+        self.assertIn("체결 방식을 바꾸면", report)
+        self.assertIn("손실 한도를 포기", report)

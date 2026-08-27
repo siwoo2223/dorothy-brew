@@ -63,9 +63,50 @@ class Row:
 
 
 @dataclass
+class Scenario:
+    """체결 방식 하나. 진입·청산을 각각 메이커로 낼지 테이커로 낼지."""
+
+    label: str
+    cost: float          # 왕복 비용 (%)
+    caveat: str = ""     # 이 방식이 공짜가 아닌 이유
+
+
+def scenarios(cfg: Config, *, win_rate: float = 0.45) -> list[Scenario]:
+    """현실적인 체결 방식 넷.
+
+    **메이커 전용이 공짜가 아닌 이유가 핵심이다.** 손절을 지정가로 걸 수는 없다.
+    가격이 반대로 가면 지정가는 체결되지 않고 그냥 지나가며, 손실은 계속 커진다.
+
+    그래서 진입과 익절만 지정가로 낼 수 있고 **손절은 반드시 시장가**다.
+    그러면 왕복 비용이 승률에 따라 달라진다 — 이긴 매매는 익절(메이커)로,
+    진 매매는 손절(테이커)로 끝나기 때문이다. win_rate는 그 혼합 비율이다.
+    기본값 0.45는 이 저장소에서 실측한 전략들의 승률대(37~49%)에서 잡았다.
+
+    손절을 아예 포기하면 왕복이 메이커 두 번으로 내려가지만, 그건 비용을
+    아낀 게 아니라 **손실 한도를 포기한 것**이다. 같은 표에 두되 그렇게 적는다.
+    """
+    maker = cfg.exchange.maker_fee
+    taker = cfg.exchange.taker_fee
+    slip = cfg.exchange.slippage
+    blended = maker + win_rate * maker + (1 - win_rate) * (taker + slip)
+    return [
+        Scenario("시장가 (테이커)", 2 * (taker + slip) * 100,
+                 "가장 확실하지만 가장 비쌉니다."),
+        Scenario("진입만 지정가", (maker + taker + slip) * 100,
+                 "진입을 놓칠 수 있습니다 — 그것도 하필 크게 간 것들을."),
+        Scenario(f"진입·익절 지정가 (승률 {win_rate:.0%})", blended * 100,
+                 "손절은 시장가입니다. 승률이 낮을수록 이 값이 올라갑니다."),
+        Scenario("손절 포기 (메이커 전용)", 2 * maker * 100,
+                 "⚠ 비용을 아낀 게 아니라 손실 한도를 포기한 것입니다. "
+                 "한 번의 큰 역행이 계좌를 끝냅니다."),
+    ]
+
+
+@dataclass
 class CostFloor:
     rows: list[Row] = field(default_factory=list)
     cost: float = 0.0
+    fee_scenarios: list[Scenario] = field(default_factory=list)
 
     @property
     def scaling_exponent(self) -> float:
@@ -104,7 +145,32 @@ class CostFloor:
                 f"{row.eaten:>17.0f}%{row.breakeven_win_rate:>14.1f}%{mark}"
             )
         lines.append("═" * 78)
+        if self.fee_scenarios:
+            lines += self._scenario_table()
         return "\n".join(lines + self._verdict())
+
+    def _scenario_table(self) -> list[str]:
+        """체결 방식을 바꾸면 손익분기 승률이 얼마나 내려가는가."""
+        picks = [r for r in self.rows if r.timeframe in ("1h", "4h", "1d")] or self.rows[:3]
+        lines = [
+            "  체결 방식을 바꾸면 — 손익분기 승률",
+            "  " + "─" * 74,
+            "  " + f"{'방식':<24}{'왕복':>8}"
+            + "".join(f"{r.timeframe:>9}" for r in picks),
+            "  " + "─" * 74,
+        ]
+        for scenario in self.fee_scenarios:
+            cells = ""
+            for row in picks:
+                rate = (0.5 + scenario.cost / (2 * row.mean_move)) * 100
+                cells += f"{rate:>8.1f}%"
+            lines.append(f"  {scenario.label:<24}{scenario.cost:>7.3f}%{cells}")
+        lines.append("  " + "─" * 74)
+        for scenario in self.fee_scenarios:
+            if scenario.caveat:
+                lines.append(f"  {scenario.label}: {scenario.caveat}")
+        lines.append("═" * 78)
+        return lines
 
     def _verdict(self) -> list[str]:
         if not self.rows:
@@ -151,7 +217,7 @@ def analyse(
     candles는 가장 짧은 타임프레임이어야 한다. 여기서 상위로만 리샘플한다.
     """
     cost = 2 * (cfg.exchange.taker_fee + cfg.exchange.slippage)
-    result = CostFloor(cost=cost * 100)
+    result = CostFloor(cost=cost * 100, fee_scenarios=scenarios(cfg))
 
     for name in timeframes:
         if name not in TIMEFRAME_MS:
