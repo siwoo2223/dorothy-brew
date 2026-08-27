@@ -1,11 +1,21 @@
+# ⚠ 주석은 줄 맨 앞에서만 주석입니다.
+#    규칙 뒤에 # 를 붙이면 그 텍스트까지 패턴의 일부가 되어 아무것도 안 걸립니다.
+#    실제로 "config/config.yaml  # 실계좌 설정" 이라고 써 두어서
+#    실계좌 설정 파일이 전혀 보호되지 않던 적이 있습니다.
+#
+# ⚠ 앞에 / 가 없으면 모든 깊이의 같은 이름 디렉터리에 걸립니다.
+#    실제로 "data/" 가 src/dorothy/data/ 패키지를 통째로 삼켜서,
+#    클론하면 ModuleNotFoundError로 아무것도 동작하지 않던 적이 있습니다.
+
 # 비밀값 — 절대 커밋 금지
 .env
 *.key
-config/config.yaml          # 실계좌 설정. config.example.yaml만 추적한다
+# 실계좌 설정. config/*.example.yaml 만 추적합니다
+/config/config.yaml
 
-# 런타임 산출물
-data/
-logs/
+# 런타임 산출물 (루트에만 적용)
+/data/
+/logs/
 *.db
 *.sqlite3
 KILL
