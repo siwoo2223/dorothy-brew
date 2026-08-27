@@ -164,5 +164,35 @@ def comparison_report(rows: list[ComparisonRow]) -> str:
             lines.append("  ⚠ 매수 후 보유를 이긴 전략도 없습니다.")
             lines.append("     이 구간에서는 매매하지 않는 편이 나았다는 뜻입니다.")
 
+    lines += _duplicate_warning(ranked)
     lines.append("  ※ 거래 30건 미만은 통계가 아닙니다. 기간을 늘려 다시 재세요.")
     return "\n".join(lines)
+
+
+def _duplicate_warning(ranked: list[ComparisonRow]) -> list[str]:
+    """성적이 완전히 같은 전략들을 찾아낸다.
+
+    필터 전략(session_filter, regime_filter 등)은 파라미터를 안 주면 전부 통과시킨다.
+    그러면 기반 전략과 글자 하나 다르지 않은 결과가 나오는데, 표에는 서로 다른
+    전략처럼 줄이 두 개 찍힌다. "필터를 씌웠는데도 졌다"로 읽히지만 실제로는
+    필터가 아무 일도 하지 않은 것이다. 그 착각을 여기서 끊는다.
+    """
+    groups: dict[tuple, list[ComparisonRow]] = {}
+    for row in ranked:
+        if row.is_baseline or not row.metrics.trades:
+            continue
+        key = (row.metrics.trades, round(row.metrics.net_pnl, 6))
+        groups.setdefault(key, []).append(row)
+
+    lines = []
+    for rows in groups.values():
+        if len(rows) < 2:
+            continue
+        names = ", ".join(r.label for r in rows)
+        lines.append(f"  ⚠ 성적이 완전히 동일합니다: {names}"
+                     f" (각 {rows[0].metrics.trades:,}거래)")
+        lines.append("     같은 매매를 한 것입니다. 필터 전략에 파라미터를 주지 않으면"
+                     " 전부 통과시켜서 기반 전략과 똑같아집니다.")
+        lines.append("     필터의 효과를 보려면 sessions·killzones·allow_trendiness 같은"
+                     " 값을 실제로 지정하세요.")
+    return lines

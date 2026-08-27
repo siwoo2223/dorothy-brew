@@ -88,3 +88,84 @@ class TestEmaCross(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetiredStrategyTests(unittest.TestCase):
+    """폐기 표시가 제 일을 하는지.
+
+    실제 데이터에서 진 전략을 지우지 않고 표시만 하는 이유는, 새 전략이
+    그보다 나은지 재려면 기준선이 남아 있어야 하기 때문이다. 대신 고를 때마다
+    경고가 떠야 하고, '살아있는 전략' 목록에서는 빠져야 한다.
+    """
+
+    def test_retired_strategies_are_excluded_from_the_live_list(self):
+        from dorothy.strategy.base import available, retired
+
+        live = set(available(include_retired=False))
+        for name in retired():
+            self.assertNotIn(name, live)
+
+    def test_retired_strategies_still_load(self):
+        """기준선으로 쓰려면 여전히 만들어져야 한다."""
+        from dorothy.strategy.base import get_strategy, retired
+
+        for name in retired():
+            self.assertIsNotNone(get_strategy(name))
+
+    def test_choosing_a_retired_strategy_warns(self):
+        from dorothy.strategy.base import get_strategy, retired
+
+        name = next(iter(retired()))
+        with self.assertLogs("dorothy.strategy.base", level="WARNING") as logs:
+            get_strategy(name)
+        self.assertIn("폐기", "\n".join(logs.output))
+
+    def test_any_warning_names_an_actually_retired_strategy(self):
+        """경고가 뜨면 반드시 폐기된 이름이 들어 있어야 한다.
+
+        필터 전략은 기본 base가 donchian이라 만들 때 경고가 뜬다. 그건 맞는 동작이다 —
+        폐기된 전략 위에 필터를 씌우고 있다는 걸 알아야 한다.
+        """
+        import logging
+
+        from dorothy.strategy.base import available, get_strategy, retired
+
+        names = set(retired())
+        logger = logging.getLogger("dorothy.strategy.base")
+        for name in available(include_retired=False):
+            with self.assertLogs(logger, level="DEBUG") as logs:
+                logger.debug("표시자")      # 경고가 하나도 없을 때를 대비한 것
+                get_strategy(name)
+            for line in logs.output:
+                if "WARNING" not in line:
+                    continue
+                self.assertTrue(any(n in line for n in names), line)
+
+    def test_wrapping_a_retired_base_warns(self):
+        """폐기된 전략 위에 필터를 씌워도 경고는 나와야 한다."""
+        from dorothy.strategy.base import get_strategy
+
+        with self.assertLogs("dorothy.strategy.base", level="WARNING") as logs:
+            get_strategy("session_filter", base="donchian")
+        self.assertIn("donchian", "\n".join(logs.output))
+
+    def test_every_retirement_states_its_evidence(self):
+        """'별로였다'는 폐기 사유가 아니다. 숫자가 있어야 한다."""
+        from dorothy.strategy.base import retired
+
+        for name, reason in retired().items():
+            self.assertIn("거래", reason, f"{name}: 거래 수가 없습니다")
+            self.assertIn("%", reason, f"{name}: 수익률이 없습니다")
+
+    def test_the_control_group_is_never_retired(self):
+        """무작위 진입은 지는 게 정상이다. 폐기하면 비교 대상이 사라진다."""
+        from dorothy.strategy.base import retired
+
+        self.assertNotIn("random", retired())
+
+    def test_available_includes_retired_by_default(self):
+        from dorothy.strategy.base import available, retired
+
+        everything = set(available())
+        for name in retired():
+            self.assertIn(name, everything)

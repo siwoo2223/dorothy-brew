@@ -20,6 +20,9 @@ from .common import atr_at, bounded, entry_signal
 @register
 class SupertrendStrategy(Strategy):
     name = "supertrend"
+    retired = (
+        "5년 실제 데이터에서 952거래 -70.81% (무작위 대조군 -33.12%보다 나쁨)"
+    )
 
     def __init__(
         self,

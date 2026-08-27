@@ -218,3 +218,67 @@ class TestEfficiencyMetric(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateStrategyWarningTests(unittest.TestCase):
+    """필터가 아무 일도 안 했을 때 그걸 알아채는지.
+
+    session_filter를 파라미터 없이 돌리면 donchian과 글자 하나 다르지 않은 결과가
+    나온다. 표에는 줄이 둘 찍혀서 "필터를 씌웠는데도 졌다"로 읽히지만,
+    실제로는 필터가 켜지지 않은 것이다. 실제 5년 데이터에서 이 착각이 나왔다.
+    """
+
+    def row(self, name, trades, pnl, baseline=False):
+        from dorothy.backtest.compare import ComparisonRow
+        from dorothy.backtest.metrics import Metrics
+
+        metrics = Metrics(
+            initial_equity=100.0, final_equity=100.0 + pnl, trades=trades,
+            wins=0, losses=trades, gross_profit=0.0, gross_loss=abs(pnl),
+            total_fees=0.0, max_drawdown_pct=0.0, max_consecutive_losses=0,
+        )
+        return ComparisonRow(name, name, metrics, is_baseline=baseline)
+
+    def report_for(self, rows):
+        from dorothy.backtest.compare import comparison_report
+        return comparison_report(rows)
+
+    def test_flags_identical_results(self):
+        report = self.report_for([
+            self.row("donchian", 2068, -84.89),
+            self.row("session_filter", 2068, -84.89),
+        ])
+        self.assertIn("성적이 완전히 동일합니다", report)
+        self.assertIn("donchian", report.split("성적이 완전히 동일합니다")[1].split("\n")[0])
+        self.assertIn("session_filter", report.split("성적이 완전히 동일합니다")[1].split("\n")[0])
+
+    def test_no_flag_when_results_differ(self):
+        report = self.report_for([
+            self.row("donchian", 2068, -84.89),
+            self.row("regime_filter", 2065, -84.37),
+        ])
+        self.assertNotIn("성적이 완전히 동일합니다", report)
+
+    def test_baselines_are_not_flagged(self):
+        """기준선끼리 같은 값이 나오는 건 다른 얘기다."""
+        report = self.report_for([
+            self.row("random", 10, -5.0, baseline=True),
+            self.row("buy_and_hold", 10, -5.0, baseline=True),
+        ])
+        self.assertNotIn("성적이 완전히 동일합니다", report)
+
+    def test_zero_trade_strategies_are_not_flagged(self):
+        """0거래끼리 같은 건 '같은 매매를 했다'는 뜻이 아니다."""
+        report = self.report_for([
+            self.row("funding_bias", 0, 0.0),
+            self.row("ict_confluence", 0, 0.0),
+        ])
+        self.assertNotIn("성적이 완전히 동일합니다", report)
+
+    def test_flags_three_way_duplicates(self):
+        report = self.report_for([
+            self.row("donchian", 2068, -84.89),
+            self.row("session_filter", 2068, -84.89),
+            self.row("other_filter", 2068, -84.89),
+        ])
+        self.assertEqual(report.count("성적이 완전히 동일합니다"), 1)

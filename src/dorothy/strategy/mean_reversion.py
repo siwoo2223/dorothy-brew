@@ -19,6 +19,9 @@ from .common import atr_at, entry_signal
 @register
 class MeanReversionStrategy(Strategy):
     name = "mean_reversion"
+    retired = (
+        "5년 실제 데이터에서 1,035거래 -74.17% (무작위 대조군 -33.12%보다 나쁨)"
+    )
 
     def __init__(
         self,

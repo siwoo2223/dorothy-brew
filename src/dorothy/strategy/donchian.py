@@ -17,6 +17,9 @@ from .common import atr_at, entry_signal
 @register
 class DonchianBreakoutStrategy(Strategy):
     name = "donchian"
+    retired = (
+        "5년 실제 데이터에서 2,068거래 -84.89% (무작위 대조군 -33.12%보다 나쁨)"
+    )
 
     def __init__(
         self,

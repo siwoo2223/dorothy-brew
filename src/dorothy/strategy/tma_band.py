@@ -40,6 +40,9 @@ log = logging.getLogger(__name__)
 @register
 class TmaBandStrategy(Strategy):
     name = "tma_band"
+    retired = (
+        "5년 실제 데이터에서 1,759거래 -77.56% (무작위 대조군 -33.12%보다 나쁨)"
+    )
 
     def __init__(
         self,

@@ -16,6 +16,9 @@ from .base import Strategy, register
 @register
 class EmaCrossStrategy(Strategy):
     name = "ema_cross"
+    retired = (
+        "5년 실제 데이터에서 754거래 -68.36% (무작위 대조군 -33.12%보다 나쁨)"
+    )
 
     def __init__(
         self,
