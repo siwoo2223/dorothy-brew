@@ -182,6 +182,28 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_grid(args) -> int:
+    """격자 매매 — 방향을 맞히지 않고 진동을 먹는다. 전부 지정가."""
+    from .strategy.grid import GridSpec, simulate
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    spec = GridSpec(
+        levels=args.levels, step_atr=args.step, size_per_level=args.size,
+        close_daily=not args.no_daily_close, max_hold_bars=args.max_hold,
+    )
+    result = simulate(
+        candles, spec, maker_fee=cfg.exchange.maker_fee,
+        taker_fee=cfg.exchange.taker_fee, slippage=cfg.exchange.slippage,
+    )
+    print(result.report(spec, {
+        "maker": cfg.exchange.maker_fee, "taker": cfg.exchange.taker_fee,
+        "slippage": cfg.exchange.slippage,
+    }))
+    return 0
+
+
 def cmd_costfloor(args) -> int:
     """이 타임프레임에서 수수료를 넘는 것이 애초에 가능한지 본다."""
     from .backtest import cost_floor
@@ -501,6 +523,16 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    gd = sub.add_parser("grid", parents=[common],
+                        help="격자 매매 — 지정가만 쓰고 진동을 먹는다")
+    add_data_args(gd)
+    gd.add_argument("--levels", type=int, default=5, help="한쪽 격자 개수")
+    gd.add_argument("--step", type=float, default=0.25, help="격자 간격 (ATR 배수)")
+    gd.add_argument("--size", type=float, default=0.20, help="레벨당 명목가 (자본 대비)")
+    gd.add_argument("--max-hold", type=int, default=24, help="보유 한도 (봉)")
+    gd.add_argument("--no-daily-close", action="store_true", help="하루 마감 청산 끄기")
+    gd.set_defaults(func=cmd_grid)
 
     cf = sub.add_parser("costfloor", parents=[common],
                         help="타임프레임별 손익분기 승률 — 애초에 가능한가")
