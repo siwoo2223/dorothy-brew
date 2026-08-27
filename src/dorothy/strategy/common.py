@@ -14,6 +14,18 @@ from ..data.indicators import atr as atr_indicator
 from ..models import Action, Candle, Signal
 
 
+def bounded(candles: list[Candle], window: int) -> list[Candle]:
+    """최근 window 봉만 남긴다.
+
+    이유가 두 가지다:
+    1. 속도 — 매 봉마다 전체 히스토리에 지표를 재계산하면 O(n²)가 되어
+       긴 백테스트가 몇 분씩 걸린다. 파라미터를 못 만지면 전략 개발이 멈춘다.
+    2. 정합성 — 실전에서 거래소는 제한된 개수의 캔들만 준다(fetch_ohlcv limit).
+       백테스트가 무한한 과거를 보면 실전과 결과가 달라진다.
+    """
+    return candles[-window:] if len(candles) > window else candles
+
+
 def atr_at(candles: list[Candle], period: int) -> float | None:
     value = atr_indicator(
         [c.high for c in candles], [c.low for c in candles],

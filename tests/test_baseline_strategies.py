@@ -25,7 +25,8 @@ class TestRegistry(unittest.TestCase):
         """등록 목록을 손으로 관리하지 않으므로 파일만 추가하면 잡혀야 한다."""
         self.assertEqual(
             set(available()),
-            {"donchian", "ema_cross", "ict_confluence", "mean_reversion", "random"},
+            {"donchian", "ema_cross", "ict_confluence", "mean_reversion",
+             "random", "supertrend", "tma_band"},
         )
 
 
