@@ -114,7 +114,7 @@ class TestStrategyCausality(unittest.TestCase):
     def test_tma_band_default_is_causal(self):
         """기본값은 반드시 인과적이어야 한다."""
         strategy = get_strategy("tma_band")
-        self.assertFalse(strategy.centered)
+        self.assertEqual(strategy.mode, "causal")
         cut = 1500
         tampered = CANDLES[:cut] + [
             Candle(c.ts, c.open * 4, c.high * 4, c.low * 4, c.close * 4, c.volume)
@@ -126,6 +126,62 @@ class TestStrategyCausality(unittest.TestCase):
                     strategy.generate(CANDLES[: i + 1], None).action,
                     strategy.generate(tampered[: i + 1], None).action,
                 )
+
+
+class TestTmaModes(unittest.TestCase):
+    """delayed 모드가 '실행 가능한 중심이동'인지 확인한다."""
+
+    def _signals(self, mode):
+        strategy = get_strategy("tma_band", mode=mode)
+        return [
+            (i, strategy.generate(CANDLES[: i + 1], None))
+            for i in range(strategy.warmup, len(CANDLES), 3)
+        ]
+
+    def test_unknown_mode_is_rejected(self):
+        with self.assertRaises(ValueError):
+            get_strategy("tma_band", mode="magic")
+
+    def test_centered_mode_produces_no_signals(self):
+        """중심이동의 현재 봉 값은 실시간에 존재하지 않는다.
+
+        코드가 막아서가 아니라 계산이 불가능해서 0건이다.
+        이 사실을 테스트로 고정해 두면 나중에 누가 '미래참조로 바꿔달라'고 해도
+        왜 안 되는지 코드가 답한다.
+        """
+        entries = [s for _, s in self._signals("centered") if s.action is not Action.HOLD]
+        self.assertEqual(len(entries), 0)
+
+    def test_delayed_mode_does_produce_signals(self):
+        entries = [s for _, s in self._signals("delayed") if s.action is not Action.HOLD]
+        self.assertGreater(len(entries), 0)
+
+    def test_delayed_mode_is_causal(self):
+        """지연 모드는 확정된 값만 쓰므로 미래를 보지 않아야 한다."""
+        strategy = get_strategy("tma_band", mode="delayed")
+        cut = 1500
+        tampered = CANDLES[:cut] + [
+            Candle(c.ts, c.open * 4, c.high * 4, c.low * 4, c.close * 4, c.volume)
+            for c in CANDLES[cut:]
+        ]
+        for i in (1300, 1400, cut - 1):
+            with self.subTest(bar=i):
+                a = strategy.generate(CANDLES[: i + 1], None)
+                b = strategy.generate(tampered[: i + 1], None)
+                self.assertIs(a.action, b.action)
+                self.assertEqual(a.stop_loss, b.stop_loss)
+
+    def test_delayed_entries_have_valid_stops(self):
+        for i, sig in self._signals("delayed"):
+            if sig.action is Action.HOLD:
+                continue
+            price = CANDLES[i].close
+            with self.subTest(bar=i):
+                self.assertIsNotNone(sig.stop_loss)
+                if sig.action is Action.ENTER_LONG:
+                    self.assertLess(sig.stop_loss, price)
+                else:
+                    self.assertGreater(sig.stop_loss, price)
 
 
 class TestEntryInvariants(unittest.TestCase):
