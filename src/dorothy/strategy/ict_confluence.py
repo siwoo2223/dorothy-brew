@@ -70,6 +70,9 @@ class ScoreCard:
 @register
 class IctConfluenceStrategy(Strategy):
     name = "ict_confluence"
+    retired = (
+        "기본 설정은 5년 실제 데이터에서 18거래뿐이라 판정이 불가하지만, 표본이 30건을 넘는 완화 경로 3개가 전부 음수였다 (손익비 1.2→40거래 -0.353%/회, 각도 20→32거래 -0.163%/회, 각도 10→49거래 -0.474%/회, 수수료 후)"
+    )
 
     def __init__(
         self,

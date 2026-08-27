@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 class TmaBandStrategy(Strategy):
     name = "tma_band"
     retired = (
-        "5년 실제 데이터에서 1,759거래 -77.56% (무작위 대조군 -33.12%보다 나쁨)"
+        "5년 실제 데이터에서 1,759거래 -77.56% (무작위 대조군 -33.12%보다 나쁨). 방향을 나눠도 양쪽 다 음수라 살릴 방법이 없다 (롱 -0.327%/회, 숏 -0.239%/회, 수수료 후)"
     )
 
     def __init__(

@@ -1,0 +1,31 @@
+# 현재 5년 실제 데이터에서 가장 나은 설정입니다.
+#
+#   4시간봉 · 100거래 · +18.43% · MDD 6.1% · PF 1.34
+#   연도별로 6년 중 5년 흑자, BTC가 64.7% 빠진 2022년에 +10.37%
+#
+# ⚠ 아직 실전에 넣을 단계가 아닙니다.
+#    t=1.62로 우연과 구별되지 않고(100거래), 워크포워드 검증 거래가 27건뿐입니다.
+#
+# 핵심은 fast/slow가 아니라 **allow_short: false** 하나입니다.
+# 돈치안40도 숏을 끄는 것만으로 +2.47% → +23.49%가 됩니다.
+#
+# ⚠ fast/slow는 기본값 그대로 두세요. 이 결과의 전제입니다.
+#    파라미터를 탐색하면 워크포워드에서 무너집니다 (돈치안이 그랬습니다: 효율 0.02).
+#
+# ⚠ API 키는 여기 적지 마세요. 환경변수(.env)로만 넣습니다.
+
+mode: backtest
+initial_equity: 200.0
+exchange:
+  name: bitget
+  symbol: "BTC/USDT:USDT"
+  timeframe: "4h"
+  leverage: 2.0
+  taker_fee: 0.0006
+  slippage: 0.0005
+strategy:
+  name: ema_cross
+  params:
+    fast: 20
+    slow: 50
+    allow_short: false

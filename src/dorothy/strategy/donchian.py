@@ -18,7 +18,7 @@ from .common import atr_at, entry_signal
 class DonchianBreakoutStrategy(Strategy):
     name = "donchian"
     retired = (
-        "5년 실제 데이터에서 2,068거래 -84.89% (무작위 대조군 -33.12%보다 나쁨)"
+        "롱숏 대칭 기본 설정이 5년 실제 데이터에서 2,068거래 -84.89% (무작위 대조군 -33.12%보다 나쁨). 4시간봉·채널40·숏 끔으로 바꾸면 194거래 +23.49%가 되지만, 채널을 골라야 해서 워크포워드 효율이 0.02로 무너진다"
     )
 
     def __init__(

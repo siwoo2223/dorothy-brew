@@ -21,7 +21,7 @@ from .common import atr_at, bounded, entry_signal
 class SupertrendStrategy(Strategy):
     name = "supertrend"
     retired = (
-        "5년 실제 데이터에서 952거래 -70.81% (무작위 대조군 -33.12%보다 나쁨)"
+        "5년 실제 데이터에서 952거래 -70.81% (무작위 대조군 -33.12%보다 나쁨). 방향별로는 숏이 롱보다 낫다 (숏 +0.140%/회 vs 롱 -0.302%/회, 수수료 후)"
     )
 
     def __init__(

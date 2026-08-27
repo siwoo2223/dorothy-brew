@@ -20,7 +20,7 @@ from .common import atr_at, entry_signal
 class MeanReversionStrategy(Strategy):
     name = "mean_reversion"
     retired = (
-        "5년 실제 데이터에서 1,035거래 -74.17% (무작위 대조군 -33.12%보다 나쁨)"
+        "5년 실제 데이터에서 1,035거래 -74.17% (무작위 대조군 -33.12%보다 나쁨). 방향별로는 숏이 롱보다 낫다 (숏 +0.007%/회 vs 롱 -0.241%/회, 수수료 후)"
     )
 
     def __init__(
