@@ -182,6 +182,20 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_voltarget(args) -> int:
+    """방향을 맞히지 않고 변동성에 반비례해 노출만 조절했을 때를 본다."""
+    from .backtest import vol_target
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    print(vol_target.analyse(
+        candles, cfg, target_vol=args.target_vol, lookback=args.lookback,
+        max_leverage=args.max_leverage, rebalance_band=args.band, venue=args.venue,
+    ).report())
+    return 0
+
+
 def cmd_side(args) -> int:
     """전략 신호를 롱/숏으로 갈라 어느 쪽이 우위를 내는지 본다."""
     from .backtest import side_report
@@ -462,6 +476,17 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    vt = sub.add_parser("voltarget", parents=[common],
+                        help="변동성 타게팅 — 방향 예측 없이 노출만 조절")
+    add_data_args(vt)
+    vt.add_argument("--target-vol", type=float, default=0.50, help="목표 연변동성 (0.50=50%%)")
+    vt.add_argument("--lookback", type=int, default=30, help="변동성 측정 봉 수")
+    vt.add_argument("--max-leverage", type=float, default=3.0, help="배율 상한")
+    vt.add_argument("--band", type=float, default=0.10, help="재조정 밴드 (0.10=10%%)")
+    vt.add_argument("--venue", choices=("spot", "perp"), default="spot",
+                    help="spot=1배까지 현물(펀딩 없음) / perp=전체에 펀딩")
+    vt.set_defaults(func=cmd_voltarget)
 
     sd = sub.add_parser("side", parents=[common], help="롱/숏 방향별 우위 분해")
     add_data_args(sd)
