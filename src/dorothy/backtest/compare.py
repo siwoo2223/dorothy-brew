@@ -146,6 +146,19 @@ def comparison_report(rows: list[ComparisonRow]) -> str:
     hold_row = next((r for r in ranked if r.name == "buy_and_hold"), None)
     real = [r for r in ranked if not r.is_baseline]
 
+    # 0거래 전략은 "이겼다"고 말할 수 없다. 그냥 안 뛴 것이다.
+    idle = [r for r in real if not r.metrics.trades]
+    if idle:
+        lines.append("")
+        names = ", ".join(r.label for r in idle)
+        lines.append(f"  ⚠ 신호가 한 번도 나오지 않았습니다: {names}")
+        lines.append("     이긴 것도 진 것도 아니라 증거가 없는 상태입니다."
+                     " 조건이 너무 빡빡하거나 데이터가 부족합니다.")
+        lines.append("     python -m dorothy diagnose --strategy <이름> 으로"
+                     " 어느 조건에서 막히는지 보세요.")
+
+    real = [r for r in real if r.metrics.trades]
+
     if random_row and real:
         beaten = [r for r in real if r.metrics.net_pnl > random_row.metrics.net_pnl]
         lines.append("")

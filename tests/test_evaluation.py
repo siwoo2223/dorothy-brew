@@ -275,6 +275,30 @@ class DuplicateStrategyWarningTests(unittest.TestCase):
         ])
         self.assertNotIn("성적이 완전히 동일합니다", report)
 
+    def test_zero_trade_strategy_is_not_credited_with_beating_random(self):
+        """한 번도 안 뛴 전략이 '무작위 대비 우위'로 뜨면 안 된다.
+
+        실제 5년 비교에서 funding_bias(0거래)가 그렇게 표시됐다.
+        이긴 게 아니라 참가하지 않은 것이다.
+        """
+        report = self.report_for([
+            self.row("random", 676, -33.12, baseline=True),
+            self.row("funding_bias", 0, 0.0),
+            self.row("donchian", 2068, -84.89),
+        ])
+        self.assertIn("신호가 한 번도 나오지 않았습니다", report)
+        if "무작위 대비 우위" in report:
+            advantage = report.split("무작위 대비 우위")[1].split("\n")[0]
+            self.assertNotIn("funding_bias", advantage)
+
+    def test_a_real_winner_is_still_credited(self):
+        report = self.report_for([
+            self.row("random", 676, -33.12, baseline=True),
+            self.row("ict_confluence", 40, -3.24),
+        ])
+        self.assertIn("무작위 대비 우위", report)
+        self.assertIn("ict_confluence", report.split("무작위 대비 우위")[1].split("\n")[0])
+
     def test_flags_three_way_duplicates(self):
         report = self.report_for([
             self.row("donchian", 2068, -84.89),
