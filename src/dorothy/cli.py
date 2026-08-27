@@ -143,6 +143,18 @@ def cmd_walkforward(args) -> int:
     return 0
 
 
+def cmd_session(args) -> int:
+    """전략이 어떤 시간대에서 벌고 잃는지 분해한다 (다중검정 보정 포함)."""
+    from .backtest import session_report
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+    print(session_report.analyse(candles, strategy, cfg).report())
+    return 0
+
+
 def cmd_regime(args) -> int:
     """전략이 어떤 시장 국면에서 벌고 잃는지 분해한다."""
     from .backtest import regime_report
@@ -368,6 +380,10 @@ def build_parser() -> argparse.ArgumentParser:
     wf.add_argument("--folds", type=int, default=4, help="구간 수")
     wf.add_argument("--train-ratio", type=float, default=0.7, help="구간 내 학습 비율")
     wf.set_defaults(func=cmd_walkforward)
+
+    se = sub.add_parser("session", parents=[common], help="시간대별 성과 분해")
+    add_data_args(se)
+    se.set_defaults(func=cmd_session)
 
     rg = sub.add_parser("regime", parents=[common], help="국면별 성과 분해")
     add_data_args(rg)
