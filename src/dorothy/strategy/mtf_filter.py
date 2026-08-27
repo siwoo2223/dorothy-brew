@@ -22,6 +22,7 @@ from ..data.indicators import ema
 from ..data.resample import infer_interval, resample, timeframe_ms
 from ..models import Action, Candle, Position, Signal
 from .base import Strategy, get_strategy, register
+from .common import bounded
 
 
 @register
@@ -35,10 +36,12 @@ class MtfFilterStrategy(Strategy):
         higher_timeframe: str = "4h",
         filter_period: int = 50,
         require_trend: bool = True,
+        analysis_window: int = 1200,
     ) -> None:
         super().__init__(
             base=base, base_params=base_params, higher_timeframe=higher_timeframe,
             filter_period=filter_period, require_trend=require_trend,
+            analysis_window=analysis_window,
         )
         if base == "mtf_filter":
             raise ValueError("mtf_filter를 자기 자신에 씌울 수 없습니다.")
@@ -49,6 +52,7 @@ class MtfFilterStrategy(Strategy):
         self.higher_ms = timeframe_ms(higher_timeframe)
         self.filter_period = filter_period
         self.require_trend = require_trend
+        self.analysis_window = analysis_window
 
     @property
     def warmup(self) -> int:
@@ -57,7 +61,12 @@ class MtfFilterStrategy(Strategy):
         return max(self.base.warmup, self.filter_period * 4 + 10)
 
     def higher_bias(self, candles: list[Candle]) -> int:
-        """+1 상승 / -1 하락 / 0 판정 불가."""
+        """+1 상승 / -1 하락 / 0 판정 불가.
+
+        매 봉마다 전체 히스토리를 리샘플링하면 O(n²)가 된다.
+        상위 봉 filter_period개를 만들 만큼만 보면 충분하다.
+        """
+        candles = bounded(candles, self.analysis_window)
         source_ms = infer_interval(candles)
         if source_ms <= 0 or self.higher_ms < source_ms:
             return 0

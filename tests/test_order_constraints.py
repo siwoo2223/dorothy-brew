@@ -53,6 +53,45 @@ class TestRounding(unittest.TestCase):
         self.assertAlmostEqual(normalize(0.00046, min_size=0.0001, step=0.0001), 0.0004)
 
 
+class TestAtrWindowBounding(unittest.TestCase):
+    """ATR을 최근 구간으로 잘라 계산해도 값이 같아야 한다.
+
+    전체 히스토리로 계산하면 매 봉마다 O(n)이라 백테스트가 O(n²)가 된다.
+    실제 2년치 시간봉(17,521개)에서 100봉/초까지 떨어졌다.
+    Wilder 평활이라 최근 구간만으로 수렴하므로 잘라도 값이 바뀌지 않는다 —
+    그 사실을 여기서 고정한다. 깨지면 성능 최적화가 정확도를 해친 것이다.
+    """
+
+    def setUp(self):
+        from dorothy.data.indicators import atr as atr_indicator
+        from dorothy.strategy.common import atr_at
+
+        self.atr_indicator = atr_indicator
+        self.atr_at = atr_at
+        self.candles = synthetic(6000, seed=5, timeframe="1h", start=65000.0)
+
+    def test_bounded_atr_matches_full_history(self):
+        for cut in (1000, 3000, 6000):
+            window = self.candles[:cut]
+            full = self.atr_indicator(
+                [c.high for c in window], [c.low for c in window],
+                [c.close for c in window], 14,
+            )[-1]
+            with self.subTest(bars=cut):
+                self.assertAlmostEqual(self.atr_at(window, 14), full, places=6)
+
+    def test_matches_for_a_long_period_too(self):
+        window = self.candles[:4000]
+        full = self.atr_indicator(
+            [c.high for c in window], [c.low for c in window],
+            [c.close for c in window], 50,
+        )[-1]
+        self.assertAlmostEqual(self.atr_at(window, 50), full, places=6)
+
+    def test_short_history_still_works(self):
+        self.assertIsNotNone(self.atr_at(self.candles[:60], 14))
+
+
 class TestPaperExchangeEnforcement(unittest.TestCase):
     def _exchange(self, equity=10.0):
         px = PaperExchange(equity=equity, taker_fee=0.0, slippage=0.0,
