@@ -21,13 +21,36 @@ def entries(strategy, candles, step=1):
 
 
 class TestRegistry(unittest.TestCase):
-    def test_all_strategies_are_discovered(self):
-        """등록 목록을 손으로 관리하지 않으므로 파일만 추가하면 잡혀야 한다."""
-        self.assertEqual(
-            set(available()),
-            {"donchian", "ema_cross", "ict_confluence", "mean_reversion",
-             "random", "supertrend", "tma_band"},
-        )
+    """자동 탐색이 동작하는지 본다.
+
+    전략 목록 전체를 하드코딩하면 전략을 추가할 때마다 이 테스트가 깨진다
+    (실제로 세 번 깨졌다). 그건 자동 탐색을 도입한 취지에 어긋난다.
+    대신 '반드시 있어야 할 것'과 '탐색된 것이 모두 정상인가'를 본다.
+    """
+
+    REQUIRED = {"donchian", "ema_cross", "mean_reversion", "random"}
+
+    def test_core_strategies_are_discovered(self):
+        self.assertTrue(self.REQUIRED <= set(available()))
+
+    def test_control_group_is_always_available(self):
+        """대조군이 사라지면 비교의 근거가 사라진다."""
+        self.assertIn("random", available())
+
+    def test_every_discovered_strategy_can_be_built(self):
+        for name in available():
+            with self.subTest(strategy=name):
+                self.assertIsNotNone(get_strategy(name))
+
+    def test_every_strategy_registers_under_its_own_name(self):
+        for name in available():
+            with self.subTest(strategy=name):
+                self.assertEqual(get_strategy(name).name, name)
+
+    def test_every_strategy_declares_a_warmup(self):
+        for name in available():
+            with self.subTest(strategy=name):
+                self.assertGreater(get_strategy(name).warmup, 0)
 
 
 class TestSharedEntryHelper(unittest.TestCase):
