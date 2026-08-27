@@ -203,6 +203,16 @@ def cmd_metalabel(args) -> int:
         embargo_bars=args.embargo, threshold=args.threshold, seed=args.seed,
     )
     print(result.report())
+
+    if args.maker:
+        from .backtest import maker_report
+
+        keep = {i for i, p in result.oos_predictions.items() if p >= args.threshold}
+        print()
+        print(maker_report.analyse(
+            candles, samples, cfg, offset_atr=args.maker_offset,
+            timeout_bars=args.maker_timeout, max_bars=args.max_bars, keep=keep,
+        ).report())
     return 0
 
 
@@ -450,6 +460,11 @@ def build_parser() -> argparse.ArgumentParser:
     ml.add_argument("--max-bars", type=int, default=168, help="삼중 배리어 시간 한도(봉)")
     ml.add_argument("--step", type=int, default=1, help="표본 추출 간격(봉)")
     ml.add_argument("--seed", type=int, default=42)
+    ml.add_argument("--maker", action="store_true",
+                    help="지정가 진입을 미체결까지 반영해 비교")
+    ml.add_argument("--maker-offset", type=float, default=0.25,
+                    help="지정가를 종가에서 몇 ATR 물러나 걸지")
+    ml.add_argument("--maker-timeout", type=int, default=3, help="체결 대기 봉 수")
     ml.set_defaults(func=cmd_metalabel)
 
     rp = sub.add_parser("repaint", parents=[common], help="엘리엇 카운트 안정성 측정")

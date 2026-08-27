@@ -76,7 +76,8 @@ def build_dataset(
             continue
 
         samples.append(
-            Sample(i, outcome.exit_index, candles[i].ts, features, outcome.label, side)
+            Sample(i, outcome.exit_index, candles[i].ts, features, outcome.label, side,
+                   stop=signal.stop_loss, target=signal.take_profit)
         )
 
     return samples

@@ -31,17 +31,22 @@ def triple_barrier(
     target: float,
     *,
     max_bars: int = 168,
+    include_entry_bar: bool = False,
 ) -> BarrierOutcome | None:
     """진입 이후 목표·손절·시간 중 먼저 닿는 것으로 라벨을 정한다.
 
     한 봉 안에서 목표와 손절이 모두 닿으면 **손절을 택한다**(보수적 가정).
     백테스트 엔진의 스탑 판정과 같은 규칙이라 라벨과 실제 성과가 어긋나지 않는다.
+
+    include_entry_bar는 지정가 체결에 쓴다. 봉 중간에 체결됐다면 그 봉의 남은
+    구간에서도 손절이 나갈 수 있다. 다음 봉부터 보면 그만큼 유리하게 계산된다.
     """
     if entry_index >= len(candles) - 1:
         return None
 
     last = min(entry_index + max_bars, len(candles) - 1)
-    for i in range(entry_index + 1, last + 1):
+    first = entry_index if include_entry_bar else entry_index + 1
+    for i in range(first, last + 1):
         candle = candles[i]
         if side is Side.LONG:
             hit_stop = candle.low <= stop
@@ -72,6 +77,10 @@ class Sample:
     features: list[float]
     label: int
     side: Side
+    # 손절·익절 절대가. 체결가를 바꿔가며 다시 태우려면 이게 있어야 한다
+    # (지정가 진입은 체결가가 신호봉 종가와 다르다).
+    stop: float = 0.0
+    target: float = 0.0
 
     @property
     def span(self) -> tuple[int, int]:
