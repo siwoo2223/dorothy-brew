@@ -190,3 +190,96 @@ class TestRandomControl(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoundedWindowTests(unittest.TestCase):
+    """분석 창을 제한해도 값이 바뀌면 안 된다.
+
+    매 봉마다 전체 히스토리로 지표를 다시 계산하면 O(n²)가 되어 8년치
+    시간봉에서 백테스트가 사실상 멈춘다. 그래서 최근 구간만 본다.
+    **속도를 위해 값을 바꾸면 그건 최적화가 아니라 버그다.**
+    """
+
+    def candles(self, n=3000):
+        from dorothy.data.loader import synthetic
+        return synthetic(n, seed=17)
+
+    def signals(self, strategy, candles, limit=None):
+        from dorothy.models import Action
+        out = []
+        stop = limit or len(candles)
+        for i in range(strategy.warmup, stop):
+            sig = strategy.generate(candles[: i + 1], None)
+            if sig.action is not Action.HOLD:
+                out.append((i, sig.action,
+                            round(sig.stop_loss, 6) if sig.stop_loss else None,
+                            round(sig.take_profit, 6) if sig.take_profit else None))
+        return out
+
+    def test_ema_cross_signals_match_a_short_history(self):
+        """긴 히스토리에서 낸 신호가, 같은 지점을 짧은 히스토리로 봐도 같아야 한다."""
+        from dorothy.strategy.base import get_strategy
+
+        candles = self.candles()
+        strategy = get_strategy("ema_cross", fast=20, slow=50)
+        index = len(candles) - 1
+
+        full = strategy.generate(candles, None)
+        # 창(slow*20=1000)보다 넉넉히 긴 꼬리만 남겨도 같은 답이어야 한다
+        trimmed = strategy.generate(candles[-1500:], None)
+        self.assertEqual(full.action, trimmed.action)
+        if full.stop_loss and trimmed.stop_loss:
+            self.assertAlmostEqual(full.stop_loss, trimmed.stop_loss, places=6)
+
+    def test_mean_reversion_signals_match_a_short_history(self):
+        from dorothy.strategy.base import get_strategy
+
+        candles = self.candles()
+        strategy = get_strategy("mean_reversion")
+        full = strategy.generate(candles, None)
+        trimmed = strategy.generate(candles[-500:], None)
+        self.assertEqual(full.action, trimmed.action)
+
+    def test_ema_cross_is_not_quadratic(self):
+        """봉 수를 4배로 늘려도 봉당 처리 시간이 크게 늘면 안 된다.
+
+        O(n²)면 봉당 시간이 n에 비례해 늘어난다. 경계가 있으면 일정하다.
+        """
+        import time
+
+        from dorothy.strategy.base import get_strategy
+
+        candles = self.candles(4000)
+        strategy = get_strategy("ema_cross", fast=20, slow=50)
+
+        def per_bar(count):
+            sample = candles[:count]
+            start = max(strategy.warmup, count - 120)
+            t0 = time.perf_counter()
+            for i in range(start, count):
+                strategy.generate(sample[: i + 1], None)
+            return (time.perf_counter() - t0) / (count - start)
+
+        small = per_bar(1000)
+        large = per_bar(4000)
+        # 4배 늘렸는데 봉당 시간이 2.5배를 넘으면 경계가 안 걸린 것이다
+        self.assertLess(large, small * 2.5,
+                        f"봉당 {small * 1e6:.0f}µs → {large * 1e6:.0f}µs — O(n²) 의심")
+
+    def test_mean_reversion_is_not_quadratic(self):
+        import time
+
+        from dorothy.strategy.base import get_strategy
+
+        candles = self.candles(4000)
+        strategy = get_strategy("mean_reversion")
+
+        def per_bar(count):
+            sample = candles[:count]
+            start = max(strategy.warmup, count - 120)
+            t0 = time.perf_counter()
+            for i in range(start, count):
+                strategy.generate(sample[: i + 1], None)
+            return (time.perf_counter() - t0) / (count - start)
+
+        self.assertLess(per_bar(4000), per_bar(1000) * 2.5)

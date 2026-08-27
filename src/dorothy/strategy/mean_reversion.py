@@ -62,7 +62,11 @@ class MeanReversionStrategy(Strategy):
         if atr is None:
             return Signal(Action.HOLD, "ATR 미계산")
 
-        line = rsi_indicator([c.close for c in candles], self.rsi_period)
+        # 전체 히스토리로 매번 다시 계산하면 O(n²)다 (ema_cross와 같은 문제).
+        # RSI도 지수 평활이라 기간의 20배면 충분하다.
+        window = self.rsi_period * 20
+        recent = candles[-window:] if len(candles) > window else candles
+        line = rsi_indicator([c.close for c in recent], self.rsi_period)
         now, prev = line[-1], line[-2]
         if now is None or prev is None:
             return Signal(Action.HOLD, "RSI 미계산")

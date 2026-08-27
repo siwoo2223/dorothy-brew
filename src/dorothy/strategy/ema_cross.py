@@ -51,10 +51,16 @@ class EmaCrossStrategy(Strategy):
         if len(candles) < self.warmup:
             return Signal(Action.HOLD, "워밍업 부족")
 
-        closes = [c.close for c in candles]
+        # 매 봉마다 전체 히스토리로 다시 계산하면 O(n²)가 된다. 8년치 시간봉이면
+        # 57억 번이라 백테스트가 사실상 멈춘다. EMA는 지수 감쇠라 기간의 20배만
+        # 봐도 나머지 가중치가 1e-9 이하다 — 값은 같고 속도만 달라진다.
+        window = max(self.slow, self.atr_period) * 20
+        recent = candles[-window:] if len(candles) > window else candles
+        closes = [c.close for c in recent]
         fast_line = ema(closes, self.fast)
         slow_line = ema(closes, self.slow)
-        atr_line = atr([c.high for c in candles], [c.low for c in candles], closes, self.atr_period)
+        atr_line = atr([c.high for c in recent], [c.low for c in recent], closes,
+                       self.atr_period)
 
         f0, s0 = fast_line[-1], slow_line[-1]
         f1, s1 = fast_line[-2], slow_line[-2]
