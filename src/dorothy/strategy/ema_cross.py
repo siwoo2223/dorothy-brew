@@ -17,7 +17,7 @@ from .base import Strategy, register
 class EmaCrossStrategy(Strategy):
     name = "ema_cross"
     retired = (
-        "롱숏 대칭 기본 설정이 5년 실제 데이터에서 754거래 -68.36% (무작위 대조군 -33.12%보다 나쁨). 다만 allow_short=False로 숏을 끄면 4시간봉에서 100거래 +18.43%, MDD 6.1%로 뒤집힌다 — 폐기 대상은 대칭 설정이지 전략 자체가 아니다"
+        "롱숏 대칭 기본 설정이 5년 실제 데이터에서 754거래 -68.36% (무작위 대조군 -33.12%보다 나쁨). 숏을 끄면 5년 창(2021~)에서는 +18.43%/MDD 6.1%로 좋아 보였지만, 8.6년(2018~)으로 늘리자 172거래 +13.89%/MDD 10.6%로 연 1.5%에 그쳤다 — 같은 기간 매수 후 보유가 +486.74%다. config/ema_long.rejected.yaml 참고"
     )
 
     def __init__(
