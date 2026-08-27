@@ -15,6 +15,7 @@ import sys
 
 from . import __version__
 from .backtest import compare as compare_mod
+from .backtest import montecarlo
 from .backtest import diagnostics
 from .backtest import engine as backtest_engine
 from .backtest import walkforward
@@ -140,6 +141,54 @@ def cmd_walkforward(args) -> int:
     )
     print(result.report())
     return 0
+
+
+def cmd_montecarlo(args) -> int:
+    """백테스트 매매를 재배열해 결과 분포를 본다."""
+    from .backtest.engine import PaperExchange  # noqa: F401
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+
+    # 백테스트를 돌려 매매 목록을 얻는다
+    from .backtest import engine as bt_engine
+    from .exchange.paper import PaperExchange as Paper
+
+    exchange = Paper(
+        equity=cfg.initial_equity, taker_fee=cfg.exchange.taker_fee,
+        slippage=cfg.exchange.slippage, min_size=cfg.exchange.min_order_size,
+        size_step=cfg.exchange.size_step, funding_rate=cfg.exchange.funding_rate,
+        funding_interval_hours=cfg.exchange.funding_interval_hours,
+    )
+    bt_engine.run(candles, strategy, cfg)   # 지표 계산용 (결과는 아래에서 다시 뽑는다)
+
+    trades = _collect_trades(candles, strategy, cfg)
+    log.info("매매 %d건으로 %d개 경로를 시뮬레이션합니다", len(trades), args.runs)
+    result = montecarlo.run(trades, cfg.initial_equity, runs=args.runs, seed=args.seed)
+    print(result.report())
+    return 0
+
+
+def _collect_trades(candles, strategy, cfg):
+    """백테스트를 한 번 더 돌려 체결 목록을 가져온다."""
+    from .backtest import engine as bt_engine
+
+    captured = {}
+    original = bt_engine.PaperExchange
+
+    class Capturing(original):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            captured["exchange"] = self
+
+    bt_engine.PaperExchange = Capturing
+    try:
+        bt_engine.run(candles, strategy, cfg)
+    finally:
+        bt_engine.PaperExchange = original
+    return captured["exchange"].trades
 
 
 def cmd_repaint(args) -> int:
@@ -307,6 +356,12 @@ def build_parser() -> argparse.ArgumentParser:
     wf.add_argument("--folds", type=int, default=4, help="구간 수")
     wf.add_argument("--train-ratio", type=float, default=0.7, help="구간 내 학습 비율")
     wf.set_defaults(func=cmd_walkforward)
+
+    mc = sub.add_parser("montecarlo", parents=[common], help="매매 재배열로 결과 분포 추정")
+    add_data_args(mc)
+    mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
+    mc.add_argument("--seed", type=int, default=42)
+    mc.set_defaults(func=cmd_montecarlo)
 
     rp = sub.add_parser("repaint", parents=[common], help="엘리엇 카운트 안정성 측정")
     add_data_args(rp)
