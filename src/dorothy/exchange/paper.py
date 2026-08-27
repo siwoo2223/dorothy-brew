@@ -26,6 +26,8 @@ class PaperExchange(Exchange):
         slippage: float = 0.0005,
         min_size: float = 0.0,
         size_step: float = 0.0,
+        funding_rate: float = 0.0,
+        funding_interval_hours: int = 8,
         source: Exchange | None = None,
     ) -> None:
         self.equity = equity
@@ -34,6 +36,10 @@ class PaperExchange(Exchange):
         self.slippage = slippage
         self.min_size = min_size
         self.size_step = size_step
+        self.funding_rate = funding_rate
+        self.funding_interval_ms = max(funding_interval_hours, 1) * 3_600_000
+        self._funding_accrued = 0.0
+        self._last_ts: int | None = None
         self.source = source          # 실시세를 빌려올 거래소 (없으면 수동 주입)
         self._position: Position | None = None
         self._price: float = 0.0
@@ -48,6 +54,7 @@ class PaperExchange(Exchange):
         """백테스트 엔진이 캔들을 한 개씩 밀어 넣는다."""
         self._candles.append(candle)
         self._price = candle.close
+        self._apply_funding(candle)
         self._now_ms = candle.ts
         self._check_stops(candle)
         self.equity_curve.append((candle.ts, self.total_equity()))
@@ -123,6 +130,7 @@ class PaperExchange(Exchange):
 
         fill = self._fill_price(side)
         self.equity -= fill * size * self.taker_fee
+        self._funding_accrued = 0.0
         self._position = Position(
             symbol=symbol,
             side=side,
@@ -176,11 +184,35 @@ class PaperExchange(Exchange):
                 opened_at=pos.opened_at,
                 closed_at=self._now(),
                 fee=entry_fee + exit_fee,
+                funding=self._funding_accrued,
                 reason=reason,
             )
         )
         self._position = None
+        self._funding_accrued = 0.0
         return exit_price
+
+    def _apply_funding(self, candle: Candle) -> None:
+        """이 캔들 구간에 펀딩 시각이 지나갔으면 비용을 부과한다.
+
+        펀딩은 8시간마다 정해진 시각에 오간다. 캔들 하나가 여러 펀딩 시각을
+        건너뛸 수도 있으므로(일봉 등) 지나간 횟수를 세어 한 번에 반영한다.
+
+        양수 펀딩률이면 롱이 지불하고 숏이 받는다.
+        """
+        previous, self._last_ts = self._last_ts, candle.ts
+        position = self._position
+        if position is None or self.funding_rate == 0 or previous is None:
+            return
+
+        events = candle.ts // self.funding_interval_ms - previous // self.funding_interval_ms
+        if events <= 0:
+            return
+
+        notional = abs(position.size) * candle.close
+        charge = notional * self.funding_rate * events * position.side.sign
+        self.equity -= charge
+        self._funding_accrued += charge
 
     def _check_stops(self, candle: Candle) -> None:
         """캔들 고저가로 손절/익절 도달을 판정한다.

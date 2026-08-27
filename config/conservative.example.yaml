@@ -36,6 +36,12 @@ exchange:
   min_order_size: 0.0001          # live에서는 거래소 실제 값으로 덮어씁니다
   size_step: 0.0001
 
+  # 무기한 선물은 8시간마다 펀딩비가 오갑니다. 롱이 내고 숏이 받습니다.
+  # 롱 전용 전략이면 큰 비용입니다 — 실측상 0.10% 구간에서 수익의 70%가 날아갑니다.
+  # 롱/숏 양방향이면 대체로 상쇄됩니다(아래 allow_short: true 를 유지하는 이유 중 하나).
+  funding_rate: 0.0001            # 8시간당 0.01%. 추세장에는 0.03~0.10%까지 갑니다
+  funding_interval_hours: 8
+
 risk:
   risk_per_trade: 0.01            # 1회 1%. 10연패해도 계좌의 10%입니다
   max_position_pct: 0.30

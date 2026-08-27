@@ -27,6 +27,12 @@ class ExchangeConfig:
     # live 모드에서는 거래소가 알려주는 실제 값으로 덮어쓴다.
     min_order_size: float = 0.0001  # Bitget BTCUSDT 무기한 기준
     size_step: float = 0.0001       # 수량 단위 (이 배수만 주문 가능)
+    # 무기한 선물은 8시간마다 펀딩비가 오간다. 포지션을 하루 이상 들고 가는
+    # 전략에서는 왕복 수수료에 맞먹는 비용이 된다. 반영하지 않으면
+    # 백테스트가 낙관적으로 나온다.
+    # 양수면 롱이 숏에게 지불한다. 추세장에서는 0.05%~0.1%까지 치솟기도 한다.
+    funding_rate: float = 0.0001    # 8시간당 0.01% (평상시 근사치)
+    funding_interval_hours: int = 8
 
 
 @dataclass
