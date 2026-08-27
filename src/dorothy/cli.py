@@ -182,6 +182,30 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_metalabel(args) -> int:
+    """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
+    from .ml.meta import build_dataset, train
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+
+    print(f"표본을 만드는 중… (캔들 {len(candles)}개, 봉마다 신호 판정)")
+    samples = build_dataset(candles, strategy, max_bars=args.max_bars, step=args.step)
+    print(f"표본 {len(samples)}개")
+    if len(samples) < 60:
+        print("표본이 너무 적습니다. 기간을 늘리거나 신호가 잦은 전략을 쓰세요.")
+        return 1
+
+    result = train(
+        samples, candles=candles, config=cfg, folds=args.folds,
+        embargo_bars=args.embargo, threshold=args.threshold, seed=args.seed,
+    )
+    print(result.report())
+    return 0
+
+
 def cmd_montecarlo(args) -> int:
     """백테스트 매매를 재배열해 결과 분포를 본다."""
     from .backtest.engine import PaperExchange  # noqa: F401
@@ -416,6 +440,17 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    ml = sub.add_parser("metalabel", parents=[common],
+                        help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")
+    add_data_args(ml)
+    ml.add_argument("--folds", type=int, default=4, help="워크포워드 구간 수")
+    ml.add_argument("--embargo", type=int, default=24, help="검증 구간 앞 격리 봉 수")
+    ml.add_argument("--threshold", type=float, default=0.55, help="신호를 취할 확률 기준")
+    ml.add_argument("--max-bars", type=int, default=168, help="삼중 배리어 시간 한도(봉)")
+    ml.add_argument("--step", type=int, default=1, help="표본 추출 간격(봉)")
+    ml.add_argument("--seed", type=int, default=42)
+    ml.set_defaults(func=cmd_metalabel)
 
     rp = sub.add_parser("repaint", parents=[common], help="엘리엇 카운트 안정성 측정")
     add_data_args(rp)

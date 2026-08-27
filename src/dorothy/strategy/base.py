@@ -10,13 +10,21 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from abc import ABC, abstractmethod
 
 from ..models import Candle, Position, Signal
 
+log = logging.getLogger(__name__)
+
 
 class Strategy(ABC):
     name: str = "base"
+
+    #: 실제 데이터에서 손실이 확인된 전략은 여기에 이유를 적는다.
+    #: 코드를 지우지 않는 이유: 새 전략이 이것보다 나은지 재보려면 기준선이 필요하다.
+    #: 대신 고를 때마다 경고가 뜨고, 기본 설정에서는 빠진다.
+    retired: str = ""
 
     def __init__(self, **params) -> None:
         self.params = params
@@ -64,8 +72,16 @@ def load_all() -> dict[str, type[Strategy]]:
     return dict(_REGISTRY)
 
 
-def available() -> list[str]:
-    return sorted(load_all())
+def available(include_retired: bool = True) -> list[str]:
+    strategies = load_all()
+    if include_retired:
+        return sorted(strategies)
+    return sorted(n for n, cls in strategies.items() if not cls.retired)
+
+
+def retired() -> dict[str, str]:
+    """폐기된 전략과 그 이유. 기준선으로만 쓴다."""
+    return {n: cls.retired for n, cls in sorted(load_all().items()) if cls.retired}
 
 
 def get_strategy(name: str, **params) -> Strategy:
@@ -75,6 +91,9 @@ def get_strategy(name: str, **params) -> Strategy:
         raise KeyError(f"알 수 없는 전략: {name} (사용 가능: {sorted(_REGISTRY)})")
 
     cls = _REGISTRY[name]
+    if cls.retired:
+        log.warning("전략 '%s'은(는) 폐기되었습니다 — %s", name, cls.retired)
+
     # 모르는 파라미터를 조용히 삼키면 설정 파일 오타가 영원히 드러나지 않는다.
     # (실제로 이것 때문에 제거 실험이 전 항목 동일한 결과를 냈다)
     unknown = set(params) - known_params(cls)
