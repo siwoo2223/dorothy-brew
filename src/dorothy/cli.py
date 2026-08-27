@@ -182,6 +182,17 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_costfloor(args) -> int:
+    """이 타임프레임에서 수수료를 넘는 것이 애초에 가능한지 본다."""
+    from .backtest import cost_floor
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    print(cost_floor.analyse(candles, cfg, timeframes=tuple(args.timeframes)).report())
+    return 0
+
+
 def cmd_leverage(args) -> int:
     """배율을 올리면 정말 더 버는지 — 변동성 드래그·펀딩비·청산까지 넣고 잰다."""
     from .backtest.leverage import analyse_leverage
@@ -490,6 +501,14 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    cf = sub.add_parser("costfloor", parents=[common],
+                        help="타임프레임별 손익분기 승률 — 애초에 가능한가")
+    add_data_args(cf)
+    cf.add_argument("--timeframes", nargs="+",
+                    default=["1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d"],
+                    help="비교할 타임프레임들 (원본보다 짧은 것은 건너뜁니다)")
+    cf.set_defaults(func=cmd_costfloor)
 
     lv2 = sub.add_parser("leverage", parents=[common],
                          help="배율별 수익·낙폭·펀딩·청산 비교")
