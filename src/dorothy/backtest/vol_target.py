@@ -90,6 +90,66 @@ def realized_vol(candles: list[Candle], index: int, lookback: int) -> float | No
     return spread if spread > 0 else None
 
 
+class _RollingVol:
+    """누적합으로 굴리는 실현 변동성. realized_vol과 같은 값을 O(1)에 낸다.
+
+    매 봉마다 lookback개를 다시 더하면 O(n·lookback)이 된다. 8년치 시간봉에
+    lookback 120이면 900만 번이라, 타임프레임을 전부 훑는 것이 불가능해진다.
+
+    ⚠ 누적합 방식은 부동소수 오차가 쌓인다. 값이 어긋나면 결론이 조용히
+       바뀌므로, 테스트에서 realized_vol과 일치하는지 확인한다.
+    """
+
+    __slots__ = ("_rets", "_sum", "_sumsq", "_lookback")
+
+    def __init__(self, candles: list[Candle], lookback: int) -> None:
+        self._lookback = lookback
+        self._rets: list[float | None] = [None]
+        for prev, now in zip(candles, candles[1:]):
+            ok = prev.close > 0 and now.close > 0
+            self._rets.append(math.log(now.close / prev.close) if ok else None)
+
+        self._sum = [0.0] * (len(self._rets) + 1)
+        self._sumsq = [0.0] * (len(self._rets) + 1)
+        for i, r in enumerate(self._rets):
+            value = r or 0.0
+            self._sum[i + 1] = self._sum[i] + value
+            self._sumsq[i + 1] = self._sumsq[i] + value * value
+
+    def at(self, index: int) -> float | None:
+        """index 시점까지 lookback개 수익률의 표준편차."""
+        start = index - self._lookback
+        if start < 1:
+            return None
+        count = index - start + 1
+        if count < 3:
+            return None
+        window = self._rets[start : index + 1]
+        # 결측이 섞이면 정확도를 위해 원래 방식으로 돌아간다 (드물다)
+        if any(r is None for r in window):
+            values = [r for r in window if r is not None]
+            if len(values) < 3:
+                return None
+            spread = statistics.pstdev(values)
+            return spread if spread > 0 else None
+
+        total = self._sum[index + 1] - self._sum[start]
+        total_sq = self._sumsq[index + 1] - self._sumsq[start]
+        mean = total / count
+        var = total_sq / count - mean * mean
+
+        # E[x²] − E[x]² 는 분산이 평균 제곱에 비해 아주 작을 때 자릿수가 날아간다.
+        # 추세가 강하고 잔파동이 없는 구간이 정확히 그렇다. 그러면 분산이 0이나
+        # 음수로 나와 배율이 상한까지 튀는데, 그게 조용히 결론을 바꾼다.
+        # 그런 구간에서만 두 번 훑는 방식으로 되돌아간다 (드물어서 비용은 없다).
+        if var <= 0 or var < 1e-6 * mean * mean:
+            spread = statistics.pstdev(window)
+            return spread if spread > 0 else None
+
+        spread = math.sqrt(var)
+        return spread if spread > 0 else None
+
+
 @dataclass
 class VolTargetResult:
     hold: Curve
@@ -100,6 +160,7 @@ class VolTargetResult:
     bars_per_year: float
     rebalance_band: float
     venue: str = "spot"
+    start_index: int = 0        # 평가를 시작한 봉. 비교하려면 이게 같아야 한다
 
     def report(self) -> str:
         lines = [
@@ -176,6 +237,7 @@ def analyse(
     max_leverage: float = 3.0,
     rebalance_band: float = 0.10,
     venue: str = "spot",
+    start_index: int | None = None,
     bars_per_year: float | None = None,
 ) -> VolTargetResult:
     """계속 롱으로 들고 있되, 수량만 변동성에 반비례시킨다.
@@ -186,6 +248,12 @@ def analyse(
     venue="spot"이면 1배까지는 현물로 들고 있다고 보아 펀딩비를 물리지 않는다.
     "perp"면 전체 노출에 문다. 벤치마크(매수 후 보유)와 조건을 맞추려면
     spot이 맞다 — 현물을 그냥 들고 있는 사람은 펀딩비를 내지 않는다.
+
+    start_index를 주면 평가를 그 봉부터 시작한다. 변동성 추정에는 그 이전 봉을
+    쓴다. **lookback이 다른 설정들을 비교할 때 반드시 필요하다.**
+    안 주면 lookback+1부터 시작하는데, 그러면 lookback이 길수록 앞부분을 더
+    건너뛰어 **설정마다 평가 기간이 달라진다.** 실제로 그것 때문에 매수 후 보유
+    기준선이 +365%에서 +822%까지 움직였고, 승률 비교가 통째로 무의미해졌다.
     """
     if venue not in ("spot", "perp"):
         raise ValueError(f"venue는 spot 또는 perp여야 합니다: {venue}")
@@ -211,11 +279,17 @@ def analyse(
         """
         return w if venue == "perp" else max(0.0, w - 1.0)
 
+    rolling = _RollingVol(candles, lookback)
     hold = Curve("매수 후 보유", [1.0])
     targeted = Curve(f"변동성 타게팅", [1.0])
     weight = 0.0
 
-    start = lookback + 1
+    start = lookback + 1 if start_index is None else max(start_index, lookback + 1)
+    if start >= len(candles):
+        raise ValueError(
+            f"start_index({start})가 데이터 길이({len(candles)})를 넘습니다. "
+            "lookback을 줄이거나 데이터를 늘리세요."
+        )
     for i in range(start, len(candles)):
         prev, now = candles[i - 1].close, candles[i].close
         if prev <= 0:
@@ -226,7 +300,7 @@ def analyse(
         hold.weights.append(1.0)
 
         # 배율은 **직전 봉까지의** 변동성으로 정한다. 현재 봉을 보면 미래참조다.
-        spread = realized_vol(candles, i - 1, lookback)
+        spread = rolling.at(i - 1)
         wanted = 0.0 if spread is None else min(bar_vol_target / spread, max_leverage)
 
         if weight == 0.0 or abs(wanted - weight) > rebalance_band * max(weight, 1e-9):
@@ -244,5 +318,5 @@ def analyse(
 
     return VolTargetResult(
         hold, targeted, target_vol, lookback, max_leverage, bars_per_year,
-        rebalance_band, venue,
+        rebalance_band, venue, start,
     )

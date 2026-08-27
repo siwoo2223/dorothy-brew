@@ -7,7 +7,7 @@
 import math
 import unittest
 
-from dorothy.backtest.vol_target import Curve, analyse, realized_vol
+from dorothy.backtest.vol_target import _RollingVol, Curve, analyse, realized_vol
 from dorothy.config import Config
 from dorothy.models import Candle
 
@@ -41,6 +41,67 @@ class RealizedVolTests(unittest.TestCase):
         before = realized_vol(candles, 50, 30)
         shaken = series(closes[:51] + [c * 3 for c in closes[51:]])
         self.assertEqual(before, realized_vol(shaken, 50, 30))
+
+
+class RollingVolTests(unittest.TestCase):
+    """빠른 구현이 느린 구현과 같은 값을 내는지. 어긋나면 결론이 조용히 바뀐다."""
+
+    def test_matches_the_direct_computation(self):
+        import math
+        closes = [100 * (1 + 0.01 * math.sin(i * 0.7)) for i in range(500)]
+        candles = series(closes)
+        for lookback in (10, 30, 120):
+            rolling = _RollingVol(candles, lookback)
+            for index in range(0, 500, 17):
+                direct = realized_vol(candles, index, lookback)
+                fast = rolling.at(index)
+                if direct is None:
+                    self.assertIsNone(fast, f"lookback={lookback} index={index}")
+                else:
+                    self.assertAlmostEqual(direct, fast, places=10,
+                                           msg=f"lookback={lookback} index={index}")
+
+    def test_matches_on_a_pure_trend(self):
+        """잔파동 없이 일정 비율로만 오르는 구간. 분산이 사실상 0이라
+        누적합 방식은 여기서 자릿수가 날아간다. 실제로 이 테스트가 그 버그를 잡았다.
+        배율은 변동성에 반비례하므로, 분산이 0으로 잘못 나오면 상한까지 튄다."""
+        candles = series([100 * (1.003 ** i) for i in range(400)])
+        rolling = _RollingVol(candles, 60)
+        for index in (100, 200, 300, 399):
+            direct = realized_vol(candles, index, 60)
+            fast = rolling.at(index)
+            if direct is None:
+                self.assertIsNone(fast, f"index={index}")
+            else:
+                self.assertAlmostEqual(direct, fast, places=12, msg=f"index={index}")
+
+    def test_matches_when_trend_dwarfs_the_wobble(self):
+        """추세가 크고 잔파동이 작을수록 자릿수 소실이 심해진다."""
+        import math
+        for wobble in (1e-3, 1e-5, 1e-7):
+            closes, price = [], 100.0
+            for i in range(300):
+                price *= 1.005 + (wobble if i % 2 else -wobble)
+                closes.append(price)
+            candles = series(closes)
+            rolling = _RollingVol(candles, 60)
+            for index in (150, 250):
+                direct = realized_vol(candles, index, 60)
+                fast = rolling.at(index)
+                self.assertIsNotNone(fast, f"wobble={wobble}")
+                self.assertAlmostEqual(
+                    direct, fast, delta=direct * 1e-6,
+                    msg=f"wobble={wobble} index={index}: {direct} vs {fast}")
+
+    def test_flat_series_gives_none_both_ways(self):
+        candles = series([100] * 200)
+        rolling = _RollingVol(candles, 30)
+        self.assertIsNone(rolling.at(100))
+        self.assertIsNone(realized_vol(candles, 100, 30))
+
+    def test_none_before_enough_history(self):
+        candles = series([100 + i for i in range(200)])
+        self.assertIsNone(_RollingVol(candles, 30).at(2))
 
 
 class CurveTests(unittest.TestCase):
@@ -166,6 +227,45 @@ class AnalyseTests(unittest.TestCase):
         free = analyse(candles, cfg, venue="perp", rebalance_band=0.0)
         paid = analyse(candles, self.cfg, venue="perp", rebalance_band=0.0)
         self.assertGreater(free.targeted.return_pct, paid.targeted.return_pct)
+
+    def test_start_index_makes_baselines_comparable(self):
+        """lookback이 달라도 start_index를 맞추면 매수 후 보유가 같아야 한다.
+
+        이게 안 맞으면 lookback이 긴 설정이 앞부분(폭락 구간)을 더 건너뛰어
+        더 유리한 기간을 보게 되고, 승률 비교가 통째로 무의미해진다.
+        실제로 그 결함 때문에 매수 후 보유 기준선이 +365%에서 +822%까지 움직였다.
+        """
+        candles = self.wobble(1500, 0.01, drift=0.0003)
+        short = analyse(candles, self.cfg, lookback=30, start_index=400)
+        long_ = analyse(candles, self.cfg, lookback=240, start_index=400)
+        self.assertAlmostEqual(short.hold.return_pct, long_.hold.return_pct, places=8)
+        self.assertAlmostEqual(short.hold.max_drawdown_pct,
+                               long_.hold.max_drawdown_pct, places=8)
+        self.assertEqual(short.start_index, long_.start_index)
+
+    def test_without_start_index_baselines_diverge(self):
+        """start_index를 안 주면 실제로 어긋난다는 것도 못 박아 둔다."""
+        candles = self.wobble(1500, 0.01, drift=0.0003)
+        short = analyse(candles, self.cfg, lookback=30)
+        long_ = analyse(candles, self.cfg, lookback=240)
+        self.assertNotAlmostEqual(short.hold.return_pct, long_.hold.return_pct, places=2)
+
+    def test_start_index_below_lookback_is_raised_to_it(self):
+        candles = self.wobble(600, 0.01)
+        result = analyse(candles, self.cfg, lookback=100, start_index=10)
+        self.assertEqual(result.start_index, 101)
+
+    def test_start_index_past_the_data_is_rejected(self):
+        candles = self.wobble(300, 0.01)
+        with self.assertRaises(ValueError):
+            analyse(candles, self.cfg, lookback=30, start_index=5000)
+
+    def test_volatility_estimate_uses_bars_before_the_start(self):
+        """워밍업 구간은 평가에서 빠지되 변동성 추정에는 쓰여야 한다.
+        첫 봉부터 배율이 0이 아니어야 그게 확인된다."""
+        candles = self.wobble(800, 0.01)
+        result = analyse(candles, self.cfg, lookback=200, start_index=400)
+        self.assertGreater(result.targeted.weights[0], 0.0)
 
     def test_report_renders(self):
         result = analyse(self.wobble(400, 0.01), self.cfg)
