@@ -182,6 +182,20 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_leverage(args) -> int:
+    """배율을 올리면 정말 더 버는지 — 변동성 드래그·펀딩비·청산까지 넣고 잰다."""
+    from .backtest.leverage import analyse_leverage
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    print(analyse_leverage(
+        candles, cfg, levels=tuple(args.levels), target_vol=args.target_vol,
+        lookback=args.lookback, rebalance_band=args.band,
+    ).report())
+    return 0
+
+
 def cmd_voltarget(args) -> int:
     """방향을 맞히지 않고 변동성에 반비례해 노출만 조절했을 때를 본다."""
     from .backtest import vol_target
@@ -476,6 +490,16 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    lv2 = sub.add_parser("leverage", parents=[common],
+                         help="배율별 수익·낙폭·펀딩·청산 비교")
+    add_data_args(lv2)
+    lv2.add_argument("--levels", type=float, nargs="+",
+                     default=[1.0, 1.25, 1.5, 2.0, 3.0], help="비교할 배율들")
+    lv2.add_argument("--target-vol", type=float, default=0.50)
+    lv2.add_argument("--lookback", type=int, default=120)
+    lv2.add_argument("--band", type=float, default=0.30)
+    lv2.set_defaults(func=cmd_leverage)
 
     vt = sub.add_parser("voltarget", parents=[common],
                         help="변동성 타게팅 — 방향 예측 없이 노출만 조절")

@@ -267,6 +267,43 @@ class AnalyseTests(unittest.TestCase):
         result = analyse(candles, self.cfg, lookback=200, start_index=400)
         self.assertGreater(result.targeted.weights[0], 0.0)
 
+    def test_leverage_cannot_go_below_zero_equity(self):
+        """청산되면 자본은 0에서 멈춘다. 마이너스로 가면 그 뒤 반등에
+        파산한 계좌가 되살아나 레버리지 비교가 통째로 허구가 된다."""
+        crash = series([100] * 50 + [30] + [100] * 50)
+        result = analyse(crash, self.cfg, lookback=30, max_leverage=3.0,
+                         hold_leverage=3.0)
+        self.assertGreaterEqual(min(result.hold.equity), 0.0)
+        self.assertGreaterEqual(min(result.targeted.equity), 0.0)
+
+    def test_ruin_is_recorded_and_final(self):
+        crash = series([100] * 50 + [40] + [100] * 50)
+        result = analyse(crash, self.cfg, lookback=30, hold_leverage=3.0)
+        self.assertTrue(result.hold.ruined)
+        self.assertEqual(result.hold.equity[-1], 0.0)
+
+    def test_no_ruin_flag_when_survived(self):
+        result = analyse(self.wobble(400, 0.01), self.cfg, hold_leverage=1.0)
+        self.assertFalse(result.hold.ruined)
+
+    def test_hold_leverage_scales_the_benchmark(self):
+        candles = series([100 * (1.002 ** i) for i in range(400)])
+        one = analyse(candles, self.cfg, lookback=30, hold_leverage=1.0)
+        two = analyse(candles, self.cfg, lookback=30, hold_leverage=2.0)
+        self.assertGreater(two.hold.return_pct, one.hold.return_pct)
+        self.assertEqual(two.hold.weights[0], 2.0)
+
+    def test_hold_leverage_pays_funding_above_one_times(self):
+        candles = self.wobble(400, 0.01)
+        one = analyse(candles, self.cfg, lookback=30, hold_leverage=1.0)
+        two = analyse(candles, self.cfg, lookback=30, hold_leverage=2.0)
+        self.assertEqual(one.hold.funding_paid, 0.0)
+        self.assertGreater(two.hold.funding_paid, 0.0)
+
+    def test_rejects_nonpositive_hold_leverage(self):
+        with self.assertRaises(ValueError):
+            analyse(self.wobble(200, 0.01), self.cfg, hold_leverage=0.0)
+
     def test_report_renders(self):
         result = analyse(self.wobble(400, 0.01), self.cfg)
         report = result.report()

@@ -37,6 +37,7 @@ class Curve:
     funding_paid: float = 0.0
     rebalances: int = 0
     weights: list[float] = field(default_factory=list)
+    ruined: bool = False        # 청산으로 자본이 0이 된 적이 있는가
 
     @property
     def return_pct(self) -> float:
@@ -72,6 +73,23 @@ class Curve:
         if len(rets) < 3:
             return 0.0
         return statistics.pstdev(rets) * math.sqrt(bars_per_year) * 100
+
+
+def _step(curve: Curve, equity: float, weight: float, change: float, funding: float) -> float:
+    """한 봉 뒤의 자본. **청산을 넘어 마이너스로 가지 않는다.**
+
+    배율 2배로 들고 있는데 가격이 50% 빠지면 자본은 0이 된다. 그 아래로는
+    갈 수 없다 — 거래소가 청산한다. 단순히 곱하기만 하면 자본이 음수가 되고,
+    그 뒤에 가격이 반등하면 **파산한 계좌가 되살아나** 레버리지 비교가
+    통째로 허구가 된다. 레버리지 표를 만들려면 이게 먼저 맞아야 한다.
+    """
+    if equity <= 0:
+        return 0.0
+    after = equity * (1 + weight * change - funding)
+    if after <= 0:
+        curve.ruined = True
+        return 0.0
+    return after
 
 
 def realized_vol(candles: list[Candle], index: int, lookback: int) -> float | None:
@@ -237,6 +255,7 @@ def analyse(
     max_leverage: float = 3.0,
     rebalance_band: float = 0.10,
     venue: str = "spot",
+    hold_leverage: float = 1.0,
     start_index: int | None = None,
     bars_per_year: float | None = None,
 ) -> VolTargetResult:
@@ -257,6 +276,8 @@ def analyse(
     """
     if venue not in ("spot", "perp"):
         raise ValueError(f"venue는 spot 또는 perp여야 합니다: {venue}")
+    if hold_leverage <= 0:
+        raise ValueError(f"hold_leverage는 0보다 커야 합니다: {hold_leverage}")
     interval_ms = candles[1].ts - candles[0].ts if len(candles) > 1 else 3600_000
     if bars_per_year is None:
         bars_per_year = 365.25 * 24 * 3600_000 / interval_ms
@@ -280,7 +301,8 @@ def analyse(
         return w if venue == "perp" else max(0.0, w - 1.0)
 
     rolling = _RollingVol(candles, lookback)
-    hold = Curve("매수 후 보유", [1.0])
+    hold_label = "매수 후 보유" if hold_leverage == 1.0 else f"매수 후 보유 {hold_leverage:g}x"
+    hold = Curve(hold_label, [1.0])
     targeted = Curve(f"변동성 타게팅", [1.0])
     weight = 0.0
 
@@ -296,8 +318,12 @@ def analyse(
             continue
         change = now / prev - 1
 
-        hold.equity.append(hold.equity[-1] * (1 + change))
-        hold.weights.append(1.0)
+        hold_funding = funded_notional(hold_leverage) * funding_per_bar
+        hold.funding_paid += hold_funding * 100
+        hold.equity.append(
+            _step(hold, hold.equity[-1], hold_leverage, change, hold_funding)
+        )
+        hold.weights.append(hold_leverage)
 
         # 배율은 **직전 봉까지의** 변동성으로 정한다. 현재 봉을 보면 미래참조다.
         spread = rolling.at(i - 1)
@@ -313,7 +339,7 @@ def analyse(
 
         funding = funded_notional(weight) * funding_per_bar
         targeted.funding_paid += funding * 100
-        targeted.equity.append(targeted.equity[-1] * (1 + weight * change - funding))
+        targeted.equity.append(_step(targeted, targeted.equity[-1], weight, change, funding))
         targeted.weights.append(weight)
 
     return VolTargetResult(
