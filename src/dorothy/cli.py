@@ -182,6 +182,15 @@ def cmd_regime(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """실행 전 점검 — 뭐가 빠졌는지 먼저 알려준다."""
+    from . import doctor
+
+    checks = doctor.run(args.config, check_network=not args.offline)
+    print(doctor.report(checks))
+    return 0 if all(c.ok or not c.fatal for c in checks) else 1
+
+
 def cmd_collect(args) -> int:
     """거래소 체결·호가를 실시간으로 모은다. API 키가 필요 없습니다."""
     from .collect.runner import CollectSpec, run
@@ -572,6 +581,11 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--runs", type=int, default=5000, help="시뮬레이션 경로 수")
     mc.add_argument("--seed", type=int, default=42)
     mc.set_defaults(func=cmd_montecarlo)
+
+    dr = sub.add_parser("doctor", parents=[common],
+                        help="실행 전 점검 — 의존성·설정·거래소 연결")
+    dr.add_argument("--offline", action="store_true", help="네트워크 점검 건너뛰기")
+    dr.set_defaults(func=cmd_doctor)
 
     co = sub.add_parser("collect", parents=[common],
                         help="실시간 체결·호가 수집 (websockets 필요, API 키 불필요)")

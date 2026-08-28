@@ -11,6 +11,17 @@ Bitget USDT 무기한선물 자동매매 봇의 골격입니다.
 
 ---
 
+## 내 컴퓨터에서 돌리기
+
+실시간 페이퍼 트레이딩까지 가는 순서는 **[RUNNING.md](RUNNING.md)**에 있습니다.
+단계마다 확인 방법을 같이 적어뒀고, 시작하기 전에 `doctor`로 환경을 점검할 수 있습니다.
+
+```bash
+PYTHONPATH=src python3 -m dorothy.cli doctor --config config/config.yaml
+```
+
+---
+
 ## 30초 확인
 
 설치할 것 없이 바로 돌아갑니다 (Python 3.10+).
@@ -19,7 +30,7 @@ Bitget USDT 무기한선물 자동매매 봇의 골격입니다.
 ./scripts/quickstart.sh
 ```
 
-테스트 694개 → 백테스트 → 페이퍼 트레이딩 → 진단 → 전략 비교 → 워크포워드 검증까지
+테스트 719개 → 백테스트 → 페이퍼 트레이딩 → 진단 → 전략 비교 → 워크포워드 검증까지
 한 번에 돕니다.
 
 ---
