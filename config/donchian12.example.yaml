@@ -1,0 +1,43 @@
+# 이 저장소에서 손절·수수료를 제대로 넣고 |t| >= 2를 넘긴 유일한 설정입니다.
+#
+#   12시간봉 · 291건 · 1회 +1.1983% · t=2.87 · 손절률 47%
+#   1% 리스크 사이징 기준 8.6년 +37.31%, MDD 5.9%
+#
+# 검증한 것
+#   채널 7개 중 5개 통과 (단조 증가, 40은 봉우리가 아니라 고원 한가운데)
+#   타임프레임 6개 중 5개 통과 (단조 증가, 수수료 바닥선으로 설명됨)
+#   롱 전용이 롱숏보다 나음 (t=2.87 vs 1.85)
+#
+# ⚠ 남은 우려: 후반(2022~2026) t=1.20으로 약합니다.
+#    연도별 기울기 t=-1.52라 '줄고 있다'고 단정할 수는 없지만
+#    안심할 수도 없습니다. 큰 추세가 있던 해에 수익이 몰려 있습니다.
+#
+# ⚠ 실시간 검증을 하지 않았습니다. 페이퍼 트레이딩부터 하세요.
+#    12시간봉이라 의미 있는 표본이 쌓이는 데 몇 달 걸립니다.
+#
+# ⚠ 분할 주문(scaled order)을 붙이지 마세요. 재봤더니 깊게 깔수록
+#    단조롭게 나빠집니다 — 돌파 신호에서 되돌림을 기다리면 이길 때
+#    작게, 질 때 크게 실립니다.
+#
+# ⚠ API 키는 여기 적지 마세요. 환경변수(.env)로만 넣습니다.
+
+mode: backtest
+initial_equity: 200.0
+exchange:
+  name: bitget
+  symbol: "BTC/USDT:USDT"
+  timeframe: "12h"
+  leverage: 2.0
+  taker_fee: 0.0006
+  maker_fee: 0.0002
+  slippage: 0.0005
+risk:
+  risk_per_trade: 0.01
+  max_daily_loss_pct: 0.03
+  max_consecutive_losses: 4
+  max_open_positions: 1
+strategy:
+  name: donchian
+  params:
+    channel: 40
+    allow_short: false
