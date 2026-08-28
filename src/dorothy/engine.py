@@ -47,7 +47,15 @@ class TradingEngine:
         self.notifier = notifier or Notifier(
             config.telegram_token, config.telegram_chat_id, enabled=config.notify.telegram_enabled
         )
-        self.risk = RiskManager(config.risk, kill_switch_file=config.kill_switch_file)
+        # 리플레이에서는 캔들 시각이 '지금'이어야 한다. 벽시계를 쓰면 8.6년치를
+        # 몇 초에 재생하는 동안 전체가 하루로 취급되어, 일일 손실 한도와 연속 손실이
+        # 한 번 걸리면 영영 안 풀린다 — 실제로 체결이 142건에서 76건으로 줄었다.
+        self._replay_clock = False
+        self.risk = RiskManager(
+            config.risk,
+            kill_switch_file=config.kill_switch_file,
+            clock=self._now_ms,
+        )
         self.executor = Executor(
             exchange,
             self.risk,
@@ -59,6 +67,12 @@ class TradingEngine:
         self._running = False
         self._last_candle_ts = 0
         self._reported_trades = 0
+
+    def _now_ms(self) -> int:
+        """리스크 판정의 '지금'. 리플레이면 캔들 시각, 실시간이면 벽시계."""
+        if self._replay_clock and self._last_candle_ts:
+            return self._last_candle_ts
+        return int(time.time() * 1000)
 
     # --- 수명주기 --------------------------------------------------------
     def _install_signal_handlers(self) -> None:
@@ -128,7 +142,11 @@ class TradingEngine:
 
         실시간 루프와 같은 코드 경로를 타므로, 여기서 터지는 버그는 실전에서도 터진다.
         """
-        self.risk.state.consecutive_losses = self.journal.consecutive_losses()
+        # 리플레이는 캔들 시각을 '지금'으로 쓴다 (위 _now_ms 참고).
+        self._replay_clock = True
+        # 저장된 일지에서 연속 손실을 읽으면 **이전 실행 결과가 새어 들어온다.**
+        # 리플레이는 매번 깨끗한 상태에서 시작해야 결과를 비교할 수 있다.
+        self.risk.state.consecutive_losses = 0
         account = self.exchange.fetch_account()
         self.risk.roll_day(account.equity)
         log.info("오프라인 리플레이 시작 (자본 %.2f)", account.equity)

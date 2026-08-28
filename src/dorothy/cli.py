@@ -411,6 +411,12 @@ def cmd_paper(args) -> int:
             equity=cfg.initial_equity,
             taker_fee=cfg.exchange.taker_fee,
             slippage=cfg.exchange.slippage,
+            # 펀딩비·최소 주문 수량을 빠뜨리면 페이퍼가 백테스트보다 좋게 나온다.
+            # 실전 직전에 딱 속기 좋은 자리다 (실제로 자본이 4.8% 부풀었다).
+            funding_rate=cfg.exchange.funding_rate,
+            funding_interval_hours=cfg.exchange.funding_interval_hours,
+            min_size=cfg.exchange.min_order_size,
+            size_step=cfg.exchange.size_step,
         )
         cfg.poll_interval_sec = 0
         log.warning("오프라인 리플레이 모드 — 저장된 캔들을 최대 속도로 재생합니다.")
@@ -422,6 +428,10 @@ def cmd_paper(args) -> int:
             equity=cfg.initial_equity,
             taker_fee=cfg.exchange.taker_fee,
             slippage=cfg.exchange.slippage,
+            funding_rate=cfg.exchange.funding_rate,
+            funding_interval_hours=cfg.exchange.funding_interval_hours,
+            min_size=cfg.exchange.min_order_size,
+            size_step=cfg.exchange.size_step,
             source=source,
         )
 
