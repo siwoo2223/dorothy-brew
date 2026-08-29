@@ -76,6 +76,17 @@ class Journal:
         )
         return float(cur.fetchone()["s"])
 
+    def peak_equity(self) -> float:
+        """기록된 최고 자본.
+
+        재시작할 때 이 값을 복구하지 않으면 **고점 대비 낙폭 한도가
+        재시작으로 초기화된다.** 고점에서 15% 내려온 상태에서 봇을 다시
+        켜면 그 자리가 새 고점이 되어 한도가 영영 안 걸린다.
+        연속 손실 카운터를 복구하는 이유와 같다.
+        """
+        row = self.conn.execute("SELECT MAX(equity) FROM equity").fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
+
     def consecutive_losses(self) -> int:
         """재시작 후 연속 손실 카운터 복구용."""
         cur = self.conn.execute(

@@ -92,6 +92,9 @@ class TradingEngine:
 
         # 재시작 시 연속 손실 카운터 복구 (재시작으로 한도를 초기화하면 안 된다)
         self.risk.state.consecutive_losses = self.journal.consecutive_losses()
+        # 고점도 같은 이유로 복구한다. 안 하면 고점에서 15% 내려온 상태로
+        # 재시작했을 때 그 자리가 새 고점이 되어 낙폭 한도가 영영 안 걸린다.
+        self.risk.state.peak_equity = self.journal.peak_equity()
 
         account = self.exchange.fetch_account()
         self.risk.roll_day(account.equity)

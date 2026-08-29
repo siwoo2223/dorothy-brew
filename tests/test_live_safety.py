@@ -246,3 +246,158 @@ class TestEquityFallback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PeakEquityRestoreTests(unittest.TestCase):
+    """재시작이 낙폭 한도를 초기화하면 안 된다.
+
+    고점에서 15% 내려온 상태로 봇을 다시 켰을 때 그 자리가 새 고점이 되면,
+    한도가 영영 안 걸린다. 연속 손실 카운터를 복구하는 이유와 같다.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.dir.name) / "j.db"
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def journal(self):
+        from dorothy.journal.store import Journal
+
+        return Journal(self.path)
+
+    def test_empty_journal_reports_zero(self):
+        j = self.journal()
+        self.assertEqual(j.peak_equity(), 0.0)
+        j.close()
+
+    def test_reports_the_highest_value_ever_seen(self):
+        j = self.journal()
+        for ts, equity in ((1, 1000.0), (2, 1500.0), (3, 1200.0)):
+            j.record_equity(ts, equity)
+        self.assertEqual(j.peak_equity(), 1500.0)
+        j.close()
+
+    def test_peak_survives_reopening(self):
+        j = self.journal()
+        j.record_equity(1, 2000.0)
+        j.close()
+        j2 = self.journal()
+        self.assertEqual(j2.peak_equity(), 2000.0)
+        j2.close()
+
+    def test_engine_restores_the_peak_on_start(self):
+        """이게 핵심이다. 재시작 후에도 예전 고점 대비로 판정해야 한다."""
+        from dorothy.config import Config
+        from dorothy.data.loader import synthetic
+        from dorothy.engine import TradingEngine
+        from dorothy.exchange.paper import ReplayExchange
+        from dorothy.strategy.base import get_strategy
+
+        j = self.journal()
+        j.record_equity(1, 5000.0)          # 예전 고점
+        j.close()
+
+        cfg = Config()
+        cfg.db_path = str(self.path)
+        cfg.initial_equity = 4000.0          # 고점에서 20% 내려온 상태로 재시작
+        cfg.poll_interval_sec = 0
+        cfg.risk.max_drawdown_pct = 0.15
+        cfg.strategy.name = "donchian"
+        cfg.strategy.params = {"channel": 20}
+
+        exchange = ReplayExchange(synthetic(300, seed=3), equity=cfg.initial_equity)
+        engine = TradingEngine(
+            cfg, exchange, get_strategy(cfg.strategy.name, **cfg.strategy.params)
+        )
+        engine.risk.state.consecutive_losses = engine.journal.consecutive_losses()
+        engine.risk.state.peak_equity = engine.journal.peak_equity()
+
+        self.assertEqual(engine.risk.state.peak_equity, 5000.0,
+                         "재시작이 고점을 잊었습니다")
+        reason = engine.risk.halt_reason(4000.0)
+        self.assertIn("고점 대비 낙폭", reason,
+                      "고점 5000 대비 20% 낙폭인데 안 막혔습니다")
+
+
+class StopVerificationTests(unittest.TestCase):
+    """손절이 거래소에 실제로 걸렸는지 확인하는가.
+
+    `pos.stop_loss = stop_loss`는 **우리가 요청한 값**을 넣을 뿐이다.
+    거래소가 stopLossPrice를 무시해도 봇은 손절이 있다고 믿는다.
+    보호받는다고 믿으면서 무방비인 것이 제일 나쁜 실패다.
+    """
+
+    @staticmethod
+    def _bare(call):
+        """네트워크 없이 _verify_stop만 시험한다.
+
+        client는 None이면 안 된다 — _call에 넘기기 전에 client.fetch_open_orders를
+        읽으므로 거기서 먼저 터진다. 실제로 이 픽스처를 그렇게 짰다가 걸렸다.
+        """
+        from types import SimpleNamespace
+
+        from dorothy.exchange.bitget import BitgetExchange
+
+        ex = BitgetExchange.__new__(BitgetExchange)      # __init__ 우회 (ccxt 불필요)
+        ex.client = SimpleNamespace(fetch_open_orders=lambda *a, **k: [])
+        ex._call = call
+        return ex
+
+    def exchange(self, open_orders):
+        return self._bare(lambda fn, *a, **k: open_orders)
+
+    def test_accepts_a_matching_stop_price(self):
+        ex = self.exchange([{"stopPrice": 50000.0}])
+        with self.assertNoLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+    def test_accepts_a_trigger_price_field(self):
+        ex = self.exchange([{"triggerPrice": 50000.0}])
+        with self.assertNoLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+    def test_accepts_a_nested_preset_field(self):
+        ex = self.exchange([{"info": {"presetStopLossPrice": "50000"}}])
+        with self.assertNoLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+    def test_tolerates_small_rounding(self):
+        ex = self.exchange([{"stopPrice": 50010.0}])         # 0.02% 차이
+        with self.assertNoLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+    def test_warns_when_no_stop_is_present(self):
+        """이게 핵심이다. 손절이 없으면 반드시 시끄러워야 한다."""
+        ex = self.exchange([])
+        with self.assertLogs("dorothy.exchange.bitget", level="WARNING") as logs:
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+        self.assertIn("손절", "\n".join(logs.output))
+
+    def test_warns_when_the_price_is_wrong(self):
+        ex = self.exchange([{"stopPrice": 40000.0}])         # 20% 어긋남
+        with self.assertLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+    def test_warns_when_the_query_itself_fails(self):
+        """조회 실패를 조용히 넘기면 무방비 상태를 모른 채 매매하게 된다."""
+        def boom(*a, **k):
+            raise RuntimeError("네트워크")
+
+        ex = self._bare(boom)
+        with self.assertLogs("dorothy.exchange.bitget", level="WARNING") as logs:
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)
+        self.assertIn("확인하지 못했습니다", "\n".join(logs.output))
+
+    def test_a_failed_query_does_not_raise(self):
+        """확인 실패가 매매 자체를 막으면 안 된다. 경고로 충분하다."""
+        ex = self._bare(lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        ex._verify_stop("BTC/USDT:USDT", 50000.0)      # 예외가 새어나오면 실패
+
+    def test_garbage_values_do_not_crash(self):
+        ex = self.exchange([{"stopPrice": "없음"}, {"triggerPrice": None}])
+        with self.assertLogs("dorothy.exchange.bitget", level="WARNING"):
+            ex._verify_stop("BTC/USDT:USDT", 50000.0)

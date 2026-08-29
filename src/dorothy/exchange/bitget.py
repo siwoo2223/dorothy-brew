@@ -200,7 +200,50 @@ class BitgetExchange(Exchange):
         pos.stop_loss = stop_loss
         pos.take_profit = take_profit
         pos.client_id = client_id
+
+        # 위에서 pos.stop_loss에 넣은 것은 **우리가 요청한 값**이지 거래소가
+        # 실제로 건 값이 아니다. 거래소가 stopLossPrice를 무시하면 봇은
+        # 보호받는다고 믿는데 실제로는 무방비다. 그게 제일 나쁜 실패다.
+        if stop_loss is not None:
+            self._verify_stop(symbol, stop_loss)
         return pos
+
+    def _verify_stop(self, symbol: str, expected: float) -> None:
+        """거래소에 손절이 실제로 걸렸는지 확인한다.
+
+        확인 못 하면 **크게 경고한다.** 거래소·ccxt 버전마다 조회 방식이
+        달라 못 읽는 경우가 있는데, 그렇다고 조용히 넘어가면 무방비 상태를
+        모른 채 매매하게 된다.
+        """
+        try:
+            orders = self._call(self.client.fetch_open_orders, symbol, retries=1) or []
+        except Exception:      # noqa: BLE001 - 조회 실패가 매매를 막으면 안 된다
+            log.warning(
+                "⚠ 손절 등록 여부를 확인하지 못했습니다 (미체결 주문 조회 실패). "
+                "거래소 화면에서 손절이 걸렸는지 직접 확인하세요. 요청값 %s", expected,
+            )
+            return
+
+        for order in orders:
+            info = order.get("info") or {}
+            candidates = (
+                order.get("stopPrice"), order.get("triggerPrice"),
+                info.get("triggerPrice"), info.get("presetStopLossPrice"),
+            )
+            for value in candidates:
+                try:
+                    if value is not None and abs(float(value) - expected) < expected * 0.01:
+                        log.info("손절 등록 확인: %s", value)
+                        return
+                except (TypeError, ValueError):
+                    continue
+
+        log.warning(
+            "⚠ 손절이 거래소에 등록되지 않았을 수 있습니다 (요청 %s, 미체결 주문 %d건에서 "
+            "확인 안 됨). 지금 거래소 화면에서 직접 확인하세요 — "
+            "봇은 손절이 있다고 가정하고 계속 진행합니다.",
+            expected, len(orders),
+        )
 
     def close_position(self, symbol: str, *, reason: str = "") -> float:
         self._ensure_markets()
