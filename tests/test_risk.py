@@ -208,3 +208,53 @@ class PeakDrawdownTests(unittest.TestCase):
         reason = risk.halt_reason(equity)
         self.assertIn("고점 대비 낙폭", reason,
                       f"자본 {equity:.0f} (고점 1000)에서 안 막혔습니다")
+
+
+class TestWhatTheConfigCommentsClaim(unittest.TestCase):
+    """config/*.yaml 주석에 적은 '복리와 레버리지' 설명을 코드에 고정한다.
+
+    설정 파일에 백테스트 숫자를 적어두면, 사이징 규칙이 바뀌었을 때 주석만
+    조용히 거짓이 된다. 여기서 주장 자체를 재현해서 그걸 막는다.
+    """
+
+    def _size(self, *, equity=10_000.0, risk=0.01, leverage=2.0, max_pos=10.0):
+        rm = _rm(risk_per_trade=risk, max_position_pct=max_pos, max_leverage=50.0)
+        d = rm.evaluate_entry(
+            equity=equity, price=50_000, side=Side.LONG, stop_loss=49_000,
+            leverage=leverage,
+        )
+        self.assertTrue(d.approved, d.reason)
+        return d.size
+
+    def test_leverage_is_only_a_ceiling(self):
+        """'2배 위로는 아무것도 안 바뀝니다' — 천장이 안 물리면 배율은 무관하다."""
+        sizes = {lev: self._size(leverage=lev) for lev in (2, 3, 5, 10, 20)}
+        self.assertEqual(len(set(round(s, 9) for s in sizes.values())), 1, sizes)
+
+    def test_low_leverage_is_worse_only_because_the_ceiling_bites(self):
+        """'1x가 낮은 건 수익이 아니라 수량이 깎여서입니다' — 그 인과를 확인한다."""
+        # 명목가 상한 0.30 × 1배 = 자본의 30%. 리스크 기준 수량은 그보다 크다.
+        clipped = self._size(leverage=1, max_pos=0.30)
+        full = self._size(leverage=2, max_pos=0.30)
+        self.assertLess(clipped, full)
+        self.assertAlmostEqual(clipped * 50_000, 10_000 * 0.30 * 1, places=6)
+
+    def test_risk_per_trade_scales_size_proportionally(self):
+        """'실제 손잡이는 risk_per_trade' — 두 배면 두 배."""
+        base = self._size(risk=0.01)
+        self.assertAlmostEqual(self._size(risk=0.02), base * 2, places=9)
+        self.assertAlmostEqual(self._size(risk=0.005), base / 2, places=9)
+
+    def test_compounding_is_automatic(self):
+        """'자본을 매번 새로 읽으므로 복리는 자동' — 수량이 자본에 비례한다."""
+        base = self._size(equity=10_000)
+        self.assertAlmostEqual(self._size(equity=20_000), base * 2, places=9)
+        self.assertAlmostEqual(self._size(equity=5_000), base / 2, places=9)
+
+    def test_the_notional_cap_flattens_the_risk_curve(self):
+        """'2% 위로 눕는 건 전략 한계가 아니라 명목가 상한' — 그 지점을 고정한다."""
+        capped = [self._size(risk=r, max_pos=0.30) for r in (0.01, 0.02, 0.04)]
+        free = [self._size(risk=r, max_pos=50.0) for r in (0.01, 0.02, 0.04)]
+        self.assertAlmostEqual(capped[0], free[0], places=9)   # 1%는 아직 안 물림
+        self.assertLess(capped[2], free[2])                    # 4%는 물림
+        self.assertAlmostEqual(capped[2], capped[1], places=9)  # 물린 뒤로는 평평
