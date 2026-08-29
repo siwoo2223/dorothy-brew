@@ -41,6 +41,10 @@ class RiskConfig:
     max_position_pct: float = 0.30      # 명목가 상한 (자본 대비)
     max_daily_loss_pct: float = 0.03    # 일일 누적 손실 한도 → 초과 시 당일 매매 중단
     max_consecutive_losses: int = 4     # 연속 손실 시 자동 정지
+    # 고점 대비 낙폭 한도. 0이면 끔.
+    # 일일 한도는 하루 단위라 저빈도 전략(며칠에 한 번 매매)에서는
+    # 걸릴 기회가 없다. 이건 날짜와 무관하게 걸린다.
+    max_drawdown_pct: float = 0.0
     max_open_positions: int = 1
     max_leverage: float = 3.0           # 설정값이 이보다 크면 여기로 깎는다
 

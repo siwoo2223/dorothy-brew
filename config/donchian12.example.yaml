@@ -33,6 +33,11 @@ exchange:
   slippage: 0.0005
 risk:
   risk_per_trade: 0.01
+  # 고점 대비 낙폭 한도. **저빈도 전략에는 이게 유일하게 작동하는 보호입니다.**
+  # 아래 일일 손실 한도와 연속 손실 한도는 둘 다 '하루' 단위로 초기화되는데,
+  # 이 전략은 평균 22일에 한 번 매매해서 같은 날 두 번 걸릴 일이 없습니다.
+  # 계측해보니 1회 리스크를 12%로 올려도 차단이 한 번도 발동하지 않았습니다.
+  max_drawdown_pct: 0.20
   max_daily_loss_pct: 0.03
   max_consecutive_losses: 4
   max_open_positions: 1

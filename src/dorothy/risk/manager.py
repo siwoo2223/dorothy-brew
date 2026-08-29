@@ -46,6 +46,11 @@ class RiskState:
     trades_today: int = 0
     halted_reason: str = ""
     open_positions: int = 0
+    # 최고 자본. **날짜가 바뀌어도 초기화하지 않는다.**
+    # 일일 한도는 하루 단위라, 며칠에 걸쳐 매매하는 저빈도 전략에서는
+    # 걸릴 기회 자체가 없다. 12시간봉 전략을 재보니 1회 리스크를 12%로
+    # 올려도 차단이 한 번도 발동하지 않았다. 고점 대비 낙폭은 그 공백을 메운다.
+    peak_equity: float = 0.0
     _history: list[Trade] = field(default_factory=list)
 
 
@@ -83,6 +88,7 @@ class RiskManager:
             self.state.trades_today = 0
             self.state.day_start_equity = equity
             self.state.halted_reason = ""
+            # peak_equity는 일부러 초기화하지 않는다 — 고점은 날짜와 무관하다
             # 연속 손실 차단은 '영구 정지'가 아니라 하루 쿨다운이다.
             # 영구 정지로 두면 봇이 조용히 죽은 채로 방치되고,
             # 백테스트에서는 첫 연속 손실 이후 구간이 통째로 사라진다.
@@ -111,6 +117,18 @@ class RiskManager:
                 f"연속 {self.state.consecutive_losses}회 손실 — "
                 "오늘은 중단합니다 (내일 자동 재개, 그 전에 전략 점검 권장)"
             )
+
+        # 고점 대비 낙폭 — 날짜와 무관해서 저빈도 전략도 보호한다.
+        if equity > self.state.peak_equity:
+            self.state.peak_equity = equity
+        limit = self.cfg.max_drawdown_pct
+        if limit > 0 and self.state.peak_equity > 0:
+            drawdown = (self.state.peak_equity - equity) / self.state.peak_equity
+            if drawdown >= limit:
+                return (
+                    f"고점 대비 낙폭 한도 초과 ({drawdown:.2%} ≥ {limit:.2%}) — "
+                    f"고점 {self.state.peak_equity:,.2f} → 현재 {equity:,.2f}"
+                )
 
         base = self.state.day_start_equity or equity
         if base > 0:

@@ -118,3 +118,93 @@ class TestRiskHalts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PeakDrawdownTests(unittest.TestCase):
+    """고점 대비 낙폭 한도.
+
+    일일 손실 한도와 연속 손실 한도는 둘 다 하루 단위로 초기화된다.
+    그래서 며칠에 한 번 매매하는 전략에서는 **걸릴 기회 자체가 없다.**
+    12시간봉 전략(평균 22일에 한 번)을 계측해보니 1회 리스크를 12%로
+    올려도 차단이 한 번도 발동하지 않았다.
+
+    이 한도는 날짜와 무관하게 걸린다.
+    """
+
+    def make(self, limit, **kw):
+        """새 한도만 격리해서 본다.
+
+        기본 일일 한도(3%)를 켜두면 그게 먼저 걸려서 무엇이 막았는지
+        구분이 안 된다. 일부러 크게 열어두고 고점 한도만 시험한다.
+        """
+        from dorothy.config import RiskConfig
+        from dorothy.risk.manager import RiskManager
+
+        kw.setdefault("max_daily_loss_pct", 1.0)
+        cfg = RiskConfig(max_drawdown_pct=limit, **kw)
+        return RiskManager(cfg, kill_switch_file="/nonexistent-kill-switch")
+
+    def test_off_by_default(self):
+        from dorothy.config import RiskConfig
+
+        self.assertEqual(RiskConfig().max_drawdown_pct, 0.0)
+
+    def test_zero_limit_never_halts(self):
+        risk = self.make(0.0)
+        risk.roll_day(1000.0)
+        self.assertEqual(risk.halt_reason(1.0), "")
+
+    def test_halts_past_the_limit(self):
+        risk = self.make(0.20)
+        risk.roll_day(1000.0)
+        risk.halt_reason(1000.0)            # 고점 기록
+        self.assertEqual(risk.halt_reason(850.0), "")      # -15%
+        self.assertIn("고점 대비 낙폭", risk.halt_reason(800.0))   # -20%
+
+    def test_peak_survives_a_day_change(self):
+        """이게 핵심이다. 일일 한도가 못 지키는 이유가 날짜 초기화였다."""
+        risk = self.make(0.20)
+        risk.roll_day(1000.0)
+        risk.halt_reason(1000.0)
+        risk.state.day = "1999-01-01"        # 날짜가 바뀐 것처럼
+        risk.roll_day(800.0)
+        self.assertEqual(risk.state.peak_equity, 1000.0, "고점이 초기화됐습니다")
+        self.assertIn("고점 대비 낙폭", risk.halt_reason(800.0))
+
+    def test_peak_rises_with_equity(self):
+        risk = self.make(0.20)
+        risk.roll_day(1000.0)
+        risk.halt_reason(2000.0)
+        self.assertEqual(risk.state.peak_equity, 2000.0)
+        self.assertEqual(risk.halt_reason(1700.0), "")     # 새 고점 대비 -15%
+        self.assertIn("고점 대비 낙폭", risk.halt_reason(1600.0))
+
+    def test_message_names_the_numbers(self):
+        risk = self.make(0.20)
+        risk.roll_day(1000.0)
+        risk.halt_reason(1000.0)
+        reason = risk.halt_reason(700.0)
+        self.assertIn("1,000", reason)
+        self.assertIn("700", reason)
+
+    def test_does_not_block_a_low_frequency_strategy_unnecessarily(self):
+        """정상 범위에서는 막지 않아야 한다. 과잉 차단도 나쁘다."""
+        risk = self.make(0.30)
+        risk.roll_day(1000.0)
+        for equity in (1000.0, 1100.0, 1050.0, 1200.0, 1000.0, 1300.0):
+            self.assertEqual(risk.halt_reason(equity), "", f"자본 {equity}에서 막혔습니다")
+
+    def test_works_when_the_daily_limit_cannot(self):
+        """저빈도 시나리오 재현: 하루에 한 번씩만 매매하고 날짜가 계속 바뀐다.
+        일일 한도는 매일 초기화되어 못 걸지만, 고점 한도는 걸어야 한다."""
+        risk = self.make(0.25, max_daily_loss_pct=0.03)   # 일일 한도도 켜둔 채로
+        risk.roll_day(1000.0)
+        risk.halt_reason(1000.0)
+        equity = 1000.0
+        for day in range(6):
+            equity *= 0.95                    # 하루 -5%
+            risk.state.day = f"2020-01-{day:02d}"
+            risk.roll_day(equity)             # 날짜 전환 → 일일 카운터 초기화
+        reason = risk.halt_reason(equity)
+        self.assertIn("고점 대비 낙폭", reason,
+                      f"자본 {equity:.0f} (고점 1000)에서 안 막혔습니다")
