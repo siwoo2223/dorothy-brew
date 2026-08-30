@@ -119,6 +119,14 @@ PYTHONPATH=src python3 -m dorothy.cli paper --config config/config.yaml
 - 주문은 **내부에서만** 처리됩니다. 거래소로 나가지 않습니다
 - `Ctrl+C`로 멈춥니다. 기록은 SQLite에 남습니다
 
+**멈췄다 다시 켜도 안전합니다.** 봇은 어디까지 판단했는지를 SQLite에
+남깁니다(`bot_state.last_candle_ts`). 그래서 재시작해도 마지막 마감봉을
+다시 판단하지 않습니다 — 방금 손절당한 그 봉에 다시 들어가는 일이
+없다는 뜻입니다. 연속 손실 카운터와 자본 고점도 같이 복구됩니다.
+
+> `db_path`의 SQLite 파일을 지우면 이 기억도 같이 지워집니다.
+> 기록을 초기화하고 싶으면 매매를 쉬는 동안 하세요.
+
 오래 켜두려면:
 
 ```bash
@@ -204,6 +212,7 @@ touch KILL
 | `거래소 연결 ✗ NetworkError` | 방화벽·VPN·회사망. `doctor`로 확인하세요 |
 | 페이퍼가 백테스트보다 좋음 | 설정이 다릅니다. 수수료·펀딩비·최소 수량을 맞추세요 |
 | 체결이 0건 | `diagnose`로 어느 조건에서 막히는지 보세요 |
+| 재시작 후 바로 진입 안 함 | 정상입니다. 이미 판단한 봉은 건너뜁니다 (위 4절) |
 
 ```bash
 PYTHONPATH=src python3 -m dorothy.cli diagnose --config config/config.yaml --csv data/btc_12h.csv

@@ -313,8 +313,9 @@ class PeakEquityRestoreTests(unittest.TestCase):
         engine = TradingEngine(
             cfg, exchange, get_strategy(cfg.strategy.name, **cfg.strategy.params)
         )
-        engine.risk.state.consecutive_losses = engine.journal.consecutive_losses()
-        engine.risk.state.peak_equity = engine.journal.peak_equity()
+        # start()가 부르는 바로 그 복구를 부른다. 여기서 복구 코드를 베껴
+        # 쓰면 엔진이 복구를 안 해도 테스트가 통과한다.
+        engine._restore_state()
 
         self.assertEqual(engine.risk.state.peak_equity, 5000.0,
                          "재시작이 고점을 잊었습니다")
@@ -401,3 +402,133 @@ class StopVerificationTests(unittest.TestCase):
         ex = self.exchange([{"stopPrice": "없음"}, {"triggerPrice": None}])
         with self.assertLogs("dorothy.exchange.bitget", level="WARNING"):
             ex._verify_stop("BTC/USDT:USDT", 50000.0)
+
+
+class FrozenBookExchange(BrokerLikeExchange):
+    """새 봉이 아직 안 나온 상태의 거래소. 몇 번을 물어도 같은 캔들을 준다."""
+
+    def fetch_candles(self, symbol, timeframe, limit=200):
+        return self.candles[-limit:]
+
+    def fetch_price(self, symbol):
+        # 상위 클래스는 cursor를 쓰는데 여기선 cursor가 안 움직인다.
+        # 안 덮으면 신호는 새 봉으로 내고 체결은 옛 봉 가격으로 하게 된다.
+        return self.candles[-1].close
+
+    def append(self, candle):
+        self.candles = [*self.candles, candle]
+
+
+def _breakout_candles(n=60, tf_ms=43_200_000):
+    """마지막 봉이 10봉 고가를 뚫고 마감한 12시간봉."""
+    c = [Candle(i * tf_ms, 100, 100, 100, 100, 1.0) for i in range(n - 1)]
+    c.append(Candle((n - 1) * tf_ms, 100, 130, 100, 130, 1.0))
+    return c
+
+
+class RestartDoesNotRetradeTheSameBar(unittest.TestCase):
+    """재시작하면 마지막 마감봉을 다시 판단하는가.
+
+    **이 파일이 막는 사고:**
+      09:00  봉 마감, 돌파 → 진입
+      11:00  손절 체결
+      12:00  봇 재시작 (배포·크래시·노트북 절전)
+      → 마지막 마감봉은 여전히 09:00 봉이고 돌파는 아직 참이다.
+
+    _last_candle_ts를 복구하지 않으면 방금 손절당한 그 자리에 다시 들어간다.
+    재시작이 반복되면 연속 손실 차단에 걸릴 때까지 같은 매매를 되풀이한다.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = str(Path(self.tmp.name) / "t.db")
+
+    def engine(self, exchange):
+        from dorothy.config import Config
+        cfg = Config()
+        cfg.mode = "paper"
+        cfg.exchange.symbol = SYM
+        cfg.poll_interval_sec = 0
+        cfg.db_path = self.db
+        cfg.kill_switch_file = str(Path(self.tmp.name) / "NOKILL")
+        cfg.risk = RiskConfig(risk_per_trade=0.01, max_position_pct=10.0)
+        e = TradingEngine(
+            cfg, exchange, get_strategy("donchian", channel=10),
+            journal=Journal(self.db), notifier=Notifier(enabled=False),
+        )
+        e._restore_state()
+        e.risk.roll_day(exchange.equity)
+        return e
+
+    @staticmethod
+    def _opens(exchange):
+        return [o for o in exchange.orders if o[0] == "open"]
+
+    def test_a_restart_does_not_re_enter_the_bar_it_just_stopped_out_on(self):
+        ex = FrozenBookExchange(_breakout_candles(), equity=1000.0)
+        first = self.engine(ex)
+        first.tick()
+        self.assertEqual(len(self._opens(ex)), 1, "첫 진입이 안 났습니다")
+
+        ex.stop_out(20.0)          # 거래소 스탑 발동
+        first.tick()               # 봇이 청산을 인지
+
+        self.engine(ex).tick()     # 재시작 — 새 봉은 아직 없다
+        self.assertEqual(
+            len(self._opens(ex)), 1,
+            "재시작이 같은 봉에 다시 진입했습니다 (_last_candle_ts 미복구)",
+        )
+
+    def test_a_restart_loop_does_not_bleed(self):
+        """크래시 루프. 한 봉 안에서 몇 번을 재시작해도 진입은 한 번뿐이어야 한다."""
+        ex = FrozenBookExchange(_breakout_candles(), equity=1000.0)
+        self.engine(ex).tick()
+        for _ in range(5):
+            if ex.position is not None:
+                ex.stop_out(20.0)
+            self.engine(ex).tick()
+        self.assertEqual(len(self._opens(ex)), 1,
+                         f"재시작 5회에 진입이 {len(self._opens(ex))}번 났습니다")
+
+    def test_a_new_bar_is_still_traded_after_a_restart(self):
+        """과잉 차단도 버그다. 새 봉이 오면 정상적으로 판단해야 한다."""
+        ex = FrozenBookExchange(_breakout_candles(), equity=1000.0)
+        self.engine(ex).tick()
+        ex.stop_out(20.0)
+        self.engine(ex).tick()
+        self.assertEqual(len(self._opens(ex)), 1)
+
+        # 새 12시간봉이 마감되고, 다시 돌파했다
+        ex.append(Candle(60 * 43_200_000, 130, 160, 130, 160, 1.0))
+        self.engine(ex).tick()
+        self.assertEqual(len(self._opens(ex)), 2,
+                         "새 봉인데도 판단을 건너뛰었습니다")
+
+    def test_the_position_is_recorded_before_the_order_goes_out(self):
+        """주문 도중에 죽으면 '신호 한 번 놓침'이어야 한다. '두 번 진입'이 아니라."""
+        ex = FrozenBookExchange(_breakout_candles(), equity=1000.0)
+        engine = self.engine(ex)
+
+        boom = RuntimeError("주문 도중 프로세스 사망")
+
+        def explode(*a, **kw):
+            raise boom
+
+        engine.executor.handle = explode
+        with self.assertRaises(RuntimeError):
+            engine.tick()
+
+        # 죽기 전에 이미 기록되어 있어야 한다
+        self.assertEqual(
+            Journal(self.db).last_candle_ts(), ex.candles[-1].ts,
+            "주문 전에 기록하지 않아, 재시작하면 같은 봉을 다시 판단합니다",
+        )
+
+    def test_replay_does_not_persist_its_position(self):
+        """리플레이는 깨끗한 상태에서 시작해야 한다 — 저널을 더럽히면 안 된다."""
+        ex = FrozenBookExchange(_breakout_candles(), equity=1000.0)
+        engine = self.engine(ex)
+        engine._replay_clock = True
+        engine.tick()
+        self.assertEqual(Journal(self.db).last_candle_ts(), 0)

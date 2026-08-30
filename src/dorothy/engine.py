@@ -74,6 +74,23 @@ class TradingEngine:
             return self._last_candle_ts
         return int(time.time() * 1000)
 
+    # --- 재시작 복구 -----------------------------------------------------
+    def _restore_state(self) -> None:
+        """저널에서 재시작을 견뎌야 하는 상태를 복구한다.
+
+        **하나라도 빠뜨리면 재시작이 안전장치를 초기화한다.** 여기 모아둔
+        이유가 그것이다 — start()에 흩어놓으면 테스트가 start()를 못 부르고
+        같은 코드를 베껴 쓰게 되고, 그러면 복구를 지워도 테스트가 통과한다.
+        """
+        # 연속 손실: 재시작으로 한도를 초기화하면 안 된다.
+        self.risk.state.consecutive_losses = self.journal.consecutive_losses()
+        # 고점: 안 하면 고점에서 15% 내려온 상태로 재시작했을 때
+        # 그 자리가 새 고점이 되어 낙폭 한도가 영영 안 걸린다.
+        self.risk.state.peak_equity = self.journal.peak_equity()
+        # 판단 위치: 안 하면 재시작할 때마다 마지막 마감봉을 처음 보는 봉으로
+        # 착각해서 다시 판단한다 — 방금 손절당한 그 봉에 다시 들어간다.
+        self._last_candle_ts = self.journal.last_candle_ts()
+
     # --- 수명주기 --------------------------------------------------------
     def _install_signal_handlers(self) -> None:
         def handler(signum, frame):  # noqa: ARG001
@@ -90,11 +107,7 @@ class TradingEngine:
                 log.error("설정 오류: %s", e)
             raise SystemExit(1)
 
-        # 재시작 시 연속 손실 카운터 복구 (재시작으로 한도를 초기화하면 안 된다)
-        self.risk.state.consecutive_losses = self.journal.consecutive_losses()
-        # 고점도 같은 이유로 복구한다. 안 하면 고점에서 15% 내려온 상태로
-        # 재시작했을 때 그 자리가 새 고점이 되어 낙폭 한도가 영영 안 걸린다.
-        self.risk.state.peak_equity = self.journal.peak_equity()
+        self._restore_state()
 
         account = self.exchange.fetch_account()
         self.risk.roll_day(account.equity)
@@ -204,6 +217,11 @@ class TradingEngine:
         if last.ts == self._last_candle_ts:
             return   # 아직 새 캔들 없음. 봉 하나에 판단은 한 번만.
         self._last_candle_ts = last.ts
+        # 주문을 내기 **전에** 기록한다. 주문 도중에 죽으면 둘 중 하나인데,
+        # 먼저 기록하면 최악이 '신호 한 번 놓침'이고, 나중에 기록하면
+        # 최악이 '같은 자리에 두 번 진입'이다. 돈이 걸린 쪽을 피한다.
+        if not self._replay_clock:
+            self.journal.set_state("last_candle_ts", str(last.ts))
 
         account = self.exchange.fetch_account()
         self.risk.roll_day(account.equity)

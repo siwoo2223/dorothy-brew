@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS equity (
     ts     INTEGER PRIMARY KEY,
     equity REAL NOT NULL
 );
+
+-- 재시작을 견뎌야 하는 루프 상태. 매매 기록이 아니라 봇의 진행 위치다.
+CREATE TABLE IF NOT EXISTS bot_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -63,6 +69,33 @@ class Journal:
             "INSERT OR REPLACE INTO equity (ts, equity) VALUES (?, ?)", (ts, equity)
         )
         self.conn.commit()
+
+    # --- 루프 상태 -------------------------------------------------------
+    def set_state(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, str(value))
+        )
+        self.conn.commit()
+
+    def get_state(self, key: str, default: str = "") -> str:
+        row = self.conn.execute(
+            "SELECT value FROM bot_state WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+    def last_candle_ts(self) -> int:
+        """마지막으로 판단을 끝낸 봉의 시각.
+
+        복구하지 않으면 **재시작할 때마다 마지막 마감봉을 다시 판단한다.**
+        12시간봉에서 돌파봉에 진입 → 손절 → 재시작이면, 그 봉의 돌파는
+        아직 참이라 같은 자리에 다시 들어간다. 재시작이 반복되면
+        (크래시 루프, 배포, 노트북 절전) 연속 손실 차단에 걸릴 때까지
+        같은 매매를 반복한다.
+        """
+        try:
+            return int(self.get_state("last_candle_ts", "0"))
+        except ValueError:
+            return 0
 
     def recent_trades(self, limit: int = 20) -> list[sqlite3.Row]:
         cur = self.conn.execute(
