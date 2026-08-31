@@ -32,7 +32,7 @@ exchange:
 #     max_notional  = equity * max_position_pct * min(leverage, max_leverage)
 #     size          = min(size, max_notional / price, equity * lev / price)
 #
-# 아래 숫자는 config/donchian12.example.yaml 설정으로 8.6년 실데이터(BTC
+# 아래 숫자는 config/donchian12.rejected.yaml 설정으로 8.6년 실데이터(BTC
 # 12시간봉)를 돌려 잰 것입니다. 전략이 달라도 구조는 같습니다.
 #
 # 1) 복리는 자동입니다.

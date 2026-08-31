@@ -47,7 +47,7 @@ def _config(path: str | None) -> Check:
     p = Path(path)
     if not p.exists():
         return Check("설정 파일", False, f"{path} 없음",
-                     "cp config/donchian12.example.yaml config/config.yaml")
+                     "cp config/donchian12.rejected.yaml config/config.yaml")
     try:
         from .config import load_config
 

@@ -303,6 +303,34 @@ def cmd_side(args) -> int:
     return 0
 
 
+def cmd_edge(args) -> int:
+    """신호의 우위가 겹쳐 세서 생긴 것인지 확인한다.
+
+    돌파 신호는 서로 겹친다. 겹친 채로 t를 내면 같은 가격 움직임을 여러 번
+    세게 되어 t가 부풀려진다. 이 저장소가 실제로 그렇게 잘못 발표했다.
+    """
+    from .analysis.concurrency import analyze, signal_outcomes
+    from .models import Side
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    strategy = get_strategy(cfg.strategy.name, **cfg.strategy.params)
+    cost = 2 * (cfg.exchange.taker_fee + cfg.exchange.slippage)
+
+    outcomes = signal_outcomes(candles, strategy, max_bars=args.max_bars, step=args.step)
+    print(f"왕복 비용 {cost * 100:.2f}%  ·  삼중 장벽 {args.max_bars}봉\n")
+    for side, label in ((Side.LONG, "롱"), (Side.SHORT, "숏")):
+        got = outcomes[side]
+        if len(got) < 3:
+            print(f"[{label}] 신호 {len(got)}건 — 판단 불가\n")
+            continue
+        print(f"[{label}]")
+        print(analyze(got, cost).render())
+        print()
+    return 0
+
+
 def cmd_metalabel(args) -> int:
     """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
     from .ml.meta import build_dataset, train
@@ -650,6 +678,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_data_args(sd)
     sd.add_argument("--max-bars", type=int, default=168, help="삼중 배리어 시간 한도(봉)")
     sd.set_defaults(func=cmd_side)
+
+    eg = sub.add_parser("edge", parents=[common],
+                        help="신호의 우위가 겹쳐 세서 생긴 것인지 확인")
+    add_data_args(eg)
+    eg.add_argument("--max-bars", type=int, default=168, help="삼중 장벽 시간 한도(봉)")
+    eg.add_argument("--step", type=int, default=1, help="몇 봉마다 신호를 볼지")
+    eg.set_defaults(func=cmd_edge)
 
     ml = sub.add_parser("metalabel", parents=[common],
                         help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")

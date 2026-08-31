@@ -51,8 +51,12 @@ PYTHONPATH=src python3 -m unittest discover -s tests -q
 
 ## 2. 설정
 
+> ⚠ **이 저장소에는 검증을 통과한 전략이 없습니다.** 아래 설정은 한때
+> 통과했다고 발표했다가 **기각한** 것입니다(파일 이름이 `.rejected`인 이유).
+> 코드와 안전장치를 시험해보는 용도로만 쓰세요. 이유는 맨 아래 "마지막으로".
+
 ```bash
-cp config/donchian12.example.yaml config/config.yaml
+cp config/donchian12.rejected.yaml config/config.yaml
 ```
 
 파일을 열어 두 줄만 확인하세요.
@@ -222,8 +226,23 @@ PYTHONPATH=src python3 -m dorothy.cli diagnose --config config/config.yaml --csv
 
 ## 마지막으로
 
-이 저장소에서 유일하게 검증을 통과한 설정은 **12시간봉 돈치안40 롱 전용**입니다
-(291건, t=2.87). 그것도 **최근 절반에서 우위가 약해졌습니다**(t=1.20).
+**실전에 넣을 신호가 없습니다.**
 
-README의 "유일하게 전체 검증을 통과한 것" 절을 읽고 시작하세요.
-숫자가 어디서 왔고 무엇이 확인되지 않았는지 적어뒀습니다.
+한때 "유일하게 검증을 통과한 것"으로 12시간봉 돈치안40 롱을 발표했습니다
+(291건, t=2.87). **그 t값이 틀렸습니다.** 겹치는 신호를 독립 표본으로 셌고,
+겹침을 빼면 115건 t=0.99로 통과하지 못합니다. 봇은 한 번에 포지션 하나만
+드니까 보유 중에 들어온 신호 176건(60%)은 애초에 잡을 수 없었습니다.
+
+직접 확인해보세요:
+
+```bash
+PYTHONPATH=src python3 -m dorothy.cli edge \
+    --config config/donchian12.rejected.yaml --csv data/btc_12h.csv --max-bars 60
+```
+
+README의 "통과했다고 발표했던 것, 그리고 그게 왜 틀렸나" 절에 다시 잰
+표를 전부 적어뒀습니다.
+
+**그래서 이 안내서는 이렇게 쓰세요.** 봇을 돌려보고, 안전장치가 작동하는지
+보고, 페이퍼로 익히는 데까지는 그대로 유용합니다. **실전 자금은 넣지 마세요.**
+넣을 것이 생기려면 먼저 겹침을 뺀 t가 2를 넘는 신호를 찾아야 합니다.

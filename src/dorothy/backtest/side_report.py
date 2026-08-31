@@ -21,8 +21,7 @@ import statistics
 from dataclasses import dataclass, field
 
 from ..config import Config
-from ..models import Action, Candle, Side
-from ..ml.labeling import triple_barrier
+from ..models import Candle, Side
 from ..strategy.base import Strategy
 
 
@@ -31,10 +30,22 @@ class SideStats:
     side: Side
     returns: list[float] = field(default_factory=list)
     cost: float = 0.0
+    # 겹치지 않는 신호만 남긴 것. 비어 있으면 returns 전체를 쓴다(옛 호출부 호환).
+    # 돌파 신호는 서로 겹치는데, 겹친 채로 t를 내면 같은 움직임을 여러 번 세어
+    # √(겹친배수)만큼 부풀려진다. analysis/concurrency.py 참고.
+    independent: list[float] = field(default_factory=list)
 
     @property
     def count(self) -> int:
         return len(self.returns)
+
+    @property
+    def independent_returns(self) -> list[float]:
+        return self.independent or self.returns
+
+    @property
+    def independent_count(self) -> int:
+        return len(self.independent_returns)
 
     @property
     def gross(self) -> float:
@@ -50,14 +61,15 @@ class SideStats:
 
     @property
     def t_stat(self) -> float:
-        if len(self.returns) < 3:
+        """**겹치지 않는 신호로만 낸다.** 보유 중에 들어온 신호는 잡을 수 없고,
+        잡을 수 없는 것을 세면 표본만 늘고 정보량은 그대로라 t가 부풀려진다."""
+        rets = self.independent_returns
+        if len(rets) < 3:
             return 0.0
-        spread = statistics.stdev(self.returns)
+        spread = statistics.stdev(rets)
         if spread <= 0:
             return 0.0
-        return (statistics.fmean(self.returns) - self.cost) / (
-            spread / math.sqrt(len(self.returns))
-        )
+        return (statistics.fmean(rets) - self.cost) / (spread / math.sqrt(len(rets)))
 
 
 @dataclass
@@ -68,7 +80,12 @@ class SideComparison:
 
     @property
     def combined(self) -> SideStats:
-        return SideStats(Side.LONG, self.long.returns + self.short.returns, self.cost)
+        return SideStats(
+            Side.LONG,
+            self.long.returns + self.short.returns,
+            self.cost,
+            independent=self.long.independent_returns + self.short.independent_returns,
+        )
 
     @property
     def better(self) -> SideStats | None:
@@ -88,7 +105,8 @@ class SideComparison:
             "═" * 70,
             f"  왕복 비용 {self.cost * 100:.2f}%",
             "─" * 70,
-            f"  {'방향':<8}{'건수':>8}{'수수료 전':>12}{'수수료 후':>12}{'t':>8}{'합계':>10}",
+            f"  {'방향':<8}{'건수':>8}{'겹침제외':>9}{'수수료 전':>12}"
+            f"{'수수료 후':>12}{'t':>8}{'합계':>10}",
             "─" * 70,
         ]
         for stats, label in ((self.long, "롱"), (self.short, "숏")):
@@ -98,16 +116,24 @@ class SideComparison:
             mark = "✓" if stats.net > 0 and stats.t_stat >= 2 else (
                 "?" if stats.net > 0 else "✗")
             lines.append(
-                f"  {label:<8}{stats.count:>8}{stats.gross:>+11.3f}%"
-                f"{stats.net:>+11.3f}%{stats.t_stat:>8.2f}{stats.total:>+9.1f}% {mark}"
+                f"  {label:<8}{stats.count:>8}{stats.independent_count:>9}"
+                f"{stats.gross:>+11.3f}%{stats.net:>+11.3f}%"
+                f"{stats.t_stat:>8.2f}{stats.total:>+9.1f}% {mark}"
             )
         combined = self.combined
         lines.append("─" * 70)
         lines.append(
-            f"  {'합쳐':<8}{combined.count:>8}{combined.gross:>+11.3f}%"
-            f"{combined.net:>+11.3f}%{combined.t_stat:>8.2f}{combined.total:>+9.1f}%"
+            f"  {'합쳐':<8}{combined.count:>8}{combined.independent_count:>9}"
+            f"{combined.gross:>+11.3f}%{combined.net:>+11.3f}%"
+            f"{combined.t_stat:>8.2f}{combined.total:>+9.1f}%"
         )
         lines.append("═" * 70)
+        lines.append(
+            "  ※ t는 '겹침제외' 표본으로 냅니다. 보유 중에 들어온 신호는 잡을 수"
+        )
+        lines.append(
+            "     없고, 그걸 세면 표본만 늘어 t가 √(겹친배수)만큼 부풀려집니다."
+        )
         return "\n".join(lines + self._verdict())
 
     def _verdict(self) -> list[str]:
@@ -148,27 +174,18 @@ def analyse(
     step: int = 1,
 ) -> SideComparison:
     """전략이 낸 신호를 방향별로 갈라 삼중 배리어로 결과를 재고 비교한다."""
+    from ..analysis.concurrency import drop_concurrent, signal_outcomes
+
     cost = 2 * (cfg.exchange.taker_fee + cfg.exchange.slippage)
-    long = SideStats(Side.LONG, cost=cost)
-    short = SideStats(Side.SHORT, cost=cost)
+    outcomes = signal_outcomes(candles, strategy, max_bars=max_bars, step=step)
 
-    for i in range(strategy.warmup, len(candles) - 1, step):
-        signal = strategy.generate(candles[: i + 1], None)
-        if signal.action is Action.HOLD or not signal.is_entry:
-            continue
-        if signal.stop_loss is None or signal.take_profit is None:
-            continue
-
-        side = Side.LONG if signal.action is Action.ENTER_LONG else Side.SHORT
-        outcome = triple_barrier(
-            candles, i, side, signal.stop_loss, signal.take_profit, max_bars=max_bars
+    sides = {}
+    for side in (Side.LONG, Side.SHORT):
+        got = outcomes[side]
+        sides[side] = SideStats(
+            side,
+            returns=[o.ret for o in got],
+            cost=cost,
+            independent=[o.ret for o in drop_concurrent(got)],
         )
-        if outcome is None:
-            continue
-
-        entry = candles[i].close
-        exit_price = candles[outcome.exit_index].close
-        change = (exit_price - entry) / entry * side.sign
-        (long if side is Side.LONG else short).returns.append(change)
-
-    return SideComparison(long, short, cost)
+    return SideComparison(sides[Side.LONG], sides[Side.SHORT], cost)
