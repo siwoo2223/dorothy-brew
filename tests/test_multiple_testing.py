@@ -83,16 +83,24 @@ class BonferroniTests(unittest.TestCase):
 
 
 class VerdictTests(unittest.TestCase):
-    def test_expected_false_positives_is_n_times_alpha(self):
-        self.assertAlmostEqual(expected_false_positives(200, 0.05), 10.0)
+    def test_a_directional_pass_is_half_as_likely_by_chance(self):
+        """'돈을 벌면서 |t|>=2'는 양측 통과의 절반뿐이다.
+
+        n*alpha로 두면 우연 기대치를 두 배로 부풀려, 진짜 발견을 두고도
+        '우연이다'라고 잘못 기각한다. 과잉 기각도 버그다.
+        """
+        self.assertAlmostEqual(expected_false_positives(200, 0.05), 5.0)
+        self.assertAlmostEqual(
+            expected_false_positives(200, 0.05, directional=False), 10.0
+        )
 
     def test_finding_fewer_than_chance_is_not_a_finding(self):
-        v = verdict(n_tests=200, n_survivors=5)
+        v = verdict(n_tests=200, n_survivors=3)
         self.assertIn("✗", v)
         self.assertIn("근거가 못 됩니다", v)
 
     def test_finding_exactly_chance_is_not_a_finding(self):
-        self.assertIn("✗", verdict(n_tests=200, n_survivors=10))
+        self.assertIn("✗", verdict(n_tests=200, n_survivors=5))
 
     def test_finding_none_says_so(self):
         self.assertIn("0개 통과", verdict(n_tests=50, n_survivors=0))

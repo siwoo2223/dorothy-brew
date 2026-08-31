@@ -240,6 +240,15 @@ PYTHONPATH=src python3 -m dorothy.cli edge \
     --config config/donchian12.rejected.yaml --csv data/btc_12h.csv --max-bars 60
 ```
 
+그 뒤에 제대로 찾아봤습니다. 전략·파라미터·타임프레임 **202개**를 훑고,
+탐색기간/검증기간을 나누고, 몇 번 쟀는지까지 반영했습니다. **0개 통과입니다.**
+탐색기간 1등(t=3.18)도 처음 보는 구간에서는 1.22였습니다.
+
+```bash
+PYTHONPATH=src python3 -m dorothy.cli search --config config/config.yaml \
+    --csv data/btc_12h.csv --param channel --values 10,20,30,40,60,80
+```
+
 README의 "통과했다고 발표했던 것, 그리고 그게 왜 틀렸나" 절에 다시 잰
 표를 전부 적어뒀습니다.
 

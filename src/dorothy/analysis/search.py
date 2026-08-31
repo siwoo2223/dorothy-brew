@@ -67,7 +67,37 @@ class SearchReport:
 
     @property
     def tested(self) -> int:
-        return len(self.trials)
+        """서로 다른 검정의 개수.
+
+        결과가 완전히 같은 설정은 하나로 센다. 전략이 무시하는 파라미터를
+        훑으면(예: signal_outcomes는 청산 규칙을 실행하지 않으므로
+        exit_channel을 바꿔도 결과가 같다) 같은 검정이 여러 번 센 것처럼
+        보인다. 그대로 두면 임계값만 괜히 높아지고, 표에는 같은 줄이
+        여러 번 뜬다.
+        """
+        return len(self._distinct())
+
+    def _distinct(self) -> list["Trial"]:
+        # 속성마다 다시 계산하면 표본 하나당 튜플을 매번 새로 만든다.
+        # 설정 200개짜리 탐색에서 그것만으로 수십 초가 나간다.
+        cached = getattr(self, "_distinct_cache", None)
+        if cached is not None and cached[0] is self.trials:
+            return cached[1]
+        seen: dict[tuple, Trial] = {}
+        for t in self.trials:
+            key = (
+                tuple(round(x, 12) for x in t.in_sample.returns),
+                tuple(round(x, 12) for x in t.out_of_sample.returns),
+            )
+            seen.setdefault(key, t)
+        out = list(seen.values())
+        self._distinct_cache = (self.trials, out)
+        return out
+
+    @property
+    def duplicates(self) -> int:
+        """결과가 똑같아서 하나로 합쳐진 설정 수."""
+        return len(self.trials) - self.tested
 
     def threshold_for(self, trial: Trial) -> float:
         """이 후보가 탐색기간에서 넘어야 할 |t| (몇 번 쟀는지 반영)."""
@@ -84,7 +114,7 @@ class SearchReport:
         """탐색기간에서 보정 임계값을 넘은 것."""
         return [
             t
-            for t in self.trials
+            for t in self._distinct()
             if self._eligible(t)
             and t.in_sample.net > 0
             and abs(t.in_sample.t_stat) >= self.threshold_for(t)
@@ -98,17 +128,18 @@ class SearchReport:
     @property
     def naive_passes(self) -> list[Trial]:
         """보정 없이 |t| >= 2만 봤다면 통과했을 것들 — 우연 기대치와 비교용."""
-        return [t for t in self.trials if self._eligible(t) and t.in_sample.passes]
+        return [t for t in self._distinct() if self._eligible(t) and t.in_sample.passes]
 
     def render(self, top: int = 12) -> str:
         ranked = sorted(
-            (t for t in self.trials if self._eligible(t)),
+            (t for t in self._distinct() if self._eligible(t)),
             key=lambda t: abs(t.in_sample.t_stat),
             reverse=True,
         )
         thr = bonferroni_threshold(self.tested, 100, self.alpha)
         lines = [
-            f"설정 {self.tested}개를 쟀습니다 (표본 {self.min_samples}건 미만은 판정 제외)",
+            f"설정 {self.tested}개를 쟀습니다 (표본 {self.min_samples}건 미만은 판정 제외"
+            + (f", 결과가 같은 {self.duplicates}개는 하나로 셈)" if self.duplicates else ")"),
             f"본페로니 임계값 |t| >= {thr:.2f}  (보정 안 하면 2.00)",
             "",
             f"  {'설정':<34}{'탐색기간':>20}{'검증기간':>20}",

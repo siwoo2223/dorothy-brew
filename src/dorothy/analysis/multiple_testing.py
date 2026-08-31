@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 
 def _log_beta(a: float, b: float) -> float:
@@ -86,6 +87,7 @@ def t_pvalue(t: float, df: int) -> float:
     return _betainc(df / 2.0, 0.5, df / (df + t * t))
 
 
+@lru_cache(maxsize=4096)
 def bonferroni_threshold(n_tests: int, df: int, alpha: float = 0.05) -> float:
     """n번 재고도 family-wise 오류율을 alpha로 유지하려면 넘어야 할 |t|.
 
@@ -109,14 +111,25 @@ def bonferroni_threshold(n_tests: int, df: int, alpha: float = 0.05) -> float:
     return (lo + hi) / 2.0
 
 
-def expected_false_positives(n_tests: int, alpha: float = 0.05) -> float:
-    """우위가 전혀 없을 때 순진한 임계값을 통과할 것으로 기대되는 개수."""
-    return n_tests * alpha
+def expected_false_positives(
+    n_tests: int, alpha: float = 0.05, *, directional: bool = True
+) -> float:
+    """우위가 전혀 없을 때 순진한 임계값을 통과할 것으로 기대되는 개수.
+
+    directional=True는 "돈을 벌면서(net>0) |t|>=임계값"을 통과로 볼 때다.
+    양측 검정에서 |t|가 임계값을 넘는 경우의 **절반만** 부호가 양수이므로
+    기대치는 n*alpha가 아니라 n*alpha/2다. 여기를 n*alpha로 두면 우연
+    기대치를 두 배로 부풀려, 실제로는 우연보다 많이 나온 결과를 두고도
+    "우연이다"라고 잘못 기각하게 된다.
+    """
+    return n_tests * (alpha / 2 if directional else alpha)
 
 
-def verdict(n_tests: int, n_survivors: int, alpha: float = 0.05) -> str:
+def verdict(
+    n_tests: int, n_survivors: int, alpha: float = 0.05, *, directional: bool = True
+) -> str:
     """찾아낸 개수가 우연으로 설명되는지 한 줄로 말한다."""
-    expected = expected_false_positives(n_tests, alpha)
+    expected = expected_false_positives(n_tests, alpha, directional=directional)
     if n_survivors == 0:
         return f"✗ {n_tests}개 중 0개 통과 (우연이라면 {expected:.1f}개쯤 나왔을 자리)"
     if n_survivors <= expected:

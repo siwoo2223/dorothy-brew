@@ -177,6 +177,13 @@ def signal_outcomes(
     **진입/청산 색인을 같이 들고 나온다.** 수익률만 모으면 어느 신호가
     어느 신호와 겹치는지 알 수 없고, 그러면 겹침을 뺄 방법이 없다.
     이 저장소가 t값을 부풀린 경로가 정확히 그것이었다.
+
+    ⚠ **이것은 진입 신호의 품질만 잰다.** position=None으로 호출하므로
+    전략의 자체 청산 규칙(예: 돈치안의 exit_channel)은 절대 실행되지 않고,
+    결말은 전적으로 삼중 장벽이 정한다. 그래서 청산 관련 파라미터를
+    여기서 훑어봐야 값이 전부 똑같이 나온다 — 실제로 exit_channel을
+    5/10/20/30으로 바꿔 재봤더니 네 개가 완전히 동일했다.
+    청산 규칙을 재려면 backtest.engine으로 돌려야 한다.
     """
     from ..ml.labeling import triple_barrier
     from ..models import Action, Side

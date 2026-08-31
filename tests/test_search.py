@@ -31,9 +31,10 @@ class ShortlistTests(unittest.TestCase):
     def test_the_same_result_fails_once_it_is_one_of_many(self):
         """**핵심.** 같은 숫자라도 200번 중 하나면 근거가 약해진다."""
         strong = _trial("a", _stats(60, 0.012, 0.03), _stats(60, 0.012, 0.03))
+        # 채우는 설정은 서로 달라야 한다 — 똑같으면 하나로 세어진다(DuplicateTests)
         filler = [
-            _trial(f"f{i}", _stats(60, 0.0, 0.03), _stats(60, 0.0, 0.03))
-            for i in range(199)
+            _trial(f"f{i}", _stats(60, i * 1e-6, 0.03), _stats(60, i * 1e-6, 0.03))
+            for i in range(1, 200)
         ]
         self.assertEqual(len(SearchReport([strong]).shortlist), 1)
         self.assertEqual(len(SearchReport([strong, *filler]).shortlist), 0)
@@ -75,8 +76,8 @@ class SurvivorTests(unittest.TestCase):
 class NaivePassAccountingTests(unittest.TestCase):
     def test_it_counts_what_an_uncorrected_search_would_have_claimed(self):
         trials = [_trial("hit", _stats(60, 0.012, 0.03), _stats(60, 0.0, 0.03))]
-        trials += [_trial(f"f{i}", _stats(60, 0.0, 0.03), _stats(60, 0.0, 0.03))
-                   for i in range(199)]
+        trials += [_trial(f"f{i}", _stats(60, i * 1e-6, 0.03), _stats(60, i * 1e-6, 0.03))
+                   for i in range(1, 200)]
         rep = SearchReport(trials)
         self.assertEqual(len(rep.naive_passes), 1)
         self.assertIn("근거가 못 됩니다", rep.render())
@@ -153,3 +154,34 @@ class CandidateTests(unittest.TestCase):
         a = Candidate("donchian", "12h", {"channel": 40, "allow_short": False})
         b = Candidate("donchian", "12h", {"allow_short": False, "channel": 40})
         self.assertEqual(a.label, b.label)
+
+
+class DuplicateTests(unittest.TestCase):
+    """전략이 무시하는 파라미터를 훑으면 같은 검정이 여러 번 센 것처럼 보인다.
+
+    실제로 겪었다: signal_outcomes는 청산 규칙을 실행하지 않으므로
+    exit_channel을 5/10/20/30으로 바꿔도 결과가 네 개 다 똑같았다.
+    """
+
+    def test_identical_results_count_as_one_test(self):
+        same = [_trial(f"exit={v}", _stats(60, 0.02, 0.03), _stats(60, 0.01, 0.03))
+                for v in (5, 10, 20, 30)]
+        rep = SearchReport(same)
+        self.assertEqual(rep.tested, 1)
+        self.assertEqual(rep.duplicates, 3)
+
+    def test_the_table_does_not_repeat_the_same_row(self):
+        same = [_trial(f"exit={v}", _stats(60, 0.02, 0.03), _stats(60, 0.01, 0.03))
+                for v in (5, 10, 20, 30)]
+        self.assertEqual(SearchReport(same).render().count("+2.00%"), 1)
+
+    def test_genuinely_different_configs_still_count_separately(self):
+        different = [_trial(f"c{i}", _stats(60, 0.01 * i, 0.03), _stats(60, 0.0, 0.03))
+                     for i in range(1, 5)]
+        rep = SearchReport(different)
+        self.assertEqual(rep.tested, 4)
+        self.assertEqual(rep.duplicates, 0)
+
+    def test_dedup_does_not_change_a_clean_search(self):
+        one = [_trial("a", _stats(60, 0.05, 0.02), _stats(60, 0.04, 0.02))]
+        self.assertEqual(len(SearchReport(one).survivors), 1)
