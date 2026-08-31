@@ -331,6 +331,55 @@ def cmd_edge(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    """설정을 훑어 겹침을 뺀 우위를 찾는다 — 다중검정 보정과 검증기간 포함.
+
+    많이 재면 우연히 좋아 보이는 것이 반드시 나온다. 그래서 몇 번 쟀는지를
+    세서 임계값을 올리고, 후보를 처음 보는 구간에 던져 확인한다.
+    """
+    from .analysis.search import Candidate, SearchReport, evaluate
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    cost = 2 * (cfg.exchange.taker_fee + cfg.exchange.slippage)
+
+    values = [v.strip() for v in args.values.split(",") if v.strip()]
+    if len(values) < 2:
+        print("--values에 최소 2개를 주세요. 하나만 재는 건 탐색이 아닙니다.")
+        return 1
+
+    def parse(v: str):
+        for cast in (int, float):
+            try:
+                return cast(v)
+            except ValueError:
+                continue
+        if v.lower() in ("true", "false"):
+            return v.lower() == "true"
+        return v
+
+    trials = []
+    for raw in values:
+        params = dict(cfg.strategy.params)
+        params[args.param] = parse(raw)
+        cand = Candidate(cfg.strategy.name, cfg.exchange.timeframe, params)
+        try:
+            trials.append(
+                evaluate(cand, candles, cost=cost, split=args.split,
+                         max_bars=args.max_bars)
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  건너뜀 {cand.label}: {exc}")
+
+    if not trials:
+        print("잰 것이 없습니다.")
+        return 1
+    print()
+    print(SearchReport(trials, min_samples=args.min_samples).render(top=len(trials)))
+    return 0
+
+
 def cmd_metalabel(args) -> int:
     """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
     from .ml.meta import build_dataset, train
@@ -685,6 +734,18 @@ def build_parser() -> argparse.ArgumentParser:
     eg.add_argument("--max-bars", type=int, default=168, help="삼중 장벽 시간 한도(봉)")
     eg.add_argument("--step", type=int, default=1, help="몇 봉마다 신호를 볼지")
     eg.set_defaults(func=cmd_edge)
+
+    sr = sub.add_parser("search", parents=[common],
+                        help="파라미터를 훑어 우위를 찾는다 (다중검정 보정 포함)")
+    add_data_args(sr)
+    sr.add_argument("--param", required=True, help="훑을 파라미터 이름 (예: channel)")
+    sr.add_argument("--values", required=True, help="쉼표로 구분한 값들 (예: 10,20,40)")
+    sr.add_argument("--split", type=float, default=0.6,
+                    help="탐색기간 비율. 나머지는 검증기간 (기본 0.6)")
+    sr.add_argument("--max-bars", type=int, default=60, help="삼중 장벽 시간 한도(봉)")
+    sr.add_argument("--min-samples", type=int, default=30,
+                    help="이보다 표본이 적으면 판정에서 제외")
+    sr.set_defaults(func=cmd_search)
 
     ml = sub.add_parser("metalabel", parents=[common],
                         help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")
