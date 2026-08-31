@@ -380,6 +380,51 @@ def cmd_search(args) -> int:
     return 0
 
 
+def cmd_carry(args) -> int:
+    """펀딩비 수취 (현물 매수 + 선물 숏) — 가격을 맞히지 않고 버는 구조."""
+    from .backtest.carry import CarryConfig, breakeven_rate, simulate, yield_on_capital
+    from .data import funding as funding_mod
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    prices = [(c.ts, c.close) for c in candles]
+
+    if not args.funding_csv:
+        print("펀딩률 CSV가 필요합니다. 이 저장소에는 펀딩 데이터가 없습니다.\n")
+        print("  PYTHONPATH=src python3 -m dorothy.cli fetch-funding \\")
+        print("      --config config/config.yaml --days 365 --out data/funding.csv\n")
+        print("받아오기 전까지 참고용 산수만 보여드립니다.\n")
+        print(f"  {'펀딩률/8h':>10}" + "".join(f"{f'{L}배':>9}" for L in (1, 2, 3, 5)))
+        for rate in (0.00005, 0.0001, 0.0002):
+            cells = "".join(f"{yield_on_capital(rate, L):>8.1f}%" for L in (1, 2, 3, 5))
+            print(f"  {rate * 100:>9.3f}%{cells}")
+        print("  ↑ 자본 기준 연 수익률. 명목가 기준이 아닙니다.\n")
+        cc = CarryConfig(spot_fee=args.spot_fee, perp_fee=cfg.exchange.taker_fee)
+        print("  수수료를 덮는 데 필요한 평균 펀딩률")
+        for d in (7, 30, 90, 365):
+            print(f"    {d:>4}일 보유 → {breakeven_rate(cc, d) * 100:.4f}%/8h")
+        return 1
+
+    series = funding_mod.load_csv(args.funding_csv)
+    if not series:
+        print(f"펀딩률을 읽지 못했습니다: {args.funding_csv}")
+        return 1
+    funding = [(p.ts, p.rate) for p in series.points]
+    print(f"펀딩률 {len(funding)}개 · 가격 {len(prices)}개\n")
+
+    for lev in [float(v) for v in args.leverage.split(",")]:
+        cc = CarryConfig(
+            leverage=lev, spot_fee=args.spot_fee, perp_fee=cfg.exchange.taker_fee,
+            allow_topup=not args.no_topup,
+        )
+        result = simulate(prices, funding, equity=cfg.initial_equity, cfg=cc)
+        print(f"── 레버리지 {lev:g}배 " + "─" * 40)
+        print(result.render())
+        print()
+    return 0
+
+
 def cmd_metalabel(args) -> int:
     """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
     from .ml.meta import build_dataset, train
@@ -746,6 +791,16 @@ def build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--min-samples", type=int, default=30,
                     help="이보다 표본이 적으면 판정에서 제외")
     sr.set_defaults(func=cmd_search)
+
+    ca = sub.add_parser("carry", parents=[common],
+                        help="펀딩비 수취 (현물 매수 + 선물 숏)")
+    add_data_args(ca)
+    ca.add_argument("--funding-csv", help="펀딩률 CSV (fetch-funding으로 받으세요)")
+    ca.add_argument("--leverage", default="1,2,3", help="쉼표로 구분한 숏 레버리지")
+    ca.add_argument("--spot-fee", type=float, default=0.001, help="현물 테이커 수수료")
+    ca.add_argument("--no-topup", action="store_true",
+                    help="증거금을 보충하지 않는다 (청산까지 그대로 본다)")
+    ca.set_defaults(func=cmd_carry)
 
     ml = sub.add_parser("metalabel", parents=[common],
                         help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")
