@@ -1,0 +1,71 @@
+# 직접 매매용 설정 — "적당한 배율로 트레이딩"
+#
+# ⚠ 먼저 알아야 할 것: 이 저장소는 우위가 있는 신호를 찾지 못했습니다.
+#   설정 202개를 훑어 겹침을 뺀 |t|>=2를 넘긴 것이 0개입니다(README).
+#   그러니 이 파일은 **"뭘 사고 팔지"를 정해주지 않습니다.** 판단은
+#   본인이 하고, 이 파일은 **한 번의 실수로 계좌가 끝나지 않게** 합니다.
+#
+#   기대값이 0인 게임에서 결과를 정하는 것은 신호가 아니라 크기와 한도입니다.
+#
+# ⚠ API 키는 여기 적지 마세요. 환경변수(.env)로만 넣습니다.
+
+mode: paper                       # 실전 전에 반드시 paper로 먼저
+initial_equity: 200.0
+poll_interval_sec: 15
+db_path: data/dorothy.db
+kill_switch_file: KILL            # 이 파일을 만들면 포지션을 정리하고 멈춘다
+
+exchange:
+  name: bitget
+  symbol: "BTC/USDT:USDT"
+  timeframe: "4h"
+  # 배율은 수량을 정하지 않습니다(그건 risk_per_trade가 합니다).
+  # 배율이 정하는 것은 **청산가**입니다. 청산까지 거리 ≈ 1/배율 - 0.005
+  #
+  #   3배 → 32.8%   5배 → 19.5%   10배 → 9.5%   20배 → 4.5%
+  #
+  # 4시간봉 BTC 8.6년에서 손절폭(ATR×2)은 중앙값 3.07%, 상위 1%가 10.92%.
+  # 10배면 142건 중 2%에서 **손절보다 청산이 먼저 옵니다** — 그러면
+  # 잃는 것이 계획한 1%가 아니라 그 포지션 증거금 전부입니다.
+  #
+  # 상위 1% 손절폭까지 두 배 여유를 두려면 4.5배 이하입니다. 3배로 둡니다.
+  # 본인 타임프레임에서 직접 확인하세요:
+  #   PYTHONPATH=src python3 -m dorothy.cli liqcheck \
+  #       --config config/trading.yaml --csv data/btc_4h.csv
+  leverage: 3.0
+  margin_mode: isolated           # 한 종목 사고가 계좌 전체로 번지지 않게
+  taker_fee: 0.0006               # 본인 등급으로 맞추세요
+  maker_fee: 0.0002
+  slippage: 0.0005
+
+risk:
+  # 여기가 실제 손잡이입니다. 8.6년 실측: 이 값만 바꿔도
+  # 0.5% → +17.13%, 1% → +37.31%, 2% → +86.54% (같은 신호, 같은 건수)
+  # 켈리 최적점을 넘기면 기대값이 양수여도 파산합니다. 1~2%를 권합니다.
+  risk_per_trade: 0.01
+  max_position_pct: 0.30
+
+  # **저빈도로 매매한다면 이것이 유일하게 작동하는 보호입니다.**
+  # 아래 일일 한도들은 하루 단위로 초기화돼서, 며칠에 한 번 매매하면
+  # 같은 날 두 번 걸릴 일이 없습니다. 이건 날짜와 무관하고
+  # 봇을 재시작해도 저널에서 고점이 복원됩니다.
+  max_drawdown_pct: 0.20
+
+  max_daily_loss_pct: 0.03        # 하루에 여러 번 매매할 때만 의미가 있습니다
+  max_consecutive_losses: 4
+  max_open_positions: 1
+  max_leverage: 3.0               # exchange.leverage가 커도 여기서 깎입니다
+
+strategy:
+  # 검증을 통과한 신호가 없으므로 기본값을 넣지 않습니다.
+  # 직접 매매하실 거면 봇의 전략은 끄고 안전장치만 쓰거나,
+  # 본인 규칙을 전략으로 옮겨 백테스트부터 하세요.
+  name: donchian
+  params:
+    channel: 40
+    allow_short: false
+    atr_stop_mult: 2.0            # liqcheck의 손절폭 분포가 이 값에서 나옵니다
+    atr_target_mult: 3.0
+
+notify:
+  telegram_enabled: false

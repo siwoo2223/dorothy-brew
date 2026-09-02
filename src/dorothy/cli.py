@@ -425,6 +425,30 @@ def cmd_carry(args) -> int:
     return 0
 
 
+def cmd_liqcheck(args) -> int:
+    """내 손절폭에서 몇 배까지 안전한가 — 손절과 청산 중 무엇이 먼저 오는가."""
+    from .risk import liquidation
+
+    cfg = _build_config(args)
+    cfg.mode = "backtest"
+    candles = _load_candles(args, cfg)
+    mult = args.atr_stop_mult or cfg.strategy.params.get("atr_stop_mult", 2.0)
+    checks = liquidation.analyse(
+        candles,
+        leverages=tuple(float(v) for v in args.leverage.split(",")),
+        atr_period=args.atr_period,
+        atr_stop_mult=mult,
+        safety=args.safety,
+        maintenance_margin=args.maintenance_margin,
+    )
+    print(liquidation.render(checks, atr_stop_mult=mult))
+    configured = min(cfg.exchange.leverage, cfg.risk.max_leverage)
+    match = [c for c in checks if abs(c.leverage - configured) < 1e-9]
+    if match:
+        print(f"\n  설정값 {configured:g}배 → {match[0].verdict}")
+    return 0
+
+
 def cmd_metalabel(args) -> int:
     """1차 전략의 신호를 모델이 걸러낼 수 있는지 검증한다 (누수 방지 포함)."""
     from .ml.meta import build_dataset, train
@@ -801,6 +825,18 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("--no-topup", action="store_true",
                     help="증거금을 보충하지 않는다 (청산까지 그대로 본다)")
     ca.set_defaults(func=cmd_carry)
+
+    lq = sub.add_parser("liqcheck", parents=[common],
+                        help="내 손절폭에서 몇 배까지 안전한가 (손절 vs 청산)")
+    add_data_args(lq)
+    lq.add_argument("--leverage", default="1,2,3,5,10,20,50")
+    lq.add_argument("--atr-period", type=int, default=14)
+    lq.add_argument("--atr-stop-mult", type=float,
+                    help="손절 = ATR × 이 값 (기본: 전략 설정값)")
+    lq.add_argument("--safety", type=float, default=2.0,
+                    help="청산이 손절보다 몇 배 멀어야 하는가 (기본 2배)")
+    lq.add_argument("--maintenance-margin", type=float, default=0.005)
+    lq.set_defaults(func=cmd_liqcheck)
 
     ml = sub.add_parser("metalabel", parents=[common],
                         help="모델이 신호를 걸러낼 수 있는지 검증 (numpy·scikit-learn 필요)")
