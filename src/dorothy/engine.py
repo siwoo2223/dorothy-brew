@@ -196,8 +196,16 @@ class TradingEngine:
     # --- 한 사이클 -------------------------------------------------------
     def tick(self) -> None:
         symbol = self.cfg.exchange.symbol
+        # 창 크기가 지표 값을 바꾼다. ATR은 Wilder 평활(재귀)이라 그 시점 값이
+        # **과거를 얼마나 깊이 봤는지에 의존한다.** 시드 영향은 봉마다
+        # (period-1)/period 씩 줄어드는데, 예전 값(warmup+50, 최소 100)은
+        # 돈치안40 기준 시드 이후 86봉뿐이어서 영향이 1.7e-3 남았다.
+        # 그래서 리플레이가 백테스트와 체결가부터 어긋났다(8.6년 누적 0.07%).
+        # **실전은 백테스트가 아니라 이 경로를 탄다** — 백테스트를 재현하려면
+        # 여기서 충분히 깊게 봐야 한다. 250봉이면 시드 영향이 9e-9로 사라진다.
         candles = self.exchange.fetch_candles(
-            symbol, self.cfg.exchange.timeframe, limit=max(self.strategy.warmup + 50, 100)
+            symbol, self.cfg.exchange.timeframe,
+            limit=max(self.strategy.warmup + 250, 300),
         )
         if not candles:
             log.warning("캔들 없음 — 이번 틱 건너뜀")
