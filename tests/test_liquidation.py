@@ -136,6 +136,23 @@ class AnalyseTests(unittest.TestCase):
 class VerdictWordingTests(unittest.TestCase):
     """반올림이 판정을 거짓말로 만들면 안 된다."""
 
+    def test_no_failing_verdict_ever_prints_a_zero(self):
+        """**어떤 비율에서도** ✗와 "0%"가 같이 나오면 안 된다.
+
+        처음엔 임계값을 0.1%로 뒀는데 0.2%가 "0%"로 찍혔다. 한 건만
+        고치지 말고 범위를 훑어서 확인한다.
+        """
+        total = 20_000
+        for bad in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 19_999):
+            c = LeverageCheck(
+                20.0, liquidation_distance(20),
+                [0.9] * bad + [0.001] * (total - bad),
+            )
+            v = c.verdict
+            self.assertIn("✗", v, f"{bad}건인데 실패 판정이 아닙니다")
+            self.assertNotIn(" 0%", v, f"{bad}/{total} → {v!r}")
+            self.assertNotIn(" 0.0%", v, f"{bad}/{total} → {v!r}")
+
     def test_a_single_bad_trade_is_reported_as_a_count(self):
         c = LeverageCheck(20.0, liquidation_distance(20), [0.01] * 9999 + [0.9])
         self.assertEqual(c.unsafe_count, 1)

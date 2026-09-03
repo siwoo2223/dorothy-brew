@@ -88,14 +88,19 @@ class LeverageCheck:
     @property
     def verdict(self) -> str:
         if self.unsafe_count > 0:
-            # 18,946건 중 1건은 "0.0%"로 찍힌다 — ✗와 앞뒤가 안 맞는다.
-            # 비율이 반올림돼 사라지면 건수로 말한다.
-            if self.unsafe_share < 0.1:
+            # 반올림해서 "0%"가 되면 ✗와 앞뒤가 안 맞는다. 0.2%도 "0%"가 된다.
+            # 비율이 눈에 안 보일 만큼 작으면 건수로 말하고,
+            # 그 외에는 0이 아니게 보일 만큼만 소수점을 살린다.
+            if self.unsafe_share < 0.05:
                 return (
                     f"✗ {self.unsafe_count}건에서 손절보다 청산이 가깝습니다 "
                     f"({len(self.stop_distances):,}건 중)"
                 )
-            return f"✗ {self.unsafe_share:.0f}%의 매매에서 손절보다 청산이 가깝습니다"
+            digits = 1 if self.unsafe_share < 10 else 0
+            return (
+                f"✗ {self.unsafe_share:.{digits}f}%의 매매에서 "
+                "손절보다 청산이 가깝습니다"
+            )
         if self.thin_share > 10:
             return f"? 여유가 {self.safety:g}배 미만인 매매가 {self.thin_share:.0f}%입니다"
         return "✓ 손절이 먼저 걸립니다"
