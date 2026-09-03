@@ -55,11 +55,30 @@ class PaperExchange(Exchange):
     def feed_candle(self, candle: Candle) -> None:
         """백테스트 엔진이 캔들을 한 개씩 밀어 넣는다."""
         self._candles.append(candle)
+        self._observe(candle)
+
+    def _observe(self, candle: Candle) -> None:
+        """캔들 하나를 반영한다 — 펀딩, 스탑 판정, 자본 기록.
+
+        **오프라인과 온라인이 반드시 같은 처리를 거쳐야 한다.**
+        예전엔 온라인 경로(source가 있을 때)가 _check_stops만 부르고
+        _apply_funding을 부르지 않아서, 실시간 페이퍼가 펀딩비를 한 푼도
+        내지 않았다. 백테스트보다 좋게 나오는 바로 그 방향의 버그다.
+
+        같은 캔들로 두 번 불려도 안전하다 — 온라인은 15초마다 폴링하는데
+        4시간봉이면 같은 마감봉을 수백 번 다시 본다. _apply_funding은
+        events=0으로, _check_stops는 포지션이 없어서 그냥 빠진다.
+        """
         self._price = candle.close
         self._apply_funding(candle)
         self._now_ms = candle.ts
         self._check_stops(candle)
-        self.equity_curve.append((candle.ts, self.total_equity()))
+        # 같은 봉을 다시 봤다면 자본 곡선에 또 쌓지 않는다. 안 그러면
+        # 15초 폴링에서 하루 5,760점씩 늘어난다(구분되는 값은 6점뿐).
+        if self.equity_curve and self.equity_curve[-1][0] == candle.ts:
+            self.equity_curve[-1] = (candle.ts, self.total_equity())
+        else:
+            self.equity_curve.append((candle.ts, self.total_equity()))
 
     def _now(self) -> int:
         return self._now_ms or int(time.time() * 1000)
@@ -73,12 +92,9 @@ class PaperExchange(Exchange):
         if self.source is not None:
             candles = self.source.fetch_candles(symbol, timeframe, limit)
             if candles:
-                # 실시세를 쓸 때도 스탑 판정은 돌아야 한다.
-                # 이걸 빼먹으면 온라인 페이퍼 모드에서 손절이 영원히 체결되지 않는다.
-                self._price = candles[-1].close
-                self._now_ms = candles[-1].ts
-                self._check_stops(candles[-1])
-                self.equity_curve.append((candles[-1].ts, self.total_equity()))
+                # 오프라인과 **같은** 처리를 거친다. 여기서 갈라지면
+                # 실시간 페이퍼가 백테스트와 다른 답을 낸다.
+                self._observe(candles[-1])
             return candles
         return self._candles[-limit:]
 

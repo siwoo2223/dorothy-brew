@@ -115,6 +115,33 @@ PYTHONPATH=src python3 -m dorothy.cli backtest \
 
 ## 4. 실시간 페이퍼
 
+직접 매매 설정을 쓴다면 이걸 복사하세요 (4시간봉·ATR×2.0·3배):
+
+```bash
+cp config/trading.example.yaml config/config.yaml
+```
+
+**시작 전 3분 점검**
+
+```bash
+# 1) 의존성·설정·거래소 연결
+PYTHONPATH=src python3 -m dorothy.cli doctor --config config/config.yaml
+
+# 2) 이 배율에서 손절이 청산보다 먼저 걸리는지
+PYTHONPATH=src python3 -m dorothy.cli liqcheck \
+    --config config/config.yaml --csv data/btc_4h.csv
+#    → "설정값 3배 → ✓ 손절이 먼저 걸립니다" 가 나와야 합니다
+
+# 3) 같은 설정으로 과거를 먼저 돌려 기준선을 잡아둡니다
+PYTHONPATH=src python3 -m dorothy.cli paper \
+    --config config/config.yaml --csv data/btc_4h.csv --offline
+```
+
+3번의 결과를 적어두세요. 실시간 페이퍼가 이것과 **크게 다르면** 설정이
+어긋난 것입니다(수수료 등급, 심볼, 타임프레임).
+
+**실행**
+
 ```bash
 PYTHONPATH=src python3 -m dorothy.cli paper --config config/config.yaml
 ```
@@ -122,6 +149,19 @@ PYTHONPATH=src python3 -m dorothy.cli paper --config config/config.yaml
 - **API 키가 필요 없습니다.** 공개 시세만 읽습니다
 - 주문은 **내부에서만** 처리됩니다. 거래소로 나가지 않습니다
 - `Ctrl+C`로 멈춥니다. 기록은 SQLite에 남습니다
+
+**무엇을 보게 되는가** (4시간봉 기준)
+
+- 4시간에 한 번만 판단합니다. 폴링은 15초마다 하지만 **새 마감봉이
+  없으면 아무것도 하지 않습니다.** 로그가 조용한 게 정상입니다.
+- 100일에 약 **9.7건** 매매합니다. 첫 며칠은 한 건도 없을 수 있습니다.
+- 100일 뒤 수익 확률은 **58%**, 중앙값 +0.9%입니다. 첫 100일에 42% 확률로
+  마이너스인데, 그건 전략이 틀렸다는 뜻이 아니라 **9.7건으로는 아무것도
+  알 수 없다**는 뜻입니다.
+- 백테스트 안에서도 **905일** 동안 이전 고점 아래에 있던 구간이 있었습니다.
+
+> ⚠ **페이퍼 중에 설정을 바꾸면 그때까지의 기록이 의미를 잃습니다.**
+> 바꾸고 싶으면 `db_path`를 새 파일로 두고 처음부터 다시 세세요.
 
 **멈췄다 다시 켜도 안전합니다.** 봇은 어디까지 판단했는지를 SQLite에
 남깁니다(`bot_state.last_candle_ts`). 그래서 재시작해도 마지막 마감봉을
@@ -145,6 +185,27 @@ tail -f paper.log
 
 ```bash
 PYTHONPATH=src python3 -m dorothy.cli status --config config/config.yaml
+```
+
+**멈춰야 할 때**
+
+```bash
+touch KILL      # 포지션을 정리하고 봇이 멈춥니다 (kill_switch_file 설정값)
+```
+
+`KILL` 파일은 다시 시작하기 전에 지우세요.
+
+**몇 주 뒤에 볼 것**
+
+| 보는 것 | 정상 | 이상하면 |
+|---|---|---|
+| 체결 건수 | 100일에 9~10건 | 0건이면 `diagnose`로 어디서 막히는지 |
+| 1건당 손익 | ±0.5% 근처 | 백테스트와 크게 다르면 수수료 설정 확인 |
+| 손절/익절 비율 | 손절이 조금 더 많음 | 손절이 안 잡히면 `stop_loss` 사유가 없는지 |
+| 로그의 `⚠`·`✗` | 없어야 함 | 있으면 그 줄을 먼저 읽으세요 |
+
+```bash
+grep -E "⚠|✗|ERROR" paper.log        # 경고만 추려 보기
 ```
 
 ---
