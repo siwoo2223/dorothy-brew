@@ -532,3 +532,77 @@ class RestartDoesNotRetradeTheSameBar(unittest.TestCase):
         engine._replay_clock = True
         engine.tick()
         self.assertEqual(Journal(self.db).last_candle_ts(), 0)
+
+
+class NakedPositionIsClosedTests(unittest.TestCase):
+    """손절이 등록 안 됐으면 경고로 끝내면 안 된다.
+
+    예전엔 `log.warning`만 하고 "손절이 있다고 가정하고 계속 진행합니다"라고
+    적혀 있었다. nohup으로 돌리면 그 로그를 아무도 읽지 않는다.
+    무방비 포지션은 이 저장소의 첫 원칙(손절 없는 진입은 거부)에 어긋난다.
+    """
+
+    def setUp(self):
+        from types import SimpleNamespace
+        from dorothy.exchange.bitget import BitgetExchange
+        self.ex = BitgetExchange.__new__(BitgetExchange)
+        self.ex.client = SimpleNamespace(fetch_open_orders=lambda symbol: self.orders)
+        self.ex._call = lambda fn, *a, **kw: fn(*a)
+        self.orders = []
+
+    def test_a_missing_stop_returns_false_not_none(self):
+        """False(없음 확인)와 None(확인 불가)은 다른 뜻이다."""
+        self.orders = [{"stopPrice": None, "info": {}}]
+        self.assertIs(self.ex._verify_stop(SYM, 100.0), False)
+
+    def test_a_present_stop_returns_true(self):
+        self.orders = [{"stopPrice": 100.0, "info": {}}]
+        self.assertIs(self.ex._verify_stop(SYM, 100.0), True)
+
+    def test_a_failed_query_returns_none(self):
+        def boom(symbol):
+            raise RuntimeError("조회 실패")
+        self.ex.client.fetch_open_orders = boom
+        self.assertIsNone(self.ex._verify_stop(SYM, 100.0))
+
+    def test_the_executor_closes_a_position_with_no_stop(self):
+        from dorothy.config import RiskConfig
+        from dorothy.execution.executor import Executor
+        from dorothy.models import Action, Signal
+
+        class NoStopExchange(BrokerLikeExchange):
+            """손절을 무시하는 거래소. 검증에서 걸려야 한다."""
+            def open_position(self, symbol, side, size, *, stop_loss=None,
+                              take_profit=None, client_id=""):
+                pos = super().open_position(symbol, side, size, stop_loss=stop_loss,
+                                            take_profit=take_profit, client_id=client_id)
+                pos.stop_verified = False        # 거래소가 등록하지 않았다
+                return pos
+
+        ex = NoStopExchange(flat_candles(), equity=1000.0)
+        risk = RiskManager(RiskConfig(risk_per_trade=0.01, max_position_pct=10.0),
+                           kill_switch_file="/nonexistent-kill")
+        executor = Executor(ex, risk, symbol=SYM, leverage=2.0)
+        sig = Signal(Action.ENTER_LONG, "테스트", stop_loss=95.0, take_profit=110.0)
+
+        result = executor.handle(sig, position=None, equity=1000.0, candle_ts=1)
+        self.assertIsNone(result, "무방비 포지션을 그대로 돌려줬습니다")
+        self.assertIsNone(ex.position, "포지션이 정리되지 않았습니다")
+        self.assertIn(("close", "손절 미등록"), ex.orders)
+        self.assertEqual(risk.state.open_positions, 0, "슬롯이 반납되지 않았습니다")
+
+    def test_an_unverifiable_stop_is_kept(self):
+        """과잉 반응도 버그다. '확인 불가'는 '없음'이 아니다."""
+        from dorothy.config import RiskConfig
+        from dorothy.execution.executor import Executor
+        from dorothy.models import Action, Signal
+
+        ex = BrokerLikeExchange(flat_candles(), equity=1000.0)   # stop_verified=None
+        risk = RiskManager(RiskConfig(risk_per_trade=0.01, max_position_pct=10.0),
+                           kill_switch_file="/nonexistent-kill")
+        executor = Executor(ex, risk, symbol=SYM, leverage=2.0)
+        sig = Signal(Action.ENTER_LONG, "테스트", stop_loss=95.0, take_profit=110.0)
+
+        result = executor.handle(sig, position=None, equity=1000.0, candle_ts=1)
+        self.assertIsNotNone(result, "확인 불가인데 포지션을 정리했습니다")
+        self.assertIsNotNone(ex.position)

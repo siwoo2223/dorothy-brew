@@ -81,6 +81,12 @@ class Position:
     take_profit: float | None = None
     opened_at: int = 0       # epoch ms
     client_id: str = ""
+    # 손절이 거래소에 실제로 걸린 것을 확인했는가.
+    #   True  확인됨
+    #   False **확인 결과 없음** — 무방비 포지션이다
+    #   None  확인 불가 (조회 실패 등). 있다고 단정할 수 없다.
+    # stop_loss는 '우리가 요청한 값'일 뿐이라 이 필드가 따로 필요하다.
+    stop_verified: bool | None = None
 
     def unrealized_pnl(self, price: float) -> float:
         return (price - self.entry_price) * self.size * self.side.sign

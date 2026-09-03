@@ -102,6 +102,15 @@ class Executor:
             log.exception("진입 주문 실패")
             return None
 
+        # 손절 없이 들고 있는 것은 이 모듈의 첫 원칙(손절 없는 진입은 거부)에
+        # 어긋난다. 확인 결과 '없음'이면 경고로 끝내지 않고 되돌린다.
+        # (None = 확인 불가는 정리하지 않는다 — 없다는 증거가 아니다.)
+        if getattr(pos, "stop_verified", None) is False:
+            log.error("손절 미등록 확인 — 방금 낸 포지션을 즉시 정리합니다")
+            self._exit(pos, reason="손절 미등록")
+            self.risk.release()
+            return None
+
         self._last_entry_candle_ts = candle_ts
         log.info(
             "진입 %s %s @ %.4f size=%.6f SL=%s TP=%s | %s",
