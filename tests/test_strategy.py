@@ -141,14 +141,6 @@ class RetiredStrategyTests(unittest.TestCase):
                     continue
                 self.assertTrue(any(n in line for n in names), line)
 
-    def test_wrapping_a_retired_base_warns(self):
-        """폐기된 전략 위에 필터를 씌워도 경고는 나와야 한다."""
-        from dorothy.strategy.base import get_strategy
-
-        with self.assertLogs("dorothy.strategy.base", level="WARNING") as logs:
-            get_strategy("session_filter", base="donchian")
-        self.assertIn("donchian", "\n".join(logs.output))
-
     def test_every_retirement_states_its_evidence(self):
         """'별로였다'는 폐기 사유가 아니다. 숫자가 있어야 한다."""
         from dorothy.strategy.base import retired

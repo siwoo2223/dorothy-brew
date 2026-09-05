@@ -185,7 +185,7 @@ def comparison_report(rows: list[ComparisonRow]) -> str:
 def _duplicate_warning(ranked: list[ComparisonRow]) -> list[str]:
     """성적이 완전히 같은 전략들을 찾아낸다.
 
-    필터 전략(session_filter, regime_filter 등)은 파라미터를 안 주면 전부 통과시킨다.
+    래퍼 전략(다른 전략을 감싸는 것)은 파라미터를 안 주면 전부 통과시킨다.
     그러면 기반 전략과 글자 하나 다르지 않은 결과가 나오는데, 표에는 서로 다른
     전략처럼 줄이 두 개 찍힌다. "필터를 씌웠는데도 졌다"로 읽히지만 실제로는
     필터가 아무 일도 하지 않은 것이다. 그 착각을 여기서 끊는다.

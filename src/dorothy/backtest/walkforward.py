@@ -38,9 +38,7 @@ log = logging.getLogger(__name__)
 DEFAULT_GRIDS: dict[str, dict[str, list]] = {
     "donchian": {"channel": [10, 20, 40], "atr_stop_mult": [1.5, 2.5]},
     "ema_cross": {"fast": [10, 20], "slow": [50, 100], "atr_stop_mult": [1.5, 2.5]},
-    "mean_reversion": {"rsi_period": [7, 14], "oversold": [25.0, 30.0]},
     "random": {"entry_probability": [0.01, 0.02]},
-    "ict_confluence": {"min_displacement_angle": [15.0, 30.0], "min_rr": [1.5, 2.5]},
 }
 
 

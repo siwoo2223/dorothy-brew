@@ -677,7 +677,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--symbol")
         sp.add_argument("--timeframe")
         sp.add_argument("--equity", type=float, help="시작 자본")
-        sp.add_argument("--strategy", help="전략 이름 (ema_cross / ict_confluence)")
+        sp.add_argument("--strategy", help="전략 이름 (donchian / ema_cross / box)")
 
     bt = sub.add_parser("backtest", parents=[common], help="과거 데이터로 전략 검증")
     add_data_args(bt)
