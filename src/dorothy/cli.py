@@ -200,6 +200,7 @@ def cmd_collect(args) -> int:
         venue=args.venue, symbol=args.symbol,
         trades=not args.no_trades, book=not args.no_book,
         book_speed=args.speed, max_seconds=args.seconds,
+        max_gigabytes=args.max_gb if args.max_gb and args.max_gb > 0 else None,
     )
     print(f"거래소 {spec.venue}  종목 {spec.symbol}")
     print(f"스트림 {', '.join(spec.streams())}")
@@ -207,13 +208,23 @@ def cmd_collect(args) -> int:
     if args.probe:
         print("\n점검 모드 — 몇 초만 받아보고 끝냅니다.\n")
 
-    with Store(args.db) as store:
+    # 0은 '끄기'로 받는다. Store/CollectSpec은 None을 '제한 없음'으로 쓴다.
+    near = args.near_pct if args.near_pct and args.near_pct > 0 else None
+    if near:
+        print(f"호가   중간가 ±{near:.2%} 안쪽만 저장 (먼 호가는 버림)")
+    else:
+        print("호가   전부 저장 — ⚠ 하루 1GB 넘게 쌓일 수 있습니다")
+    if args.max_gb:
+        print(f"한도   {args.max_gb:g} GB에 도달하면 멈춥니다")
+
+    with Store(args.db, near_pct=near) as store:
         try:
             run(spec, store, probe=args.probe)
         except KeyboardInterrupt:
             print("\n중단 — 저장하고 종료합니다.")
         print()
         print(store.summary())
+        print(store.growth_estimate())
     return 0
 
 
@@ -223,32 +234,11 @@ def cmd_collect_status(args) -> int:
 
     with Store(args.db) as store:
         print(store.summary())
+        print(store.growth_estimate())
         for key in ("venue", "symbol", "streams"):
             value = store.get_meta(key)
             if value:
                 print(f"  {key:<10}  {value}")
-    return 0
-
-
-def cmd_grid(args) -> int:
-    """격자 매매 — 방향을 맞히지 않고 진동을 먹는다. 전부 지정가."""
-    from .strategy.grid import GridSpec, simulate
-
-    cfg = _build_config(args)
-    cfg.mode = "backtest"
-    candles = _load_candles(args, cfg)
-    spec = GridSpec(
-        levels=args.levels, step_atr=args.step, size_per_level=args.size,
-        close_daily=not args.no_daily_close, max_hold_bars=args.max_hold,
-    )
-    result = simulate(
-        candles, spec, maker_fee=cfg.exchange.maker_fee,
-        taker_fee=cfg.exchange.taker_fee, slippage=cfg.exchange.slippage,
-    )
-    print(result.report(spec, {
-        "maker": cfg.exchange.maker_fee, "taker": cfg.exchange.taker_fee,
-        "slippage": cfg.exchange.slippage,
-    }))
     return 0
 
 
@@ -744,6 +734,11 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--no-trades", action="store_true", help="체결 수집 끄기")
     co.add_argument("--no-book", action="store_true",
                     help="호가 수집 끄기 (용량이 1/100로 줄어듭니다)")
+    co.add_argument("--near-pct", type=float, default=0.005,
+                    help="중간가에서 이 비율 밖의 호가는 버린다 (0.005=±0.5%%). "
+                         "0을 주면 전부 저장 — 하루 1GB 넘게 쌓입니다")
+    co.add_argument("--max-gb", type=float, default=20.0,
+                    help="파일이 이 크기가 되면 깔끔하게 멈춘다 (0이면 무제한)")
     co.add_argument("--seconds", type=float, help="이 시간 뒤 종료 (미지정이면 계속)")
     co.add_argument("--probe", action="store_true",
                     help="몇 초만 받아보고 눈으로 확인 — 처음엔 이걸로 시작하세요")
@@ -753,15 +748,6 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--db", default="data/collect.db")
     cs.set_defaults(func=cmd_collect_status)
 
-    gd = sub.add_parser("grid", parents=[common],
-                        help="격자 매매 — 지정가만 쓰고 진동을 먹는다")
-    add_data_args(gd)
-    gd.add_argument("--levels", type=int, default=5, help="한쪽 격자 개수")
-    gd.add_argument("--step", type=float, default=0.25, help="격자 간격 (ATR 배수)")
-    gd.add_argument("--size", type=float, default=0.20, help="레벨당 명목가 (자본 대비)")
-    gd.add_argument("--max-hold", type=int, default=24, help="보유 한도 (봉)")
-    gd.add_argument("--no-daily-close", action="store_true", help="하루 마감 청산 끄기")
-    gd.set_defaults(func=cmd_grid)
 
     cf = sub.add_parser("costfloor", parents=[common],
                         help="타임프레임별 손익분기 승률 — 애초에 가능한가")

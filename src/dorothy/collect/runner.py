@@ -36,6 +36,10 @@ class CollectSpec:
     book_speed: str = "100ms"       # 100ms | 250ms | 500ms
     max_seconds: float | None = None
     reconnect_max: float = 60.0
+    # 파일이 이보다 커지면 **깔끔하게 멈춘다.** 없으면 디스크가 찰 때
+    # SQLite 쓰기 실패가 아래 except로 잡혀 '끊김'으로 오인되고,
+    # 영원히 재접속만 시도하면서 아무것도 저장하지 못한다.
+    max_gigabytes: float | None = 20.0
 
     def streams(self) -> list[str]:
         symbol = self.symbol.lower()
@@ -107,9 +111,30 @@ def run(spec: CollectSpec, store: Store, *, probe: bool = False) -> None:
     started = time.time()
     backoff = 1.0
     seen = {"trade": 0, "book": 0}
+    limit_bytes = int(spec.max_gigabytes * 1e9) if spec.max_gigabytes else None
+    checked_at = 0.0
+
+    def over_limit() -> bool:
+        """용량 확인. 매 메시지마다 stat을 부르면 그게 병목이 된다."""
+        nonlocal checked_at
+        if limit_bytes is None:
+            return False
+        now = time.time()
+        if now - checked_at < 30:
+            return False
+        checked_at = now
+        return store.disk_bytes() >= limit_bytes
 
     while True:
         if spec.max_seconds and time.time() - started >= spec.max_seconds:
+            break
+        if over_limit():
+            store.flush()
+            log.error(
+                "용량 한도 도달 (%.1f GB) — 수집을 멈춥니다. "
+                "near_pct를 줄이거나 book_speed를 늘려 다시 시작하세요.",
+                spec.max_gigabytes,
+            )
             break
         disconnected_at: int | None = None
         try:
@@ -123,6 +148,8 @@ def run(spec: CollectSpec, store: Store, *, probe: bool = False) -> None:
                     kind = handle(raw, store)
                     if kind:
                         seen[kind] += 1
+                    if over_limit():
+                        break                 # 바깥 루프가 사유를 남기고 멈춘다
                     if probe and seen["trade"] + seen["book"] >= 20:
                         print(f"  체결 {seen['trade']}건, 호가 {seen['book']}건 수신")
                         print("  마지막 메시지:", raw[:200])

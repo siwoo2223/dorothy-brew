@@ -247,3 +247,103 @@ class HandleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiskFootprintTests(unittest.TestCase):
+    """몇 달 모으려면 용량이 진짜 제약이다.
+
+    실측 81바이트/행 · depth@100ms는 초당 10메시지. 메시지당 20레벨이면
+    하루 1.4GB, 3개월 126GB다. 줄이는 장치가 실제로 줄이는지 확인한다.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = str(Path(self.tmp.name) / "c.db")
+
+    @staticmethod
+    def _delta(ts, fid, mid=70_000.0, span=200.0, levels=10):
+        step = span / levels
+        bids = [BookLevel(mid - (i + 1) * step, 1.0) for i in range(levels)]
+        asks = [BookLevel(mid + (i + 1) * step, 1.0) for i in range(levels)]
+        return BookDelta(ts=ts, first_id=fid, final_id=fid, bids=bids, asks=asks)
+
+    def test_near_pct_drops_far_levels(self):
+        store = Store(self.path, near_pct=0.001)      # ±0.1% = ±70원
+        store.add_trade(Trade(ts=1, trade_id=1, price=70_000.0, qty=1.0, is_buy=True))
+        store.add_book(self._delta(2, 10, span=2000.0, levels=10))
+        kept = store.conn.execute("SELECT COUNT(*) FROM book").fetchone()[0]
+        self.assertGreater(store.counts.book_dropped, 0, "먼 호가를 하나도 안 버렸습니다")
+        self.assertLess(kept, 20, "전부 저장됐습니다")
+        store.close()
+
+    def test_without_a_reference_price_nothing_is_dropped(self):
+        """기준가가 없는데 버리면 무엇을 버렸는지 알 수 없다."""
+        store = Store(self.path, near_pct=0.001)
+        store.add_book(self._delta(1, 10))            # 체결이 아직 없다
+        self.assertEqual(store.counts.book_dropped, 0)
+        self.assertEqual(store.conn.execute("SELECT COUNT(*) FROM book").fetchone()[0], 20)
+        store.close()
+
+    def test_near_pct_off_keeps_everything(self):
+        store = Store(self.path)
+        store.add_trade(Trade(ts=1, trade_id=1, price=70_000.0, qty=1.0, is_buy=True))
+        store.add_book(self._delta(2, 10, span=5000.0))
+        self.assertEqual(store.counts.book_dropped, 0)
+        store.close()
+
+    def test_a_negative_band_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Store(self.path, near_pct=0.0)
+
+    def test_disk_bytes_counts_the_wal(self):
+        store = Store(self.path, commit_every=10_000)
+        for i in range(500):
+            store.add_book(self._delta(i, i + 1))
+        self.assertGreater(store.disk_bytes(), 0)
+        store.close()
+
+    def test_growth_estimate_reports_per_day(self):
+        store = Store(self.path)
+        day = 86_400_000
+        store.add_trade(Trade(ts=day, trade_id=1, price=70_000.0, qty=1.0, is_buy=True))
+        store.add_trade(Trade(ts=day * 3, trade_id=2, price=70_000.0, qty=1.0, is_buy=True))
+        store.flush()
+        text = store.growth_estimate()
+        self.assertIn("하루", text)
+        self.assertIn("90일", text)
+        store.close()
+
+    def test_growth_estimate_says_so_when_there_is_not_enough_data(self):
+        store = Store(self.path)
+        self.assertIn("아직", store.growth_estimate())
+        store.close()
+
+    def test_the_dropped_count_survives_a_restart(self):
+        """몇 달 뒤에 '원래 이만큼이었다'와 '우리가 버렸다'를 구분해야 한다."""
+        store = Store(self.path, near_pct=0.001)
+        store.add_trade(Trade(ts=1, trade_id=1, price=70_000.0, qty=1.0, is_buy=True))
+        store.add_book(self._delta(2, 10, span=2000.0))
+        first = store.total_dropped()
+        self.assertGreater(first, 0)
+        store.close()
+
+        again = Store(self.path, near_pct=0.001)
+        self.assertEqual(again.total_dropped(), first, "재시작하면서 잊었습니다")
+        again.add_trade(Trade(ts=3, trade_id=2, price=70_000.0, qty=1.0, is_buy=True))
+        again.add_book(self._delta(4, 11, span=2000.0))
+        self.assertGreater(again.total_dropped(), first, "누적되지 않습니다")
+        again.close()
+
+    def test_status_reports_dropping_even_without_the_flag(self):
+        """collect-status는 near_pct 없이 파일을 연다. 그래도 알려줘야 한다."""
+        store = Store(self.path, near_pct=0.001)
+        store.add_trade(Trade(ts=1, trade_id=1, price=70_000.0, qty=1.0, is_buy=True))
+        store.add_book(self._delta(2, 10, span=2000.0))
+        store.close()
+
+        reader = Store(self.path)            # 플래그 없이 열기
+        text = reader.summary()
+        self.assertIn("먼 호가 버림", text)
+        self.assertIn("0.10%", text)
+        reader.close()
