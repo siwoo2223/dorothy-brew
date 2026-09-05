@@ -1,0 +1,66 @@
+# 보수적 시작 설정 — 소액 계좌용
+#
+#   cp config/conservative.example.yaml config/config.yaml
+#
+# 이 파일의 모든 숫자에는 이유가 있습니다. 바꾸시기 전에 주석을 읽어주세요.
+# ⚠ 이 설정도 실제 데이터로는 아직 검증되지 않았습니다.
+#   반드시 fetch → compare → walkforward 를 직접 돌려보세요.
+
+mode: paper                       # 먼저 페이퍼. live는 데모 계정부터
+initial_equity: 100.0             # 실전 최소선. $10로는 최소 주문 수량에 걸립니다
+poll_interval_sec: 60             # 1시간봉이라 자주 볼 필요 없습니다
+db_path: data/dorothy.db
+kill_switch_file: KILL
+
+exchange:
+  name: bitget
+  symbol: "BTC/USDT:USDT"
+
+  # ── 가장 중요한 한 줄 ──────────────────────────────────
+  # 15분봉 → 1시간봉으로 올리는 것만으로 실측상:
+  #   PF        1.00~1.29 → 1.50~1.53
+  #   MDD       16.5%     → 3.3%
+  #   수수료     $33.56    → $6.69
+  #   워크포워드  효율 -0.22 → +0.31 (검증 구간이 마이너스에서 플러스로)
+  # 소액 계좌에서 수수료는 성과를 결정합니다. 빈도를 낮추는 게 첫 번째입니다.
+  timeframe: "1h"
+
+  # 레버리지는 기대값이 아니라 '생존'의 문제입니다.
+  # 100배에서는 가격이 1% 움직이면 증거금이 사라집니다.
+  leverage: 2.0
+  margin_mode: isolated
+
+  taker_fee: 0.0006               # 본인 등급으로 맞추세요
+  maker_fee: 0.0002
+  slippage: 0.0005
+  min_order_size: 0.0001          # live에서는 거래소 실제 값으로 덮어씁니다
+  size_step: 0.0001
+
+  # 무기한 선물은 8시간마다 펀딩비가 오갑니다. 롱이 내고 숏이 받습니다.
+  # 롱 전용 전략이면 큰 비용입니다 — 실측상 0.10% 구간에서 수익의 70%가 날아갑니다.
+  # 롱/숏 양방향이면 대체로 상쇄됩니다(아래 allow_short: true 를 유지하는 이유 중 하나).
+  funding_rate: 0.0001            # 8시간당 0.01%. 추세장에는 0.03~0.10%까지 갑니다
+  funding_interval_hours: 8
+
+risk:
+  risk_per_trade: 0.01            # 1회 1%. 10연패해도 계좌의 10%입니다
+  max_position_pct: 0.30
+  max_daily_loss_pct: 0.03        # 하루 -3%면 그날은 중단
+  max_consecutive_losses: 4       # 4연패면 당일 중단 (다음 날 자동 재개)
+  max_open_positions: 1
+  max_leverage: 3.0               # 위 leverage가 이보다 크면 여기로 깎입니다
+
+strategy:
+  # 돈치안을 고른 이유는 '가장 잘 나와서'가 아니라
+  # **파라미터가 가장 적어서**입니다. 파라미터가 적으면 과최적화할 여지도 적습니다.
+  name: donchian
+  params:
+    channel: 40                   # 1시간봉 40 ≈ 1.7일 고저 돌파
+    exit_channel: 20              # 청산은 더 빠르게
+    atr_period: 14
+    atr_stop_mult: 2.0
+    atr_target_mult: 3.0
+    allow_short: true
+
+notify:
+  telegram_enabled: false
