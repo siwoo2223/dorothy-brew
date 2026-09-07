@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dorothy-brew"
+version = "0.1.0"
+description = "Pattern-based auto trading AI: 30 chart / smart-money / harmonic pattern detectors"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+dorothy = "dorothy_brew.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dorothy_brew*"]
