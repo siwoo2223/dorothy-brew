@@ -281,6 +281,16 @@ def trend_with_bos(seed: int = 47) -> Series:
     return b.series("TREND")
 
 
+def trending_market(seed: int = 71, legs: int = 14, drift: float = 0.05) -> Series:
+    """A persistent uptrend of impulse + shallow pullback — flags, BOS, channels."""
+    b = PriceBuilder(seed=seed, noise=0.003)
+    b.chop(24, 0.012, 0.9)
+    for i in range(legs):
+        b.leg(7, drift * (1 + 0.15 * ((i % 3) - 1)), vol_mult=1.9, noise_mult=0.6)
+        b.leg(6, -drift * 0.35, vol_mult=0.7)
+    return b.series("TREND-UP")
+
+
 def random_walk(seed: int = 101, bars: int = 300, vol: float = 0.008) -> Series:
     """Structureless geometric random walk — the false-positive control."""
     b = PriceBuilder(seed=seed, noise=vol)
@@ -291,6 +301,7 @@ def random_walk(seed: int = 101, bars: int = 300, vol: float = 0.008) -> Series:
 
 SCENARIOS.update({
     "trend_with_bos": trend_with_bos,
+    "trending_market": trending_market,
     "random_walk": random_walk,
     **{f"harmonic_{k}": (lambda k=k: harmonic(k)) for k in HARMONIC_LEVELS},
 })

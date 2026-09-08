@@ -7,6 +7,8 @@ from typing import List, Optional, Sequence, Tuple
 from ..core import (Candle, Pivot, Series, line_at, line_through, linreg, near,
                     volume_slope, clamp)
 
+_MISS = object()
+
 
 def last_pivots(series: Series, n: int, left: int = 3, right: int = 3) -> List[Pivot]:
     return series.pivots(left, right)[-n:]
@@ -69,34 +71,45 @@ def volume_dryup(series: Series, i0: int, i1: int) -> float:
 
 def impulse_leg(series: Series, end: int, min_bars: int = 4, max_bars: int = 40,
                 direction: str = "up") -> Optional[Tuple[int, int, float]]:
-    """Find the strongest contiguous leg ending at/near ``end``.
+    """Strongest contiguous leg inside the ``max_bars`` window ending at ``end``.
 
-    Returns (start_index, end_index, size) where size is the price travel.
+    Returns ``(start_index, end_index, size)`` — the low/high pair (or high/low
+    for a down leg) that spans the most price. One backward pass with a running
+    extreme instead of testing every window, because the backtester calls this
+    on every bar.
     """
-    best = None
-    atr = series.atr(14, end) or 1e-9
-    for start in range(max(0, end - max_bars), max(0, end - min_bars) + 1):
-        seg = series[start:end + 1]
-        if len(seg) < min_bars:
-            continue
+    n = len(series)
+    if end < min_bars or end >= n:
+        return None
+    key = (end, min_bars, max_bars, direction)
+    cached = series.leg_cache.get(key, _MISS)
+    if cached is not _MISS:
+        return cached
+
+    lo_bound = max(0, end - max_bars)
+    window = series.candles[lo_bound:end + 1]
+    highs = [c.high for c in window]
+    lows = [c.low for c in window]
+    best: Optional[Tuple[int, int, float]] = None
+    run_extreme, run_index = None, -1
+
+    for j in range(min_bars, len(window)):
+        i = j - min_bars                       # the leg needs at least min_bars
         if direction == "up":
-            lo_i = min(range(len(seg)), key=lambda i: seg[i].low)
-            hi_i = max(range(len(seg)), key=lambda i: seg[i].high)
-            if hi_i <= lo_i:
-                continue
-            size = seg[hi_i].high - seg[lo_i].low
-            span = (start + lo_i, start + hi_i, size)
+            if run_extreme is None or lows[i] < run_extreme:
+                run_extreme, run_index = lows[i], i
+            size = highs[j] - run_extreme
         else:
-            hi_i = max(range(len(seg)), key=lambda i: seg[i].high)
-            lo_i = min(range(len(seg)), key=lambda i: seg[i].low)
-            if lo_i <= hi_i:
-                continue
-            size = seg[hi_i].high - seg[lo_i].low
-            span = (start + hi_i, start + lo_i, size)
-        if size / atr < 2.0:
-            continue
+            if run_extreme is None or highs[i] > run_extreme:
+                run_extreme, run_index = highs[i], i
+            size = run_extreme - lows[j]
         if best is None or size > best[2]:
-            best = span
+            best = (lo_bound + run_index, lo_bound + j, size)
+
+    atr = series.atr(14, end) or 1e-9
+    if best is None or best[2] / atr < 2.0:
+        best = None
+    series.leg_cache[key] = best
     return best
 
 

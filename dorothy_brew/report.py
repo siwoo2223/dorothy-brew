@@ -131,3 +131,84 @@ def catalogue(specs: Optional[Iterable[PatternSpec]] = None) -> str:
         out.append(f" {spec.number:<3}{spec.id:<24}{spec.name:<26}"
                    f"{'/'.join(spec.entry_tf):<16}{spec.hold}")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# backtest rendering
+# ---------------------------------------------------------------------------
+
+def _sparkline(values, width: int = 60) -> str:
+    """A coarse ASCII equity curve — enough to see shape and drawdown."""
+    if len(values) < 2:
+        return ""
+    blocks = " .:-=+*#%@"
+    step = max(1, len(values) // width)
+    sampled = values[::step][:width]
+    lo, hi = min(sampled), max(sampled)
+    if hi <= lo:
+        return blocks[0] * len(sampled)
+    return "".join(blocks[min(len(blocks) - 1,
+                              int((v - lo) / (hi - lo) * (len(blocks) - 1)))]
+                   for v in sampled)
+
+
+def render_backtest(result, show_trades: int = 10) -> str:
+    stats = result.stats()
+    cfg = result.config
+    out = [BAR,
+           f" BACKTEST {result.symbol or 'series'} | {result.timeframe or '?'} | "
+           f"{result.bars} bars | risk {cfg.risk_pct}% of {cfg.initial_equity:,.0f}"
+           f"{' (compounding)' if cfg.compound else ''}",
+           BAR]
+    if not stats["trades"]:
+        out.append(" no trades were taken — loosen the filters or extend the history")
+        return "\n".join(out)
+
+    equity = [e for _, e in result.equity_curve]
+    out += [
+        f" trades {stats['trades']:>5}   win rate {stats['win_rate'] * 100:>5.1f}%   "
+        f"expectancy {stats['expectancy_r']:+.3f}R   profit factor {stats['profit_factor']:.2f}",
+        f" return {stats['total_return_pct']:+.2f}%   max drawdown {stats['max_drawdown_pct']:.2f}%   "
+        f"total {stats['total_r']:+.1f}R   fees {stats['fees_paid']:,.2f}",
+        f" avg win {stats['avg_win_r']:+.2f}R   avg loss {stats['avg_loss_r']:+.2f}R   "
+        f"best {stats['best_r']:+.2f}R   worst {stats['worst_r']:+.2f}R   "
+        f"avg hold {stats['avg_bars_held']:.0f} bars",
+        f" signal-bars seen {stats['signals_seen']} -> entries {stats['signals_taken']}",
+        f" equity |{_sparkline(equity)}| {equity[0]:,.0f} -> {equity[-1]:,.0f}",
+        "",
+        f" {'PATTERN':<24}{'N':>4}{'WIN%':>7}{'EXP R':>8}{'TOTAL R':>9}{'PNL':>12}",
+    ]
+    for pid, row in result.by_pattern().items():
+        name = REGISTRY[pid].name if pid in REGISTRY else pid
+        out.append(f" {name[:23]:<24}{row['trades']:>4}{row['win_rate'] * 100:>7.1f}"
+                   f"{row['expectancy_r']:>8.2f}{row['total_r']:>9.2f}{row['pnl']:>12,.2f}")
+
+    direction = result.by_direction()
+    if direction:
+        out.append("")
+        for side, row in direction.items():
+            out.append(f" {side:<24}{row['trades']:>4}{row['win_rate'] * 100:>7.1f}"
+                       f"{'':>8}{row['total_r']:>9.2f}")
+
+    if show_trades:
+        out += ["", f" last {min(show_trades, len(result.trades))} trades:",
+                f" {'#':>3} {'PATTERN':<22}{'SIDE':<6}{'ENTRY':>12}{'EXIT':>10}"
+                f"{'BARS':>6}{'R':>8}  REASON"]
+        for i, trade in enumerate(result.trades[-show_trades:], 1):
+            out.append(f" {i:>3} {trade.pattern_id[:21]:<22}{trade.direction:<6}"
+                       f"{_fmt_price(trade.entry_price):>12}"
+                       f"{(str(trade.exit_bar) if trade.exit_bar is not None else 'open'):>10}"
+                       f"{trade.bars_held:>6}{trade.r_multiple:>8.2f}  {trade.reason}")
+    return "\n".join(out)
+
+
+def render_live_event(event, cfg=None, actionable_only: bool = False) -> str:
+    """One line of context plus the fresh signals from a closed bar."""
+    signals = [s for s in event.new_signals
+               if not actionable_only or s.status in (CONFIRMED, RETEST)]
+    head = (f"[{_fmt_time(event.candle.ts)}] {event.report.symbol} {event.report.timeframe} "
+            f"close {_fmt_price(event.candle.close)} | {len(event.report.signals)} live setups, "
+            f"{len(signals)} new")
+    if not signals:
+        return head
+    return "\n".join([head] + [signal_block(s, cfg, "  ") for s in signals])

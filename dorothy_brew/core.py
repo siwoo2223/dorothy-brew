@@ -64,7 +64,9 @@ class Series:
         self.symbol = symbol
         self.timeframe = timeframe
         self._atr_cache: dict = {}
+        self._tr_cache: Optional[List[float]] = None
         self._pivot_cache: dict = {}
+        self.leg_cache: dict = {}   # memoised impulse legs, keyed by detector args
 
     # -- container protocol -------------------------------------------------
     def __len__(self) -> int:
@@ -100,12 +102,14 @@ class Series:
 
     # -- indicators ---------------------------------------------------------
     def true_ranges(self) -> List[float]:
-        out = [self.candles[0].range] if self.candles else []
-        for prev, cur in zip(self.candles, self.candles[1:]):
-            out.append(max(cur.high - cur.low,
-                           abs(cur.high - prev.close),
-                           abs(cur.low - prev.close)))
-        return out
+        if self._tr_cache is None:
+            out = [self.candles[0].range] if self.candles else []
+            for prev, cur in zip(self.candles, self.candles[1:]):
+                out.append(max(cur.high - cur.low,
+                               abs(cur.high - prev.close),
+                               abs(cur.low - prev.close)))
+            self._tr_cache = out
+        return self._tr_cache
 
     def atr(self, period: int = 14, at: Optional[int] = None) -> float:
         """Wilder-smoothed ATR evaluated at bar ``at`` (default: last bar)."""

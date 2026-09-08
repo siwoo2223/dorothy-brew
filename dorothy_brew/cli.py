@@ -5,14 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from urllib.error import URLError
 from typing import Dict, List, Optional
 
 from . import data, synth
+from .backtester import BacktestConfig, backtest
 from .config import ScanConfig
 from .core import Series
 from .engine import MultiReport, ScanReport, plans, scan, scan_multi
+from .feeds import BASE_URL, PRODUCTS, BitgetClient, BitgetError, LiveFeed
+from .feeds.http import HttpError
 from .registry import CATEGORY_TITLES, REGISTRY, all_specs
-from .report import card, catalogue, render_multi, render_report
+from .report import (card, catalogue, render_backtest, render_live_event,
+                     render_multi, render_report)
 
 
 def _cfg_from_args(a: argparse.Namespace) -> ScanConfig:
@@ -132,6 +137,95 @@ def cmd_demo(a: argparse.Namespace) -> int:
     return 0
 
 
+def _bt_from_args(a: argparse.Namespace) -> BacktestConfig:
+    bt = BacktestConfig()
+    for arg, field in (("equity", "initial_equity"), ("risk_pct", "risk_pct"),
+                       ("warmup", "warmup"), ("window", "window"), ("step", "step"),
+                       ("max_open", "max_open"), ("fee_bps", "fee_bps"),
+                       ("slippage_bps", "slippage_bps"), ("max_bars", "max_bars_in_trade"),
+                       ("cooldown", "cooldown_bars"), ("entry_mode", "entry_mode")):
+        value = getattr(a, arg, None)
+        if value is not None:
+            setattr(bt, field, value)
+    if getattr(a, "no_shorts", False):
+        bt.allow_shorts = False
+    if getattr(a, "no_compound", False):
+        bt.compound = False
+    return bt
+
+
+def cmd_backtest(a: argparse.Namespace) -> int:
+    cfg = _cfg_from_args(a)
+    bt = _bt_from_args(a)
+    series = _load(a.file, a.symbol, a.timeframe)
+    result = backtest(series, cfg, bt, patterns=a.pattern, categories=a.category)
+    if a.json:
+        print(json.dumps(result.to_dict(), indent=2, default=str))
+    else:
+        print(render_backtest(result, show_trades=a.trades))
+    return 0 if result.trades else 1
+
+
+def _client(a: argparse.Namespace) -> BitgetClient:
+    return BitgetClient(product=a.product, timeout=a.timeout)
+
+
+def _network_guard(fn, *args):
+    """Turn transport failures into a one-line message instead of a traceback."""
+    try:
+        return fn(*args)
+    except BitgetError as exc:
+        raise SystemExit(f"bitget rejected the request: {exc}")
+    except HttpError as exc:
+        raise SystemExit(f"bitget returned {exc.status}: {exc.body[:200]}")
+    except (URLError, OSError) as exc:
+        raise SystemExit(f"could not reach {BASE_URL}: {exc}. Check connectivity, "
+                         f"any HTTPS_PROXY setting, and whether the API is "
+                         f"reachable from your region.")
+
+
+def cmd_fetch(a: argparse.Namespace) -> int:
+    client = _client(a)
+    series = _network_guard(lambda: client.history(a.symbol, a.timeframe, bars=a.bars))
+    if not len(series):
+        raise SystemExit(f"bitget returned no candles for {a.symbol} {a.timeframe}")
+    if a.out:
+        data.write_csv(series, a.out)
+        print(f"{len(series)} candles -> {a.out} "
+              f"({series[0].ts} .. {series[-1].ts})")
+    if a.scan or not a.out:
+        cfg = _cfg_from_args(a)
+        report = scan(series, cfg, patterns=a.pattern, categories=a.category)
+        print(json.dumps(report.to_dict(), indent=2, default=str) if a.json
+              else render_report(report, cfg, top=a.top))
+    return 0
+
+
+def cmd_live(a: argparse.Namespace) -> int:
+    cfg = _cfg_from_args(a)
+    feed = LiveFeed(_client(a), a.symbol, a.timeframe, scan_cfg=cfg, window=a.window,
+                    patterns=a.pattern, categories=a.category,
+                    poll_seconds=a.poll_seconds)
+    _network_guard(feed.prime)
+    print(f"primed {len(feed.series)} bars of {feed.symbol} {feed.timeframe} "
+          f"({a.product}); waiting for the next close. Ctrl-C to stop.")
+    if a.once:
+        report = feed.scan_now()
+        print(json.dumps(report.to_dict(), indent=2, default=str) if a.json
+              else render_report(report, cfg, top=a.top))
+        return 0
+
+    def emit(event) -> None:
+        text = render_live_event(event, cfg, actionable_only=a.no_forming)
+        print(text, flush=True)
+
+    try:
+        feed.run(emit, max_polls=a.max_polls)
+    except KeyboardInterrupt:
+        print("\nstopped")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dorothy",
@@ -161,6 +255,45 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("pattern_id")
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_explain)
+
+    b = sub.add_parser("backtest", help="replay a file bar by bar and score the signals")
+    b.add_argument("file")
+    _add_common(b)
+    b.add_argument("--warmup", type=int, help="bars before the first scan (default 150)")
+    b.add_argument("--window", type=int, help="bars handed to the scanner (default 320)")
+    b.add_argument("--step", type=int, help="scan every N bars (default 1)")
+    b.add_argument("--max-open", dest="max_open", type=int, help="concurrent positions")
+    b.add_argument("--fee-bps", dest="fee_bps", type=float, help="fee per side in bps")
+    b.add_argument("--slippage-bps", dest="slippage_bps", type=float, help="slippage in bps")
+    b.add_argument("--max-bars", dest="max_bars", type=int, help="time stop, in bars")
+    b.add_argument("--cooldown", type=int, help="bars before re-entering the same pattern")
+    b.add_argument("--entry-mode", dest="entry_mode", choices=["next_open", "signal_close"])
+    b.add_argument("--no-shorts", action="store_true")
+    b.add_argument("--no-compound", action="store_true")
+    b.add_argument("--trades", type=int, default=10, help="how many recent trades to print")
+    b.set_defaults(func=cmd_backtest)
+
+    f = sub.add_parser("fetch", help="download Bitget candles (public API, no key)")
+    f.add_argument("symbol", help="e.g. BTCUSDT")
+    f.add_argument("--product", default="usdt-futures", choices=list(PRODUCTS))
+    f.add_argument("--bars", type=int, default=500, help="how many candles (default 500)")
+    f.add_argument("--out", help="write the candles to this CSV")
+    f.add_argument("--scan", action="store_true", help="also scan what was downloaded")
+    f.add_argument("--timeout", type=float, default=10.0)
+    _add_common(f)
+    f.set_defaults(func=cmd_fetch, timeframe="1h")
+
+    live = sub.add_parser("live", help="poll Bitget and scan every closed bar")
+    live.add_argument("symbol", help="e.g. BTCUSDT")
+    live.add_argument("--product", default="usdt-futures", choices=list(PRODUCTS))
+    live.add_argument("--window", type=int, default=400, help="rolling bars kept in memory")
+    live.add_argument("--poll-seconds", dest="poll_seconds", type=float,
+                      help="override the poll interval (default: the next bar close)")
+    live.add_argument("--max-polls", dest="max_polls", type=int, help="stop after N polls")
+    live.add_argument("--once", action="store_true", help="scan the current bars and exit")
+    live.add_argument("--timeout", type=float, default=10.0)
+    _add_common(live)
+    live.set_defaults(func=cmd_live, timeframe="1h")
 
     d = sub.add_parser("demo", help="run the detectors on built-in synthetic charts")
     d.add_argument("scenario", nargs="?")

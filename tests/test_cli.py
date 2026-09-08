@@ -120,6 +120,90 @@ class TestCli(unittest.TestCase):
             run(["scan", "/nonexistent/file.csv"])
 
 
+class TestBacktestCli(unittest.TestCase):
+    def test_backtest_text_output(self):
+        code, out = run(["backtest", "demo:trending_market", "--warmup", "120",
+                         "--window", "240", "--trades", "3"])
+        self.assertEqual(code, 0)
+        self.assertIn("BACKTEST", out)
+        self.assertIn("win rate", out)
+        self.assertIn("expectancy", out)
+
+    def test_backtest_json_output(self):
+        _, out = run(["backtest", "demo:trending_market", "--warmup", "120",
+                      "--window", "240", "--json"])
+        payload = json.loads(out)
+        self.assertIn("stats", payload)
+        self.assertIn("equity_curve", payload)
+        self.assertEqual(payload["stats"]["trades"], len(payload["trades"]))
+
+    def test_execution_flags_reach_the_config(self):
+        _, out = run(["backtest", "demo:trending_market", "--warmup", "120",
+                      "--window", "240", "--no-shorts", "--fee-bps", "0",
+                      "--risk", "2", "--json"])
+        payload = json.loads(out)
+        self.assertTrue(all(t["direction"] == "long" for t in payload["trades"]))
+        self.assertEqual(payload["stats"]["fees_paid"], 0.0)
+
+    def test_backtest_on_a_short_series_reports_nothing(self):
+        code, out = run(["backtest", "demo:fvg_impulse", "--warmup", "150"])
+        self.assertEqual(code, 1)
+        self.assertIn("no trades", out)
+
+
+class TestFeedCli(unittest.TestCase):
+    """The Bitget commands, wired to a fake transport instead of the network."""
+
+    def setUp(self):
+        from dorothy_brew.feeds import BitgetClient, JsonHttp
+        from tests.test_feeds import FakeBitget
+        import dorothy_brew.cli as cli_mod
+        self.fake = FakeBitget(bars=200)
+        self.original = cli_mod.BitgetClient
+        cli_mod.BitgetClient = lambda product="spot", timeout=10.0: BitgetClient(
+            product, http=JsonHttp(transport=self.fake, sleeper=lambda s: None))
+        self.cli_mod = cli_mod
+
+    def tearDown(self):
+        self.cli_mod.BitgetClient = self.original
+
+    def test_fetch_writes_a_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "btc.csv")
+            code, out = run(["fetch", "BTCUSDT", "--tf", "1h", "--bars", "120",
+                             "--out", path])
+            self.assertEqual(code, 0)
+            self.assertIn("120 candles", out)
+            series = data.load_csv(path)
+        self.assertEqual(len(series), 120)
+
+    def test_fetch_scans_when_no_output_file(self):
+        code, out = run(["fetch", "BTCUSDT", "--tf", "1h", "--bars", "200"])
+        self.assertEqual(code, 0)
+        self.assertIn("net bias", out)
+
+    def test_fetch_json(self):
+        _, out = run(["fetch", "BTCUSDT", "--tf", "1h", "--bars", "200", "--json"])
+        self.assertIn("signals", json.loads(out))
+
+    def test_live_once_scans_and_exits(self):
+        code, out = run(["live", "BTCUSDT", "--tf", "1h", "--once", "--window", "200"])
+        self.assertEqual(code, 0)
+        self.assertIn("primed", out)
+        self.assertIn("net bias", out)
+
+    def test_live_stops_after_max_polls(self):
+        code, out = run(["live", "BTCUSDT", "--tf", "1h", "--window", "200",
+                         "--max-polls", "1", "--poll-seconds", "1"])
+        self.assertEqual(code, 0)
+
+    def test_network_failure_is_a_clean_message(self):
+        self.fake.fail_times = 99
+        with self.assertRaises(SystemExit) as ctx:
+            run(["fetch", "BTCUSDT", "--tf", "1h"])
+        self.assertIn("could not reach", str(ctx.exception))
+
+
 class TestRendering(unittest.TestCase):
     def test_signal_block_shows_the_checklist(self):
         report = scan(synth.bull_flag())
