@@ -13,8 +13,10 @@ from .backtester import BacktestConfig, backtest
 from .config import ScanConfig
 from .core import Series
 from .engine import MultiReport, ScanReport, plans, scan, scan_multi
-from .feeds import BASE_URL, PRODUCTS, BitgetClient, BitgetError, LiveFeed
+from .feeds import (BASE_URL, PRODUCTS, BitgetClient, BitgetError,
+                    BitgetWebSocketFeed, LiveFeed)
 from .feeds.http import HttpError
+from .feeds.websocket import WebSocketError
 from .registry import CATEGORY_TITLES, REGISTRY, all_specs
 from .report import (card, catalogue, render_backtest, render_live_event,
                      render_multi, render_report)
@@ -178,7 +180,7 @@ def _network_guard(fn, *args):
         raise SystemExit(f"bitget rejected the request: {exc}")
     except HttpError as exc:
         raise SystemExit(f"bitget returned {exc.status}: {exc.body[:200]}")
-    except (URLError, OSError) as exc:
+    except (URLError, OSError, WebSocketError) as exc:
         raise SystemExit(f"could not reach {BASE_URL}: {exc}. Check connectivity, "
                          f"any HTTPS_PROXY setting, and whether the API is "
                          f"reachable from your region.")
@@ -203,12 +205,18 @@ def cmd_fetch(a: argparse.Namespace) -> int:
 
 def cmd_live(a: argparse.Namespace) -> int:
     cfg = _cfg_from_args(a)
-    feed = LiveFeed(_client(a), a.symbol, a.timeframe, scan_cfg=cfg, window=a.window,
-                    patterns=a.pattern, categories=a.category,
-                    poll_seconds=a.poll_seconds)
+    shared = dict(scan_cfg=cfg, window=a.window, patterns=a.pattern,
+                  categories=a.category)
+    if a.ws:
+        feed = BitgetWebSocketFeed(_client(a), a.symbol, a.timeframe, **shared)
+        transport = "websocket"
+    else:
+        feed = LiveFeed(_client(a), a.symbol, a.timeframe,
+                        poll_seconds=a.poll_seconds, **shared)
+        transport = "rest polling"
     _network_guard(feed.prime)
     print(f"primed {len(feed.series)} bars of {feed.symbol} {feed.timeframe} "
-          f"({a.product}); waiting for the next close. Ctrl-C to stop.")
+          f"({a.product}, {transport}); waiting for the next close. Ctrl-C to stop.")
     if a.once:
         report = feed.scan_now()
         print(json.dumps(report.to_dict(), indent=2, default=str) if a.json
@@ -220,9 +228,16 @@ def cmd_live(a: argparse.Namespace) -> int:
         print(text, flush=True)
 
     try:
-        feed.run(emit, max_polls=a.max_polls)
+        if a.ws:
+            _network_guard(feed.open)
+            feed.run(emit, max_events=a.max_polls)
+        else:
+            feed.run(emit, max_polls=a.max_polls)
     except KeyboardInterrupt:
         print("\nstopped")
+    finally:
+        if a.ws:
+            feed.close()
     return 0
 
 
@@ -289,7 +304,10 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--window", type=int, default=400, help="rolling bars kept in memory")
     live.add_argument("--poll-seconds", dest="poll_seconds", type=float,
                       help="override the poll interval (default: the next bar close)")
-    live.add_argument("--max-polls", dest="max_polls", type=int, help="stop after N polls")
+    live.add_argument("--max-polls", dest="max_polls", type=int,
+                      help="stop after N polls (or N closed bars with --ws)")
+    live.add_argument("--ws", action="store_true",
+                      help="stream over the websocket instead of polling REST")
     live.add_argument("--once", action="store_true", help="scan the current bars and exit")
     live.add_argument("--timeout", type=float, default=10.0)
     _add_common(live)

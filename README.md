@@ -38,7 +38,7 @@ python -m dorothy_brew backtest btc_1h.csv --tf 1H --risk 1
 python -m dorothy_brew fetch BTCUSDT --tf 1h --bars 1000 --out btc_1h.csv
 
 # 비트겟 실시간 감시 — 봉이 닫힐 때마다 스캔해서 새 신호만 출력
-python -m dorothy_brew live BTCUSDT --tf 1h --no-forming
+python -m dorothy_brew live BTCUSDT --tf 1h --ws --no-forming
 
 # 패턴 카탈로그 / 개별 패턴 설명
 python -m dorothy_brew patterns
@@ -155,27 +155,62 @@ python -m dorothy_brew fetch BTCUSDT --tf 1h --bars 1000 --product usdt-futures 
 # 받아서 바로 스캔
 python -m dorothy_brew fetch ETHUSDT --tf 15m --bars 500 --scan
 
-# 실시간: 봉이 닫힐 때마다 스캔, 새로 생긴 신호만 알림
-python -m dorothy_brew live BTCUSDT --tf 1h --min-confidence 0.7 --no-forming
+# 실시간(웹소켓): 봉이 닫히는 즉시 스캔, 새로 생긴 신호만 알림
+python -m dorothy_brew live BTCUSDT --tf 1h --ws --min-confidence 0.7 --no-forming
+
+# 실시간(REST 폴링): 웹소켓이 막힌 환경용 폴백
+python -m dorothy_brew live BTCUSDT --tf 1h
 ```
 
 ```python
-from dorothy_brew import BitgetClient, LiveFeed, ScanConfig
+from dorothy_brew import BitgetClient, BitgetWebSocketFeed, LiveFeed, ScanConfig
 from dorothy_brew.report import render_live_event
 
 client = BitgetClient("usdt-futures")           # spot / usdt-futures / coin-futures / usdc-futures
-feed = LiveFeed(client, "BTCUSDT", "1h", scan_cfg=ScanConfig(min_confidence=0.65))
-feed.prime()                                    # 과거 400봉 적재
+
+# 웹소켓 (권장): 봉 마감 즉시 push
+feed = BitgetWebSocketFeed(client, "BTCUSDT", "1h",
+                           scan_cfg=ScanConfig(min_confidence=0.65))
+feed.prime()                                    # 과거 400봉은 REST로 적재
+with feed:                                      # 연결 + 구독
+    feed.run(lambda event: print(render_live_event(event)))
+
+# REST 폴링 (폴백): 같은 인터페이스
+feed = LiveFeed(client, "BTCUSDT", "1h")
+feed.prime()
 feed.run(lambda event: print(render_live_event(event)))
 ```
 
-- **닫힌 봉만 스캔한다.** REST가 돌려주는 마지막 진행 중 봉은 따로 보관하고 스캔에서 제외 — 백테스터와 같은 규칙
+### 웹소켓 클라이언트
+
+`websockets` 같은 라이브러리를 쓰지 않고 **RFC 6455를 직접 구현**했다 (패키지 의존성 0 유지).
+
+| 구현 범위 | 내용 |
+|---|---|
+| 핸드셰이크 | `Sec-WebSocket-Key` 생성, 서버의 `Sec-WebSocket-Accept` 검증(불일치 시 연결 거부) |
+| 프레이밍 | 클라이언트 프레임 마스킹(RFC 필수), 7/16/64비트 길이, 단편화 메시지 재조립 |
+| 제어 프레임 | ping 수신 시 자동 pong, close 프레임 → 코드/사유와 함께 `WebSocketClosed` |
+| 안전장치 | 예약 비트·과대 제어 프레임 거부, 메시지 크기 상한, 유휴 타임아웃 시 `None` 반환 |
+| TLS | `wss://`는 `ssl.create_default_context()`로 인증서 검증 |
+
+비트겟 스트림 계층:
+
+- 채널 구독 `{"op":"subscribe","args":[{"instType":"USDT-FUTURES","channel":"candle1H","instId":"BTCUSDT"}]}`
+- 비트겟은 30초 침묵 시 연결을 끊으므로 **20초마다 `"ping"` 텍스트 하트비트**를 보낸다
+- 연결이 끊기면 백오프(1→2→5→10→30초) 재연결 + 재구독 + **REST로 빠진 구간 메꾸기**. 봉이 정상 수신되면 백오프 초기화
+- **다음 봉이 들어오는 순간 이전 봉을 닫힌 것으로 처리**한다 → 시계 오차와 무관하게 마감 직후 스캔
+
+> 검증: 프레이밍·핸드셰이크는 별도 레퍼런스 구현(`websockets` 라이브러리)을 서버로 띄워 교차 검증했고,
+> 테스트 스위트에는 **표준 라이브러리만으로 만든 루프백 서버**가 들어 있어 외부 의존성 없이 실제 TCP
+> 핸드셰이크·마스킹·단편화·ping/pong·close를 검증한다.
+
+- **닫힌 봉만 스캔한다.** 진행 중인 봉은 따로 보관하고 스캔에서 제외 — 백테스터와 같은 규칙
 - **중복 알림 제거**: 같은 구조(패턴 + 방향 + 상태 + 시작 봉)는 한 번만 알린다. 매 봉 같은 플래그를 다시 외치지 않는다
-- 폴링 주기는 다음 봉 마감 시각에 자동으로 맞춘다 (`--poll-seconds`로 고정 가능)
+- 폴링 모드의 주기는 다음 봉 마감 시각에 자동으로 맞춘다 (`--poll-seconds`로 고정 가능)
 - 네트워크 오류는 재시도(지수 백오프) 후에도 실패하면 그 사이클만 건너뛰고 루프는 살아있다
 - 지원 봉: `1m 3m 5m 15m 30m 1h 4h 6h 12h 1d 3d 1w 1M` (`1H`, `1hour`, `60m` 같은 표기도 자동 정규화)
 
-> 웹소켓이 아니라 **REST 폴링**이다. 봉 마감 기준 신호에는 충분하지만 틱 단위 체결은 다루지 않는다.
+> 둘 다 **봉 마감 기준**이다. 틱 단위 체결/호가는 다루지 않는다.
 
 ## 지원 패턴 30종
 
@@ -266,14 +301,15 @@ CSV(헤더 자동 인식: `timestamp/date/time`, `open/high/low/close`, `volume`
 ## 테스트
 
 ```bash
-python -m unittest discover -s tests -t .    # 137 tests
+python -m unittest discover -s tests -t .    # 189 tests
 ```
 
 합성 차트 생성기(`dorothy_brew.synth`)가 패턴별 정답 차트를 만들어 각 탐지기가 자기 패턴을
 실제로 찾는지, 랜덤워크·평탄·빈 시계열에서 예외 없이 견디는지, 모든 신호의 손절/목표
 방향이 일관적인지 검증한다. 백테스터는 손으로 만든 가격 경로에 알려진 신호를 넣어
 목표 순차 체결·본전 이동·갭 손절·시간 손절·수수료 반영을 각각 확인하고, 비트겟 클라이언트와
-실시간 피드는 **네트워크 없이** 가짜 transport로 페이지네이션·재시도·중복 제거까지 검증한다.
+실시간 피드는 **네트워크 없이** 가짜 transport로 페이지네이션·재시도·중복 제거·재연결까지 검증한다.
+웹소켓은 프레이밍 단위 테스트에 더해 루프백 TCP 서버로 실제 핸드셰이크를 통과시킨다.
 
 ## 한계 (알고 쓰자)
 
@@ -286,7 +322,9 @@ python -m unittest discover -s tests -t .    # 137 tests
 - 체결 시뮬레이션은 봉 단위다. 봉 안에서 손절과 목표가 같이 터치되면 손절을 먼저 가정하지만,
   실제 틱 흐름과는 다를 수 있다
 - 피벗은 우측 3봉이 지나야 확정되므로 반전 패턴은 구조상 3봉의 확인 지연이 있다
-- 실시간 피드는 REST 폴링이라 봉 마감 후 몇 초의 지연이 있다. 주문 실행 기능은 없다
+- 웹소켓은 봉 마감 즉시(<1초), REST 폴링은 몇 초 지연. **주문 실행 기능은 없다**
+- 웹소켓 클라이언트는 이 용도(공개 시세 스트림)에 필요한 만큼만 구현했다. 압축 확장(permessage-deflate),
+  프록시 터널링, 자동 재전송 큐는 없다
 - 비트겟 API는 지역/방화벽에 따라 막힐 수 있다. `fetch`가 "could not reach" 를 뱉으면 네트워크나
   프록시(`HTTPS_PROXY`) 문제다
 - 투자 자문이 아니다. 실계좌 전에 반드시 자기 데이터로 검증할 것

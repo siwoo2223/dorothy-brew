@@ -210,16 +210,30 @@ class LiveFeed:
         return candle.ts + self.tf_seconds <= self.clock()
 
     def _merge(self, incoming: Iterable[Candle]) -> List[Candle]:
-        """Add closed candles to the series; keep the forming one aside."""
+        """Add closed candles to the series; keep the forming one aside.
+
+        A bar is closed either because the clock says so, or because a bar with
+        a later timestamp exists — the second rule is what lets the websocket
+        feed close a bar the instant the next one starts streaming, instead of
+        waiting on clock skew.
+        """
         known = {c.ts for c in self.series}
         fresh: List[Candle] = []
         for candle in sorted(incoming, key=lambda c: c.ts):
+            forming = self.forming
+            if forming is not None and candle.ts > forming.ts:
+                if forming.ts not in known:
+                    fresh.append(forming)
+                    known.add(forming.ts)
+                self.forming = None
             if self._is_closed(candle):
                 if candle.ts not in known:
                     fresh.append(candle)
+                    known.add(candle.ts)
             else:
                 self.forming = candle
         if fresh:
+            fresh.sort(key=lambda c: c.ts)
             candles = self.series.candles + fresh
             self.series = Series(candles[-self.window:], self.symbol, self.timeframe)
         return fresh

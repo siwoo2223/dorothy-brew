@@ -197,6 +197,29 @@ class TestFeedCli(unittest.TestCase):
                          "--max-polls", "1", "--poll-seconds", "1"])
         self.assertEqual(code, 0)
 
+    def test_live_over_the_websocket(self):
+        import json as _json
+        from dorothy_brew.feeds import BitgetStream, BitgetWebSocketFeed
+        from tests.test_bitget_ws import FakeSocket, candle_message
+        rows = [[str(c.ts * 1000), f"{c.open}", f"{c.high}", f"{c.low}",
+                 f"{c.close}", f"{c.volume}", "0"] for c in synth.trending_market()]
+        script = [candle_message(rows[-2]), candle_message(rows[-1])]
+        original_feed = self.cli_mod.BitgetWebSocketFeed
+
+        def make_feed(client, symbol, timeframe, **kw):
+            stream = BitgetStream("usdt-futures",
+                                  connect=lambda *a, **k: FakeSocket(script))
+            return original_feed(client, symbol, timeframe, stream=stream, **kw)
+
+        self.cli_mod.BitgetWebSocketFeed = make_feed
+        try:
+            code, out = run(["live", "BTCUSDT", "--tf", "1h", "--ws",
+                             "--window", "200", "--max-polls", "1"])
+        finally:
+            self.cli_mod.BitgetWebSocketFeed = original_feed
+        self.assertEqual(code, 0)
+        self.assertIn("websocket", out)
+
     def test_network_failure_is_a_clean_message(self):
         self.fake.fail_times = 99
         with self.assertRaises(SystemExit) as ctx:
