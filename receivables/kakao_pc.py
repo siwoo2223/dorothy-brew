@@ -57,6 +57,7 @@ class Win32KakaoDriver:
         self.search_tab = search_tab  # "friends"(친구 탭) | "chats"(채팅 탭)
         self.wait = wait
         self.trace: list[str] = []  # 마지막 발송의 단계별 기록 (발송 점검용)
+        self.preferred: str = ""  # 이 PC 카톡에서 한 번 성공한 전송 방법
 
     # ── 내부 도우미 ──
     def _w(self):
@@ -175,6 +176,62 @@ class Win32KakaoDriver:
         self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
         return chat
 
+    def _post_enter(self, hwnd) -> None:
+        """Enter 키 메시지를 정식 키 정보(스캔코드 0x1C)와 함께 보낸다."""
+        win32api, win32con, _ = self._w()
+        win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, win32con.VK_RETURN, 0x001C0001)
+        time.sleep(0.05)
+        win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0xC01C0001)
+
+    def _click(self, hwnd) -> None:
+        win32api, win32con, win32gui = self._w()
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        win32api.SetCursorPos(((left + right) // 2, (top + bottom) // 2))
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.3)
+
+    def _sent(self, box, wait: float = 1.0) -> bool:
+        """입력칸이 비었으면(=전송됨) True."""
+        end = time.time() + wait
+        while time.time() < end:
+            time.sleep(0.2)
+            if not self._text_len(box):
+                return True
+        return False
+
+    def _try_post_enter(self, chat, box, text) -> None:
+        self._post_enter(box)
+
+    def _try_click_enter(self, chat, box, text) -> None:
+        win32api, win32con, _ = self._w()
+        self._bring_to_front(chat)
+        self._click(box)
+        self._key(win32con.VK_RETURN)
+
+    def _try_paste_enter(self, chat, box, text) -> None:
+        import win32clipboard
+
+        win32api, win32con, _ = self._w()
+        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
+        finally:
+            win32clipboard.CloseClipboard()
+        self._bring_to_front(chat)
+        self._click(box)
+        self._key(win32con.VK_CONTROL, ord("V"))
+        time.sleep(0.5)
+        self._key(win32con.VK_RETURN)
+
+    SEND_METHODS = (
+        ("Enter 메시지", "_try_post_enter"),
+        ("입력칸 클릭 + Enter", "_try_click_enter"),
+        ("붙여넣기 + Enter", "_try_paste_enter"),
+    )
+
     def send_text(self, chat, text: str) -> None:
         win32api, win32con, win32gui = self._w()
         box = self._input_box(chat)
@@ -182,22 +239,35 @@ class Win32KakaoDriver:
             self._log("입력칸 못 찾음")
             raise RuntimeError("채팅방 입력칸을 찾지 못했습니다")
         self._log(f"입력칸 찾음({win32gui.GetClassName(box)})")
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text.replace("\r\n", "\n").replace("\n", "\r\n"))
+        text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)
         time.sleep(0.5)
         if not self._text_len(box):
             self._log("입력칸에 글이 들어가지 않음")
             raise RuntimeError("채팅방 입력칸에 글을 넣지 못했습니다")
-        self._press_enter(box)
-        time.sleep(1.0)
-        if self._text_len(box):  # 글이 남아 있으면 Enter 가 안 먹힌 것 → 실제 키로 다시
-            self._log("Enter(메시지 방식)로 안 보내짐 → 창을 앞으로 가져와 실제 Enter")
-            self._bring_to_front(chat)
-            self._key(win32con.VK_RETURN)
-            time.sleep(1.0)
-        if self._text_len(box):
-            self._log("전송 실패: 입력칸에 글이 그대로 남아 있음")
-            raise RuntimeError("Enter 를 눌러도 전송되지 않았습니다(입력칸에 글이 남아 있음)")
-        self._log("전송됨(입력칸이 비워짐)")
+
+        # 한 번 성공한 방법을 먼저 쓰고, 안 되면 다음 방법. 전송되면(입력칸이 비면) 바로 멈추므로 두 번 가지 않는다.
+        methods = list(self.SEND_METHODS)
+        if self.preferred:
+            methods.sort(key=lambda m: m[0] != self.preferred)
+        previous = ""
+        for label, attr in methods:
+            if not self._text_len(box):  # 앞 방법이 늦게 전송됨 → 다시 넣지 않고 멈춘다(중복 발송 방지)
+                self.preferred = previous
+                self._log(f"전송됨({previous}, 늦게 처리됨)")
+                return
+            previous = label
+            try:
+                getattr(self, attr)(chat, box, text)
+            except Exception as exc:
+                self._log(f"{label}: 오류 {exc}")
+                continue
+            if self._sent(box, wait=1.5):
+                self.preferred = label
+                self._log(f"전송됨({label})")
+                return
+            self._log(f"{label}: 전송 안 됨")
+        raise RuntimeError("Enter 를 눌러도 전송되지 않았습니다(입력칸에 글이 남아 있음)")
 
     def _bring_to_front(self, hwnd) -> None:
         win32api, win32con, win32gui = self._w()
