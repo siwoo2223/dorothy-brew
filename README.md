@@ -128,7 +128,7 @@ Windows에서는 `실행.bat`을 더블클릭하면 됩니다.
 4. '테스트 메시지 1건 먼저 보내 보기'로 본인이나 지인에게 먼저 보내 보세요.
 5. 안전장치
    - 메시지 사이에 무작위 간격을 둡니다(기본 8~15초).
-   - 하루 최대 발송 수를 정할 수 있습니다(기본 50건).
+   - 하루 최대 발송 수를 정할 수 있습니다(기본·최대 500건).
    - 연속 3건이 실패하면 발송을 멈춥니다.
    - 한 건 보낼 때마다 바로 이력에 기록하므로, 중간에 멈춰도 다시 실행했을 때 이미 보낸 고객에게 중복으로 가지 않습니다.
 
@@ -155,7 +155,7 @@ Windows에서는 `실행.bat`을 더블클릭하면 됩니다.
 # 미리보기 (발송 안 함)
 python cli.py 원장.xlsx templates/미수금/01_미수금_안내.txt
 # 내 PC 카카오톡으로 발송 (Windows)
-python cli.py 원장.xlsx templates/미수금/01_미수금_안내.txt --mode kakao-pc --gap 8 15 --daily-cap 50
+python cli.py 원장.xlsx templates/미수금/01_미수금_안내.txt --mode kakao-pc --gap 8 15 --daily-cap 500
 # 공지사항 (명단 전원), 테스트 모드로 나에게 3건만
 python cli.py 명단.xlsx templates/공지/02_휴무_안내.txt --kind 공지 --mode kakao-pc --test-to "내 카톡이름"
 # 알림톡 실제 발송

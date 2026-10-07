@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--search-tab", choices=["friends", "chats"], default="friends", help="[kakao-pc] 찾을 곳")
     p.add_argument("--gap", type=float, nargs=2, default=[8, 15], metavar=("최소", "최대"),
                    help="[kakao-pc] 메시지 간격(초)")
-    p.add_argument("--daily-cap", type=int, default=50, help="[kakao-pc] 하루 최대 발송 수")
+    p.add_argument("--daily-cap", type=int, default=500, help="[kakao-pc] 하루 최대 발송 수")
     args = p.parse_args(argv)
 
     df = read_table(args.ledger)

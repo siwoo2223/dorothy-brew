@@ -215,14 +215,14 @@ with st.sidebar:
     pf_id = template_id = ""
     sms_fallback = True
     subject = ""
-    search_tab, gap, daily_cap = "친구 목록", (8, 15), 50
+    search_tab, gap, daily_cap = "친구 목록", (8, 15), 500
     if is_kakao_pc:
         st.warning("카카오 공식 기능이 아니라서 **계정이 제한될 수 있습니다.** "
                    "간격을 넉넉히 두고 하루 발송 수를 적게 유지하세요.")
         search_tab = st.radio("고객명·카톡이름으로 찾을 곳", ["친구 목록", "채팅 목록"], horizontal=True,
                               help="엑셀의 '채팅방' 열에 값이 있는 고객은 이 설정과 관계없이 채팅 목록에서 그 채팅방을 찾습니다.")
         gap = st.slider("메시지 간격(초)", 3, 60, (8, 15), help="이 범위에서 매번 무작위로 기다립니다.")
-        daily_cap = st.number_input("하루 최대 발송 수", 1, 300, 50, help="미수금·공지·테스트를 모두 합친 수")
+        daily_cap = st.number_input("하루 최대 발송 수", 1, 500, 500, help="미수금·공지·테스트를 모두 합친 수")
         st.caption("발송하는 동안 카카오톡 창을 닫거나 로그아웃하지 마세요.")
     elif not is_preview:
         api_key = st.text_input("솔라피 API Key", os.getenv("SOLAPI_API_KEY", ""))
