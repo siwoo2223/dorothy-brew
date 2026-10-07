@@ -797,6 +797,15 @@ def _key(text: str) -> str:
     return re.sub(r"[\s\W_]+", "", text or "").lower()
 
 
+def _pairs(target: str, candidate: str) -> list[tuple[str, str]]:
+    """비교할 (찾는 이름, 결과 이름) 쌍. 찾는 이름이 자음(ㄱ 등)으로 시작하면, 글자 인식이 그 자음을
+    '그'·'7' 처럼 다른 글자로 읽으므로 양쪽 첫 글자를 뺀 쌍도 비교한다."""
+    pairs = [(target, candidate)]
+    if target and "ㄱ" <= target[0] <= "ㅎ" and len(target) > 2 and candidate:
+        pairs.append((target[1:], candidate[1:]))
+    return pairs
+
+
 def pick_search_result(name: str, titles: list[str], similarity: float = 0.85) -> int | None:
     """카톡 검색 결과 이름들 중 찾는 이름과 같은 항목의 순서(0부터). 없으면 None.
 
@@ -808,11 +817,11 @@ def pick_search_result(name: str, titles: list[str], similarity: float = 0.85) -
         return None
     keys = [_key(t) for t in titles]
     for i, k in enumerate(keys):
-        if k == target:
+        if any(a == b for a, b in _pairs(target, k)):
             return i
     best, best_score = None, 0.0
     for i, k in enumerate(keys):
-        score = difflib.SequenceMatcher(None, target, k).ratio()
+        score = max(difflib.SequenceMatcher(None, a, b).ratio() for a, b in _pairs(target, k))
         if score > best_score:
             best, best_score = i, score
     return best if best_score >= similarity else None

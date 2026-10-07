@@ -478,3 +478,30 @@ def test_pick_search_result_ignores_unrelated_top_results():
     assert pick_search_result("KF - OKGUCHON(서명교)[ANGELES]", ["KF - OKGUCHON(서영교)[ANGELES]"]) == 0  # 글자 인식 오차
     assert pick_search_result("한식원", ["KF 일반 냉동 물류"]) is None  # 같은 이름 없음 → 아무것도 안 엶
     assert pick_search_result("유니", ["유니온"]) is None
+
+
+def test_pick_search_result_leading_jamo_and_symbols():
+    from receivables.kakao_names import pick_search_result
+
+    # 사용자 화면: 방 이름이 'ㄱ'으로 시작, 글자 인식은 'ㄱ'을 '그'로, 기호는 다른 글자로 읽음
+    assert pick_search_result("ㄱ권지영  #봄날", ["그권지영 #봄날"]) == 0
+    assert pick_search_result("ㄱ레이첼☆salon4u", ["신호석, 이창하, kimberly.HAN, ...", "그레이첼æsalon4u"]) == 1
+    assert pick_search_result("ㄱ부산마트♡(신선한국식품~ 총알배송)",
+                              ["신호석, 이창하, kimberly.HAN, ...", "세부 한인회 특방 시즌 2 장...",
+                               "그부산마트C(신선한국식품~ 총알배송)"]) == 2
+    assert pick_search_result("ㄱcalvin jung", ["7calvin jung"]) == 0
+    assert pick_search_result("ㄱ권지영", ["그권지수"]) is None  # 다른 사람은 고르지 않음
+
+
+def test_not_found_in_search_does_not_stop_sending():
+    class Picky(FakeKakao):
+        def open_chat(self, name, tab=None):
+            if name not in self.friends:
+                raise ChatNotFound(f"검색 결과에 '{name}' 방이 없습니다(맨 위 방을 그냥 열지 않음)")
+            return name
+
+    kakao = Picky({"마지막"})
+    msgs = [OutgoingMessage(str(i), "", "본문", {}, chat_name=f"없는방{i}") for i in range(4)]
+    msgs.append(OutgoingMessage("x", "", "본문", {}, chat_name="마지막"))
+    results = KakaoPCSender(kakao, max_consecutive_failures=3, sleep=lambda s: None).send(msgs)
+    assert [r.ok for r in results] == [False] * 4 + [True]  # 4번 '방 없음' 뒤에도 계속 보냄

@@ -452,7 +452,10 @@ class KakaoPCSender:
                 result = SendResult(m.key, m.to, False, f"연속 {failures_in_row}건 실패로 발송 중단(미발송)")
             else:
                 result = self._send_one(m)
-                failures_in_row = 0 if result.ok else failures_in_row + 1
+                if result.ok:
+                    failures_in_row = 0
+                elif not result.detail.startswith("검색 결과에"):  # '방 없음'은 아무 방도 안 연 안전한 건너뛰기라 세지 않음
+                    failures_in_row += 1
                 if i < len(messages) - 1:
                     self.sleep(random.uniform(self.min_interval, self.max_interval))
             results.append(result)
