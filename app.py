@@ -14,7 +14,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receivables import campaign, history
-from receivables.kakao_names import diagnose, extract_names, match_names
+from receivables.kakao_names import diagnose, extract_names, install_korean_ocr, match_names
 from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver
 from receivables.loader import (
     DEFAULT_LINE_TEMPLATE,
@@ -66,6 +66,18 @@ def names_tool() -> None:
             st.info(f"'{method}' 방법으로 읽었습니다. 이름이 아닌 글자가 섞였을 수 있으니 아래 목록을 확인하세요.")
         except RuntimeError as exc:
             st.error(str(exc))
+            if "한국어 글자 인식" in str(exc):
+                st.session_state["need_ocr"] = True
+    if st.session_state.get("need_ocr"):
+        st.warning("카톡 이름을 읽으려면 Windows **한국어 글자 인식** 기능이 필요합니다(무료, 한 번만 설치). "
+                   "아래 버튼을 누르면 '이 앱이 디바이스를 변경하도록 허용하시겠어요?' 창이 뜨는데 **예**를 누르세요. "
+                   "파란 창에서 설치가 끝나면(1~5분) 아무 키나 눌러 닫고, 검은 창과 이 화면을 껐다가 실행.bat 으로 다시 켠 뒤 시도하세요.")
+        if st.button("한국어 글자 인식 설치 (관리자 권한)"):
+            try:
+                install_korean_ocr()
+                st.info("설치 창을 열었습니다. 파란 PowerShell 창에서 진행 상황을 확인하세요.")
+            except RuntimeError as exc:
+                st.error(str(exc))
     with st.expander("읽기가 안 될 때: 진단 정보 만들기"):
         st.caption("버튼을 누르면 카카오톡 창 구조를 글로 정리합니다. 대화 내용은 들어가지 않고, 목록에 보이는 이름 일부가 들어갈 수 있습니다. "
                    "내용을 복사해서 개발자에게 보내 주세요.")

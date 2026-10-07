@@ -193,6 +193,50 @@ def filter_ocr_lines(lines: list[str]) -> list[str]:
     return out
 
 
+OCR_INSTALL_CMD = 'Add-WindowsCapability -Online -Name "Language.OCR~~~ko-KR~0.0.1.0"'
+
+
+def ocr_languages() -> list[str]:
+    """이 PC 에서 쓸 수 있는 Windows 글자 인식 언어 목록 (예: ['en-US', 'ko'])."""
+    from winrt.windows.media.ocr import OcrEngine
+
+    return [lang.language_tag for lang in OcrEngine.available_recognizer_languages]
+
+
+def _korean_ocr_engine():
+    """한국어 OCR 엔진. 언어 태그 표기가 PC 마다 달라서 여러 방법으로 찾는다."""
+    from winrt.windows.globalization import Language
+    from winrt.windows.media.ocr import OcrEngine
+
+    for tag in ["ko-KR", "ko"] + [t for t in ocr_languages() if t.lower().startswith("ko")]:
+        try:
+            lang = Language(tag)
+            if OcrEngine.is_language_supported(lang):
+                engine = OcrEngine.try_create_from_language(lang)
+                if engine:
+                    return engine
+        except Exception:
+            continue
+    engine = OcrEngine.try_create_from_user_profile_languages()
+    if engine and engine.recognizer_language.language_tag.lower().startswith("ko"):
+        return engine
+    raise RuntimeError(
+        "Windows 한국어 글자 인식 기능이 없습니다 (설치된 언어: " + (", ".join(ocr_languages()) or "없음") + "). "
+        "화면의 '한국어 글자 인식 설치' 버튼을 눌러 설치해 주세요."
+    )
+
+
+def install_korean_ocr() -> None:
+    """관리자 권한 PowerShell 로 한국어 OCR 을 설치한다 (Windows 가 권한 허용 창을 띄운다)."""
+    _require_windows()
+    import ctypes
+
+    args = f"-NoProfile -Command \"{OCR_INSTALL_CMD.replace(chr(34), chr(92) + chr(34))}; pause\""
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", args, None, 1)
+    if rc <= 32:
+        raise RuntimeError("설치 창을 열지 못했습니다(권한 허용을 거절했을 수 있습니다).")
+
+
 def _ocr_reader(hwnd: int):
     import asyncio
 
@@ -200,20 +244,25 @@ def _ocr_reader(hwnd: int):
     from PIL import ImageGrab
 
     try:
-        import winocr
+        from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+        from winrt.windows.storage.streams import DataWriter
     except ImportError as exc:
-        raise RuntimeError("OCR 모듈(winocr)이 없습니다. 실행.bat 을 다시 실행해 설치해 주세요.") from exc
+        raise RuntimeError("OCR 모듈이 없습니다. 실행.bat 을 다시 실행해 설치해 주세요.") from exc
+
+    engine = _korean_ocr_engine()
+
+    async def recognize(img):
+        writer = DataWriter()
+        writer.write_bytes(img.tobytes())
+        bitmap = SoftwareBitmap.create_copy_from_buffer(
+            writer.detach_buffer(), BitmapPixelFormat.RGBA8, img.width, img.height
+        )
+        return await engine.recognize_async(bitmap)
 
     def read_visible() -> list[str]:
         img = ImageGrab.grab(bbox=win32gui.GetWindowRect(hwnd), all_screens=True)
-        img = img.resize((img.width * 2, img.height * 2))  # 크게 하면 한글 인식이 좋아진다
-        try:
-            result = asyncio.run(winocr.to_coroutine(winocr.recognize_pil(img, "ko")))
-        except AssertionError as exc:
-            raise RuntimeError(
-                "Windows 한국어 글자 인식 기능이 설치돼 있지 않습니다. 관리자 PowerShell 에서 "
-                "Add-WindowsCapability -Online -Name \"Language.OCR~~~ko-KR~0.0.1.0\" 를 실행해 주세요."
-            ) from exc
+        img = img.resize((img.width * 2, img.height * 2)).convert("RGBA")  # 크게 하면 한글 인식이 좋아진다
+        result = asyncio.run(recognize(img))
         return filter_ocr_lines([line.text for line in result.lines])
 
     return read_visible
@@ -254,6 +303,10 @@ def diagnose() -> str:
 
     lines = []
     main = _main_window()
+    try:
+        lines.append(f"OCR 언어: {ocr_languages()}")
+    except Exception as exc:
+        lines.append(f"OCR 언어 확인 오류: {exc}")
     lines.append(f"main hwnd={main} class={win32gui.GetClassName(main)} rect={win32gui.GetWindowRect(main)}")
     for h in _child_windows(main):
         lines.append(
