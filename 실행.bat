@@ -17,7 +17,7 @@ if not defined PY (
 )
 
 rem ---- 처음 한 번만 설치 (중간에 실패하면 다음에 다시 설치) ----
-if not exist ".venv\설치완료.txt" (
+if not exist ".venv\installed.txt" (
   echo 처음 실행: 필요한 프로그램을 설치합니다. 몇 분 걸릴 수 있습니다...
   if not exist .venv %PY% -m venv .venv
   .venv\Scripts\python -m pip install --upgrade pip
@@ -27,7 +27,7 @@ if not exist ".venv\설치완료.txt" (
     pause
     exit /b 1
   )
-  echo ok> ".venv\설치완료.txt"
+  echo ok> ".venv\installed.txt"
 )
 
 echo 프로그램을 시작합니다. 잠시 후 브라우저가 열립니다.
