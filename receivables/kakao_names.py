@@ -790,3 +790,29 @@ def match_names(customers: list[str], kakao_names: list[str], top: int = 3) -> l
         best_score, best = scored[0] if scored else (0.0, "")
         results.append(Match(cust, best if best_score >= 0.6 else "", best_score, candidates))
     return results
+
+
+# ───────────────────────── 검색 결과에서 정확한 방 고르기 ─────────────────────────
+def _key(text: str) -> str:
+    return re.sub(r"[\s\W_]+", "", text or "").lower()
+
+
+def pick_search_result(name: str, titles: list[str], similarity: float = 0.85) -> int | None:
+    """카톡 검색 결과 이름들 중 찾는 이름과 같은 항목의 순서(0부터). 없으면 None.
+
+    카톡 검색은 참여자·대화 내용이 맞는 다른 단톡방도 위에 보여 주므로 '맨 위'가 아니라 '이름이 같은 것'을 고른다.
+    띄어쓰기·기호는 무시하고, 글자 인식 오차를 감안해 아주 비슷한(기본 85%) 이름까지 인정한다.
+    """
+    target = _key(name)
+    if not target:
+        return None
+    keys = [_key(t) for t in titles]
+    for i, k in enumerate(keys):
+        if k == target:
+            return i
+    best, best_score = None, 0.0
+    for i, k in enumerate(keys):
+        score = difflib.SequenceMatcher(None, target, k).ratio()
+        if score > best_score:
+            best, best_score = i, score
+    return best if best_score >= similarity else None

@@ -465,3 +465,16 @@ def test_schedule_save_load_copies_files(tmp_path):
     assert "실행 완료" in (base / "e1" / "실행기록.txt").read_text(encoding="utf-8")
     scheduler.remove("e1", base=base)
     assert scheduler.list_entries(base) == []
+
+
+def test_pick_search_result_ignores_unrelated_top_results():
+    from receivables.kakao_names import pick_search_result
+
+    # 사용자 화면: '유니' 검색 → 위 3개는 다른 단톡방, 4번째가 '유니'
+    assert pick_search_result("유니", ["필리핀 세부 사고팔고, 광고, ...", "필리핀 세부 자유여행 시즌2",
+                                      "보홀교민 & 사업자 정보교환...", "유니"]) == 3
+    assert pick_search_result("moon.", ["KF 일반 냉동 물류", "MOON.", "원스탑사인(강부장)"]) == 1
+    assert pick_search_result("한식원", ["KF 일반 냉동 물류", "한식원"]) == 1
+    assert pick_search_result("KF - OKGUCHON(서명교)[ANGELES]", ["KF - OKGUCHON(서영교)[ANGELES]"]) == 0  # 글자 인식 오차
+    assert pick_search_result("한식원", ["KF 일반 냉동 물류"]) is None  # 같은 이름 없음 → 아무것도 안 엶
+    assert pick_search_result("유니", ["유니온"]) is None

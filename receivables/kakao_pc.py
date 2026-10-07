@@ -149,32 +149,98 @@ class Win32KakaoDriver:
         return found[0] if found else 0
 
     # ── KakaoDriver 구현 ──
+    def _search_list(self, main: int, tab: str) -> int:
+        """검색어를 넣었을 때 나타나는 검색 결과 목록 창 (보이는 것)."""
+        _, _, win32gui = self._w()
+        child = win32gui.FindWindowEx(main, None, CLASS_CHILD, None)
+        friends = win32gui.FindWindowEx(child, None, CLASS_PANEL, None)
+        panel = win32gui.FindWindowEx(child, friends, CLASS_PANEL, None) if tab == "chats" else friends
+        found: list[int] = []
+
+        def visit(h, _):
+            if win32gui.IsWindowVisible(h) and win32gui.GetWindowText(h).startswith("SearchListCtrl"):
+                found.append(h)
+            return True
+
+        if panel:
+            win32gui.EnumChildWindows(panel, visit, None)
+        return found[0] if found else 0
+
+    def _double_click(self, x: int, y: int) -> None:
+        win32api, win32con, _ = self._w()
+        win32api.SetCursorPos((x, y))
+        for _ in range(2):
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.05)
+
+    def _wait_chat(self, name: str, seconds: float = 4.0) -> int:
+        _, _, win32gui = self._w()
+        main = win32gui.FindWindow(None, MAIN_TITLE)
+        for _ in range(int(seconds / 0.2)):
+            time.sleep(0.2)
+            chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
+            if chat and chat != main:
+                return chat
+        return 0
+
+    def _close_wrong(self, before: dict[int, str], name: str) -> str:
+        """찾는 방이 아닌데 열린 창이 있으면 닫고 그 제목을 돌려준다."""
+        win32api, win32con, _ = self._w()
+        wrong = ""
+        for h, title in self._kakao_windows().items():
+            if h not in before and title not in (MAIN_TITLE, name):
+                wrong = wrong or title
+                win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+        return wrong
+
+    # ── KakaoDriver 구현 ──
     def open_chat(self, name: str, tab: str | None = None):
-        """tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값."""
+        """검색 결과 중 '이름이 같은 방'만 연다. 맨 위 결과를 그냥 열지 않는다.
+
+        tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값.
+        """
+        from .kakao_names import _keep_on_top, _ocr_screen, pick_search_result
+
         win32api, win32con, win32gui = self._w()
         self.trace = []
         tab = tab or self.search_tab
         before = self._kakao_windows()
-        box, used = self._search_box(tab)
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
-        time.sleep(self.wait)
-        self._press_enter(box)
-        self._log(f"검색어 '{name}' 입력 후 Enter")
+        already = win32gui.FindWindow(None, name)
+        if already and already != win32gui.FindWindow(None, MAIN_TITLE):
+            self._log(f"이미 열려 있는 채팅방 사용: '{name}'")
+            return already
 
-        chat = 0
-        for _ in range(int(4 / 0.2)):  # 최대 4초 동안 채팅방이 뜨기를 기다림
-            time.sleep(0.2)
-            chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
-            if chat and chat != win32gui.FindWindow(None, MAIN_TITLE):
-                break
-            chat = 0
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
+        box, used = self._search_box(tab)
+        main = win32gui.FindWindow(None, MAIN_TITLE)
+        _keep_on_top(main, True)  # 검색 결과를 읽고 누르는 동안 가려지지 않게
+        try:
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
+            time.sleep(self.wait)
+            self._log(f"검색어 '{name}' 입력({used})")
+            results = self._search_list(main, used)
+            titles = _ocr_screen(results)() if results else []
+            names = [t.text for t in titles]
+            self._log("검색 결과: " + (" | ".join(names) if names else "(읽지 못함)"))
+            idx = pick_search_result(name, names)
+            if idx is None:
+                raise ChatNotFound(
+                    f"검색 결과에 '{name}' 방이 없습니다(맨 위 방을 그냥 열지 않음)"
+                    + (f". 검색된 방: {', '.join(names[:5])}" if names else "")
+                )
+            t = titles[idx]
+            self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
+            self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
+            chat = self._wait_chat(name)
+        finally:
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
+            _keep_on_top(main, False)
+
         if not chat:
-            opened = [t for h, t in self._kakao_windows().items() if h not in before and t != MAIN_TITLE]
-            where = "채팅방 이름" if used == "chats" else "카톡 친구 이름"
-            hint = f" 대신 열린 창: '{opened[0]}'" if opened else " 새로 열린 창 없음"
+            wrong = self._close_wrong(before, name)
+            hint = f" 대신 열린 창 '{wrong}'은 바로 닫았습니다" if wrong else " 새로 열린 창 없음"
             self._log("채팅방 창 못 찾음." + hint)
-            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다({where} 확인 필요,{hint})")
+            raise ChatNotFound(f"'{name}' 채팅방을 열지 못했습니다({hint.strip()})")
         self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
         return chat
 
