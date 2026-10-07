@@ -255,7 +255,7 @@ else:
 
 if source == "이름 직접 입력":
     names_text = st.text_area("받는 사람 (한 줄에 한 명, 카톡에 보이는 이름 그대로)", height=150,
-                              placeholder="카페하늘\n베이커리온\n오피스커피")
+                              placeholder="KF - OKGUCHON(서명교)[ANGELES]\n송장방\nHARRY")
     phones_hint = "" if is_kakao_pc else " 문자/알림톡은 '이름,010-1234-5678' 처럼 번호도 적어 주세요."
     st.caption("PC 카카오톡은 이름만 있으면 됩니다." + phones_hint)
     typed_as_room = is_kakao_pc and st.radio(
@@ -426,7 +426,7 @@ if is_kakao_pc or is_preview:
         if source == "엑셀 파일":
             attach_col = pick("고객별 첨부파일 열", "첨부파일", optional=True)
             st.caption("고객마다 다른 파일(예: 거래명세서)을 보낼 때, 엑셀에 파일 경로를 적은 열. "
-                       "예) C:\\명세서\\카페하늘.pdf  (여러 개면 ; 로 구분)")
+                       "예) C:\\명세서\\마닐라푸드.pdf  (여러 개면 ; 로 구분)")
     if is_kakao_pc and (attachments or attach_col):
         st.warning("첨부를 보낼 때는 채팅방 창이 맨 앞으로 나오고 붙여넣기·Enter 가 자동으로 눌립니다. "
                    "**발송이 끝날 때까지 키보드·마우스를 건드리지 마세요.**")
