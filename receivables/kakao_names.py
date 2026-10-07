@@ -86,27 +86,75 @@ def _keep_on_top(hwnd: int, on: bool) -> None:
         pass
 
 
-def _collect(read_visible, hwnd: int, wait: float, max_scrolls: int = 300) -> list[str]:
-    """맨 위로 올린 뒤, 보이는 이름 읽기 → 아래로 스크롤 을 새 이름이 안 나올 때까지 반복."""
+class NameVoter:
+    """여러 번 읽은 이름을 모아 같은 항목끼리 묶고, 가장 많이 나온 표기를 고른다.
+
+    글자 인식(OCR)은 같은 이름도 읽을 때마다 조금씩 다르게 읽을 수 있어서(기나글로벌/기나글로별),
+    비슷한 표기(fuzzy=True)를 한 항목으로 보고 다수결로 정한다.
+    """
+
+    def __init__(self, fuzzy: bool = False, similarity: float = 0.8):
+        self.fuzzy = fuzzy
+        self.similarity = similarity
+        self.clusters: list[dict[str, int]] = []  # 항목마다 {표기: 횟수}
+
+    def _find(self, name: str) -> dict[str, int] | None:
+        for cluster in self.clusters:
+            if name in cluster:
+                return cluster
+        if not self.fuzzy:
+            return None
+        key = _norm(name) or name
+        for cluster in self.clusters:
+            for variant in cluster:
+                other = _norm(variant) or variant
+                if difflib.SequenceMatcher(None, key, other).ratio() >= self.similarity:
+                    return cluster
+        return None
+
+    def add(self, names: list[str]) -> int:
+        """이름들을 더하고, 새로 생긴 항목 수를 돌려준다."""
+        new = 0
+        for name in dict.fromkeys(n for n in names if n):  # 한 화면 안의 중복은 한 번만
+            cluster = self._find(name)
+            if cluster is None:
+                self.clusters.append({name: 1})
+                new += 1
+            else:
+                cluster[name] = cluster.get(name, 0) + 1
+        return new
+
+    def result(self, min_count: int = 1) -> list[str]:
+        out = []
+        for cluster in self.clusters:
+            if sum(cluster.values()) >= min_count:
+                out.append(max(cluster.items(), key=lambda kv: kv[1])[0])  # 동률이면 먼저 나온 표기
+        return out
+
+
+def _collect(read_visible, hwnd: int, wait: float, fuzzy: bool = False, max_scrolls: int = 400) -> list[str]:
+    """맨 위로 올린 뒤 '보이는 이름 읽기 → 조금 아래로' 를 목록 끝(화면이 더 안 바뀜)까지 반복."""
     for _ in range(30):
         _scroll(hwnd, 10)
     time.sleep(wait)
-    names: list[str] = []
-    seen: set[str] = set()
-    still = 0
-    for _ in range(max_scrolls):
-        added = 0
-        for name in read_visible():
-            if name and name not in seen:
-                seen.add(name)
-                names.append(name)
-                added += 1
-        still = still + 1 if added == 0 else 0
-        if still >= 3:
+    voter = NameVoter(fuzzy=fuzzy)
+    previous = None
+    same = reads = 0
+    for step in range(max_scrolls):
+        visible = read_visible()
+        reads += 1
+        voter.add(visible)
+        if step == 0:  # 맨 위 항목도 두 번 이상 읽히도록
+            voter.add(read_visible())
+            reads += 1
+        same = same + 1 if visible == previous else 0
+        if same >= 2:  # 스크롤해도 화면이 그대로 = 목록 끝
             break
-        _scroll(hwnd, -3)
+        previous = visible
+        _scroll(hwnd, -2)
         time.sleep(wait)
-    return names
+    # OCR 은 한 번만 보인 표기(잘린 줄·잘못 읽은 글자)를 버린다
+    return voter.result(min_count=2 if fuzzy and reads >= 3 else 1)
 
 
 # ───────────────────────── 1. MSAA ─────────────────────────
@@ -185,6 +233,7 @@ def filter_ocr_lines(lines: list[str]) -> list[str]:
     for raw in lines:
         text = clean_name(raw)
         text = re.sub(r"\s+\d{1,4}$", "", text)  # 채팅방 이름 뒤 인원수 '기나글로벌 15'
+        text = re.sub(r"^[0OoＯ○◎@]\s+", "", text)  # 오픈채팅 아이콘을 '0' 으로 읽은 것
         if not text or len(text) > 30:  # 너무 긴 줄은 대화 미리보기·상태메시지일 가능성이 큼
             continue
         if any(re.search(p, text) for p in NOISE_PATTERNS):
@@ -237,11 +286,59 @@ def install_korean_ocr() -> None:
         raise RuntimeError("설치 창을 열지 못했습니다(권한 허용을 거절했을 수 있습니다).")
 
 
+@dataclass
+class OcrLine:
+    text: str
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+def item_names_from_lines(lines: list[OcrLine], width: float) -> list[str]:
+    """목록 화면의 OCR 줄들에서 항목마다 맨 윗줄(이름)만 골라낸다.
+
+    카톡 목록 항목은 [굵은 이름] 아래에 [상태메시지/대화 미리보기]가 붙어 있다.
+    같은 항목 안의 줄 간격은 좁고 항목 사이 간격은 넓으므로, 간격으로 항목을 나눈 뒤 첫 줄만 쓴다.
+    오른쪽의 시간·안 읽은 수처럼 이름 칸 밖에 있는 줄은 뺀다.
+    """
+    if not lines:
+        return []
+    # 이름 칸의 왼쪽 위치 = 가장 많은 줄이 시작하는 x (5px 단위로 묶어서)
+    buckets: dict[int, int] = {}
+    for ln in lines:
+        buckets[round(ln.x / 5)] = buckets.get(round(ln.x / 5), 0) + 1
+    column_x = max(buckets.items(), key=lambda kv: (kv[1], -kv[0]))[0] * 5
+    column = sorted((ln for ln in lines if abs(ln.x - column_x) <= width * 0.06), key=lambda ln: ln.y)
+    if not column:
+        return []
+    heights = sorted(ln.h for ln in column)
+    line_h = heights[len(heights) // 2]
+
+    names = []
+    prev_bottom = None
+    for ln in column:
+        if prev_bottom is None or ln.y - prev_bottom > line_h * 0.9:  # 간격이 넓으면 새 항목
+            names.append(ln.text)
+        prev_bottom = ln.y + ln.h
+    return filter_ocr_lines(names)
+
+
+def _dpi_aware() -> None:
+    """화면 배율(125%·150%)에서도 창 위치와 캡처 위치가 맞도록."""
+    import ctypes
+
+    try:
+        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+    except Exception:
+        pass
+
+
 def _ocr_reader(hwnd: int):
     import asyncio
 
     import win32gui
-    from PIL import ImageGrab
+    from PIL import Image, ImageGrab, ImageOps
 
     try:
         from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
@@ -250,6 +347,7 @@ def _ocr_reader(hwnd: int):
         raise RuntimeError("OCR 모듈이 없습니다. 실행.bat 을 다시 실행해 설치해 주세요.") from exc
 
     engine = _korean_ocr_engine()
+    _dpi_aware()
 
     async def recognize(img):
         writer = DataWriter()
@@ -261,9 +359,22 @@ def _ocr_reader(hwnd: int):
 
     def read_visible() -> list[str]:
         img = ImageGrab.grab(bbox=win32gui.GetWindowRect(hwnd), all_screens=True)
-        img = img.resize((img.width * 2, img.height * 2)).convert("RGBA")  # 크게 하면 한글 인식이 좋아진다
+        # 크게·흑백·대비를 올리면 작은 한글 인식이 좋아진다
+        img = ImageOps.autocontrast(ImageOps.grayscale(img))
+        scale = 3
+        img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")
         result = asyncio.run(recognize(img))
-        return filter_ocr_lines([line.text for line in result.lines])
+        lines = []
+        for line in result.lines:
+            rects = [w.bounding_rect for w in line.words]
+            if not rects:
+                continue
+            x0 = min(r.x for r in rects)
+            y0 = min(r.y for r in rects)
+            x1 = max(r.x + r.width for r in rects)
+            y1 = max(r.y + r.height for r in rects)
+            lines.append(OcrLine(line.text, x0, y0, x1 - x0, y1 - y0))
+        return item_names_from_lines(lines, img.width)
 
     return read_visible
 
@@ -287,7 +398,7 @@ def extract_names(tab: str = "friends", wait: float = 0.4) -> tuple[list[str], s
                 if not first:
                     errors.append(f"{label}: 이름 없음")
                     continue
-                return _collect(reader, hwnd, wait), label
+                return _collect(reader, hwnd, wait, fuzzy=label.startswith("OCR")), label
             except Exception as exc:  # 방법마다 실패 이유를 모아 둔다
                 errors.append(f"{label}: {exc}")
     finally:

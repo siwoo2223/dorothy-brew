@@ -96,8 +96,17 @@ def names_tool() -> None:
     if not names:
         st.stop()
     st.success(f"카톡 이름 {len(names)}개")
-    with st.expander("읽어 온 이름 보기"):
-        st.dataframe(pd.DataFrame({target_col: names}), use_container_width=True, hide_index=True)
+    st.caption("글자 인식은 가끔 글자를 틀리게 읽습니다(예: 기나글로벌 → 기나글로별). 발송은 **카톡에 보이는 이름과 정확히 같아야** 되므로, "
+               "아래 표에서 틀린 글자는 칸을 눌러 고치고, 이름이 아닌 줄은 왼쪽 체크 후 휴지통으로 지우세요. 맨 아래 줄에서 추가도 됩니다.")
+    names_df = st.data_editor(
+        pd.DataFrame({target_col: names}),
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        height=min(38 + 35 * len(names), 420),
+        key=f"names-list-{len(names)}-{hash(tuple(names))}",
+    )
+    names = list(dict.fromkeys(format_value(n) for n in names_df[target_col] if format_value(n)))
     st.download_button("이름 목록 엑셀로 받기", to_excel(pd.DataFrame({target_col: names})),
                        file_name=f"{target_col}목록.xlsx")
 
@@ -126,7 +135,7 @@ def names_tool() -> None:
         "판정": ["📝 기존 값" if m.customer in existing else level_icon[m.level] for m in matches],
         "다른 후보": [", ".join(c for c in m.candidates if c != m.kakao_name) for m in matches],
     })
-    st.write(f"자동으로 짝을 맞춘 결과입니다. **{target_col}** 칸을 눌러 맞는 이름으로 고칠 수 있습니다. "
+    st.write(f"자동으로 짝을 맞춘 결과입니다. **{target_col}** 칸을 눌러 직접 고쳐 쓸 수 있습니다(다른 후보를 참고하세요). "
              "카톡에 없는 고객은 비워 두세요(그러면 고객명으로 찾습니다).")
     if target_col == "채팅방":
         st.caption("채팅 목록에서 읽었으므로 결과를 **'채팅방' 열**에 저장합니다. 이 고객들은 해당 채팅방(단톡방 포함)으로 보내집니다.")
@@ -135,8 +144,7 @@ def names_tool() -> None:
         use_container_width=True,
         hide_index=True,
         disabled=["고객명", "판정", "다른 후보"],
-        column_config={target_col: st.column_config.SelectboxColumn(
-            target_col, options=[""] + list(dict.fromkeys(names + list(existing.values()))))},
+        column_config={target_col: st.column_config.TextColumn(target_col, help="카톡에 보이는 이름 그대로")},
         key="names-editor",
     )
     counts = table_["판정"].value_counts()

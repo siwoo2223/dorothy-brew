@@ -294,6 +294,8 @@ def test_filter_ocr_lines_keeps_names_only():
              "KF물류", "01064450246", "기나글로벌 15", "오전 11:43", "300+", "1개의 채팅방", "29",
              "본건 딜레이 공문 전달 드립니다 확인 부탁드리며 일정 공유드리겠습니다"]
     assert filter_ocr_lines(lines) == ["Jung-woong", "사장님 노력", "항상 조심을", "KF물류", "기나글로벌"]
+    assert filter_ocr_lines(["0 보홀교민 & 사업자 정보교환방", "0 세부 한인회 특방 시즌 2 장터방 1331"]) == [
+        "보홀교민 & 사업자 정보교환방", "세부 한인회 특방 시즌 2 장터방"]
 
 
 # ───────────── 첨부 (사진·파일) ─────────────
@@ -347,3 +349,42 @@ def test_templates_store(tmp_path):
     assert ts.list_templates(tmp_path) == ["가격 변경", "휴무 안내"]
     ts.delete_template(tmp_path, "휴무 안내")
     assert ts.list_templates(tmp_path) == ["가격 변경"]
+
+
+# ───────────── 채팅 목록 OCR: 항목 이름만 고르기 ─────────────
+def test_item_names_from_chat_list_screenshot_layout():
+    """사용자 화면(채팅 목록) 배치를 그대로 옮긴 OCR 줄들: 이름 줄만 남아야 한다."""
+    from receivables.kakao_names import OcrLine, item_names_from_lines
+
+    L = OcrLine
+    lines = [
+        L("기나글로벌 15", 83, 19, 75, 14), L("오전 11:43", 300, 19, 50, 12),
+        L("본건 딜레이 공문 전달 드립니다", 83, 38, 150, 14),
+        L("송장방 8", 83, 91, 45, 14), L("오후 12:51", 300, 91, 50, 12),
+        L("저희 냉동 물건 harry뻘낙지로 들어온게 있는데", 83, 110, 210, 14),
+        L("뻘낙지한마당이랑 다른곳일까요?", 83, 129, 150, 14),
+        L("김현 세부 신규 6", 83, 184, 80, 14),
+        L("네", 83, 203, 12, 14),
+        L("HARRY 9", 83, 250, 50, 14),
+        L("harry 뻘낙지로 들어온 냉동이 있습니다", 83, 269, 190, 14),
+        L("입고 맞으실까요?", 83, 288, 80, 14),
+        L("찰리할머니(키메라) 7", 83, 341, 110, 14), L("300+", 320, 360, 25, 12),
+        L("21일까지 약150키로정도될것같네요", 83, 360, 170, 14),
+    ]
+    assert item_names_from_lines(lines, width=360) == ["기나글로벌", "송장방", "김현 세부 신규", "HARRY", "찰리할머니(키메라)"]
+
+
+def test_name_voter_majority_and_noise():
+    from receivables.kakao_names import NameVoter
+
+    v = NameVoter(fuzzy=True)
+    v.add(["기나글로별", "송장방"])
+    v.add(["기나글로벌", "송장방", "디할며니(기매다)"])
+    v.add(["기나글로벌", "송장방", "찰리할머니(키메라)"])
+    v.add(["찰리할머니(키메라)"])
+    # 다수결로 올바른 표기, 한 번만 나온 잘못 읽은 표기는 같은 항목으로 묶이거나 버려진다
+    assert v.result(min_count=2) == ["기나글로벌", "송장방", "찰리할머니(키메라)"]
+
+    exact = NameVoter(fuzzy=False)
+    exact.add(["KF - 써니[CEBU]", "KF - 써니[CEBUI"])
+    assert exact.result() == ["KF - 써니[CEBU]", "KF - 써니[CEBUI"]  # 정확히 읽는 방법은 합치지 않음
