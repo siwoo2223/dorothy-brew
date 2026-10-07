@@ -505,3 +505,17 @@ def test_not_found_in_search_does_not_stop_sending():
     msgs.append(OutgoingMessage("x", "", "본문", {}, chat_name="마지막"))
     results = KakaoPCSender(kakao, max_consecutive_failures=3, sleep=lambda s: None).send(msgs)
     assert [r.ok for r in results] == [False] * 4 + [True]  # 4번 '방 없음' 뒤에도 계속 보냄
+
+
+def test_rank_search_results_tolerates_ocr_errors():
+    from receivables.kakao_names import rank_search_results
+
+    # 사용자 결과: 글자 인식이 이름을 틀리게 읽어도 가장 비슷한 줄을 후보로 고른다(최종 확인은 창 제목)
+    assert rank_search_results("KF-비즈메이커 앙헬레스 신규", ["KF-비즈에이거 양일래스 신규"]) == [0]
+    assert rank_search_results("kf-김원영(클락)", ["남-김원영(클락)"]) == [0]
+    # 정확히 같은 줄이 보이면 그 줄 하나만
+    assert rank_search_results("유니", ["필리핀 세부 사고팔고, 광고, ...", "유니온", "유니"]) == [2]
+    # 엉뚱한 단톡방들은 후보가 아님
+    assert rank_search_results("ㄱ레이첼☆salon4u", ["신호석, 이창하, kimberly.HAN, ...", "세부 한인회 특방 시즌 2 장..."]) == []
+    # 후보는 최대 2개, 비슷한 순서
+    assert rank_search_results("한식원", ["한식원 본점", "KF 일반 냉동 물류", "한식원2"]) == [2, 0]

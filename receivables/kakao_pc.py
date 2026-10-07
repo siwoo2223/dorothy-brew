@@ -196,11 +196,14 @@ class Win32KakaoDriver:
 
     # ── KakaoDriver 구현 ──
     def open_chat(self, name: str, tab: str | None = None):
-        """검색 결과 중 '이름이 같은 방'만 연다. 맨 위 결과를 그냥 열지 않는다.
+        """검색 결과에서 가장 비슷한 줄을 열고, 창 제목이 엑셀 이름과 정확히 같을 때만 그 방을 쓴다.
+
+        글자 인식(OCR)은 후보를 고르는 데만 쓰고(글자를 조금 틀려도 됨), 최종 확인은 창 제목(정확한 글자)으로 한다.
+        맨 위 결과를 그냥 열지 않으며, 다른 방이 열리면 바로 닫고 다음 후보를 하나만 더 시도한다.
 
         tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값.
         """
-        from .kakao_names import _keep_on_top, _ocr_screen, pick_search_result
+        from .kakao_names import _keep_on_top, _ocr_screen, rank_search_results
 
         win32api, win32con, win32gui = self._w()
         self.trace = []
@@ -222,25 +225,32 @@ class Win32KakaoDriver:
             titles = _ocr_screen(results)() if results else []
             names = [t.text for t in titles]
             self._log("검색 결과: " + (" | ".join(names) if names else "(읽지 못함)"))
-            idx = pick_search_result(name, names)
-            if idx is None:
+            order = rank_search_results(name, names)
+            if not order:
                 raise ChatNotFound(
-                    f"검색 결과에 '{name}' 방이 없습니다(맨 위 방을 그냥 열지 않음)"
+                    f"검색 결과에 '{name}' 방이 없습니다(비슷한 이름도 없어 아무 방도 열지 않음)"
                     + (f". 검색된 방: {', '.join(names[:5])}" if names else "")
                 )
-            t = titles[idx]
-            self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
-            self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
-            chat = self._wait_chat(name)
+            chat, tried = 0, []
+            for idx in order:  # 가장 비슷한 줄부터, 최대 2개
+                t = titles[idx]
+                self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
+                self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
+                chat = self._wait_chat(name, seconds=3.0)  # 창 제목이 엑셀 이름과 '정확히' 같아야 함
+                if chat:
+                    break
+                wrong = self._close_wrong(before, name)
+                tried.append(wrong or t.text)
+                self._log(f"열린 방 '{wrong}' 은(는) 이름이 달라 바로 닫음" if wrong else "창이 열리지 않음")
+                time.sleep(0.5)
         finally:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
             _keep_on_top(main, False)
 
         if not chat:
-            wrong = self._close_wrong(before, name)
-            hint = f" 대신 열린 창 '{wrong}'은 바로 닫았습니다" if wrong else " 새로 열린 창 없음"
-            self._log("채팅방 창 못 찾음." + hint)
-            raise ChatNotFound(f"'{name}' 채팅방을 열지 못했습니다({hint.strip()})")
+            raise ChatNotFound(
+                f"검색 결과에 '{name}' 방이 없습니다(비슷한 방 {', '.join(repr(x) for x in tried)} 은 이름이 달라 닫음)"
+            )
         self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
         return chat
 

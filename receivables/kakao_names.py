@@ -825,3 +825,24 @@ def pick_search_result(name: str, titles: list[str], similarity: float = 0.85) -
         if score > best_score:
             best, best_score = i, score
     return best if best_score >= similarity else None
+
+
+def rank_search_results(name: str, titles: list[str], minimum: float = 0.5, limit: int = 2) -> list[int]:
+    """검색 결과를 '찾는 이름과 비슷한 순서'로 고른다(최대 limit 개). 이름이 정확히 같은 줄이 있으면 그것 하나만.
+
+    글자 인식은 후보를 고르는 데만 쓰고, 맞는 방인지는 열린 채팅방 창 제목(정확한 글자)으로 최종 확인한다.
+    """
+    exact = pick_search_result(name, titles, similarity=1.01)
+    if exact is not None:
+        return [exact]
+    target = _key(name)
+    if not target:
+        return []
+    scored = []
+    for i, t in enumerate(titles):
+        k = _key(t)
+        score = max(difflib.SequenceMatcher(None, a, b).ratio() for a, b in _pairs(target, k)) if k else 0.0
+        if score >= minimum:
+            scored.append((score, i))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [i for _, i in scored[:limit]]
