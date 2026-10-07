@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 > nul
 cd /d "%~dp0"
+title 미수금 발송 프로그램
 
 rem ---- 파이썬 찾기 (py 런처 우선) ----
 set PY=
