@@ -14,7 +14,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receivables import campaign, history
-from receivables.kakao_names import extract_names, match_names
+from receivables.kakao_names import diagnose, extract_names, match_names
 from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver
 from receivables.loader import (
     DEFAULT_LINE_TEMPLATE,
@@ -60,10 +60,21 @@ def names_tool() -> None:
                "목록을 끝까지 내리며 읽으니 끝날 때까지 마우스를 움직이지 마세요.")
     if st.button("PC 카카오톡에서 이름 읽어 오기"):
         try:
-            with st.spinner("카톡 목록을 읽는 중..."):
-                st.session_state["kakao_names"] = extract_names("chats" if tab == "채팅 목록" else "friends")
+            with st.spinner("카톡 목록을 읽는 중... (카톡 창이 잠깐 맨 앞에 고정됩니다)"):
+                found, method = extract_names("chats" if tab == "채팅 목록" else "friends")
+            st.session_state["kakao_names"] = found
+            st.info(f"'{method}' 방법으로 읽었습니다. 이름이 아닌 글자가 섞였을 수 있으니 아래 목록을 확인하세요.")
         except RuntimeError as exc:
             st.error(str(exc))
+    with st.expander("읽기가 안 될 때: 진단 정보 만들기"):
+        st.caption("버튼을 누르면 카카오톡 창 구조를 글로 정리합니다. 대화 내용은 들어가지 않고, 목록에 보이는 이름 일부가 들어갈 수 있습니다. "
+                   "내용을 복사해서 개발자에게 보내 주세요.")
+        if st.button("진단 정보 만들기"):
+            try:
+                with st.spinner("카톡 창 구조를 확인하는 중..."):
+                    st.code(diagnose(), language=None)
+            except RuntimeError as exc:
+                st.error(str(exc))
     pasted = st.text_area("또는 이름을 직접 붙여 넣기 (한 줄에 하나)", height=100)
     if pasted.strip():
         st.session_state["kakao_names"] = [n.strip() for n in pasted.splitlines() if n.strip()]

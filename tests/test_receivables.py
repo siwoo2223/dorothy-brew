@@ -280,3 +280,12 @@ def test_chat_room_column_overrides_friend_name(ledger, tmp_path):
     assert all(r.ok for r in results)
     assert kakao.tabs == [None, "chats", None]  # 채팅방만 채팅 목록에서 찾음
     assert results[1].detail == "채팅방 '베이커리온 납품방'에게 전송"
+
+
+def test_filter_ocr_lines_keeps_names_only():
+    from receivables.kakao_names import filter_ocr_lines
+
+    lines = ["친구", "Jung-woong", "어제 10월 6일", "선물하기", "즐겨찾는 친구 7", "사장님 노력", "항상 조심을",
+             "KF물류", "01064450246", "기나글로벌 15", "오전 11:43", "300+", "1개의 채팅방", "29",
+             "본건 딜레이 공문 전달 드립니다 확인 부탁드리며 일정 공유드리겠습니다"]
+    assert filter_ocr_lines(lines) == ["Jung-woong", "사장님 노력", "항상 조심을", "KF물류", "기나글로벌"]
