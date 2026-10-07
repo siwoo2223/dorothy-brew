@@ -10,6 +10,7 @@ PC 카카오톡 목록은 직접 그린(owner-drawn) 목록이라 일반적인 �
 from __future__ import annotations
 
 import difflib
+import unicodedata
 import re
 import sys
 import time
@@ -794,7 +795,8 @@ def match_names(customers: list[str], kakao_names: list[str], top: int = 3) -> l
 
 # ───────────────────────── 검색 결과에서 정확한 방 고르기 ─────────────────────────
 def _key(text: str) -> str:
-    return re.sub(r"[\s\W_]+", "", text or "").lower()
+    # 한글을 '완성형'으로 통일(엑셀에서 '김'이 'ㄱ+ㅣ+ㅁ'로 나뉘어 저장된 경우 대비) 후 띄어쓰기·기호 제거
+    return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", text or "")).lower()
 
 
 def _pairs(target: str, candidate: str) -> list[tuple[str, str]]:
@@ -827,7 +829,7 @@ def pick_search_result(name: str, titles: list[str], similarity: float = 0.85) -
     return best if best_score >= similarity else None
 
 
-def rank_search_results(name: str, titles: list[str], minimum: float = 0.5, limit: int = 2) -> list[int]:
+def rank_search_results(name: str, titles: list[str], minimum: float = 0.4, limit: int = 3) -> list[int]:
     """검색 결과를 '찾는 이름과 비슷한 순서'로 고른다(최대 limit 개). 이름이 정확히 같은 줄이 있으면 그것 하나만.
 
     글자 인식은 후보를 고르는 데만 쓰고, 맞는 방인지는 열린 채팅방 창 제목(정확한 글자)으로 최종 확인한다.

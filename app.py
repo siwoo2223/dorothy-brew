@@ -603,6 +603,11 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
     (st.success if ok == len(results) else st.warning)(
         ("[테스트] " if is_test else "") + f"성공 {ok}건 / 실패 {len(results) - ok}건"
     )
+    by_key = {d.customer.key: d for d in selected}
+    failed = [r for r in results if not r.ok and "발송 중지됨" not in r.detail and "발송 중단" not in r.detail]
+    if failed:
+        with st.expander(f"❌ 실패 {len(failed)}건 상세 보기 (잘리지 않은 전체 내용)", expanded=True):
+            st.code("\n".join(f"{by_key[r.key].customer.name} → {r.detail}" for r in failed), language=None)
     unverified = [r for r in results if "전송 확인 필요" in r.detail]
     if unverified:
         st.warning(f"{len(unverified)}건은 Enter 는 눌렀지만 전송됐는지 확인하지 못했습니다(중복을 막으려고 다시 보내지 않았습니다). "

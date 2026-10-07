@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import random
+import unicodedata
 import struct
 import sys
 import time
@@ -179,6 +180,7 @@ class Win32KakaoDriver:
 
     def _wait_chat(self, name: str, seconds: float = 4.0) -> int:
         _, _, win32gui = self._w()
+        name = unicodedata.normalize("NFC", name)
         main = win32gui.FindWindow(None, MAIN_TITLE)
         for _ in range(int(seconds / 0.2)):
             time.sleep(0.2)
@@ -217,7 +219,7 @@ class Win32KakaoDriver:
             self._log(f"검색 결과({page + 1}화면): " + (" | ".join(names) if names else "(읽지 못함)"))
             seen += [n for n in names if n not in seen]
             order = rank_search_results(name, names)
-            for idx in order:  # 정확히 같은 줄 하나, 또는 가장 비슷한 줄부터 최대 2개
+            for idx in order:  # 정확히 같은 줄 하나, 또는 가장 비슷한 줄부터 최대 3개
                 t = titles[idx]
                 self._log(f"'{t.text}' 더블클릭")
                 self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
@@ -566,7 +568,7 @@ class KakaoPCSender:
             time.sleep(min(0.3, max(end - time.time(), 0)))
 
     def _send_one(self, m: OutgoingMessage) -> SendResult:
-        name = m.chat_name
+        name = unicodedata.normalize("NFC", m.chat_name).strip()  # 카톡 창 제목과 같은 '완성형' 한글로
         try:
             chat = self.driver.open_chat(name, m.search_tab or None)
         except ChatNotFound as exc:

@@ -552,3 +552,14 @@ def test_short_names_only_exact():
     titles = ["보홀교민 & 사업자 정보교환...", "교민방 2017년역사 세부 오...", "건우네", "KF 일반 냉동 물류", "건"]
     assert rank_search_results("건", titles) == [4]
     assert rank_search_results("건", ["건우네", "긴"]) == []  # 비슷해도 열지 않음
+
+
+def test_matching_handles_decomposed_hangul():
+    import unicodedata
+
+    from receivables.kakao_names import rank_search_results
+
+    nfd = unicodedata.normalize("NFD", "김경주")  # 엑셀에 'ㄱ+ㅣ+ㅁ…' 로 나뉘어 저장된 이름
+    assert nfd != "김경주"
+    assert rank_search_results(nfd, ["필리핀 세부 자유여행 시즌2", "김경주"]) == [1]
+    assert rank_search_results("김경주", ["필리핀 세부 자유여행 시즌2", "김겸주"]) == [1]  # 인식 오차 → 후보(창 제목으로 확인)
