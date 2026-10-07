@@ -14,7 +14,13 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from receivables import campaign, history, templates_store
-from receivables.kakao_names import diagnose, extract_names, install_korean_ocr, match_names
+from receivables.kakao_names import (
+    diagnose,
+    extract_names,
+    extract_names_exact,
+    install_korean_ocr,
+    match_names,
+)
 from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver
 from receivables.loader import (
     DEFAULT_LINE_TEMPLATE,
@@ -58,12 +64,35 @@ def names_tool() -> None:
     tab = st.radio("어디서 읽을까요?", ["친구 목록", "채팅 목록"], horizontal=True)
     st.caption("PC 카카오톡을 켜고 메인 창에서 해당 탭을 눌러 둔 뒤 버튼을 누르세요. "
                "목록을 끝까지 내리며 읽으니 끝날 때까지 마우스를 움직이지 마세요.")
+    exact_mode = st.toggle(
+        "🎯 정확하게 읽기 (채팅방을 하나씩 열어 창 제목으로 이름 확인)",
+        help="글자 인식은 비슷한 글자를 틀릴 수 있습니다(채팅→재팅). 이 방법은 채팅방을 하나씩 열어 창 제목에서 "
+             "정확한 이름을 읽고 바로 닫습니다. 대신 시간이 더 걸리고(방 하나에 1~2초), 안 읽은 메시지가 '읽음' 처리됩니다.",
+    )
+    if exact_mode:
+        st.warning("채팅방을 열기 때문에 **안 읽은 메시지가 '읽음' 처리**됩니다(상대방 쪽 숫자 1이 사라짐). "
+                   "읽는 동안 마우스가 자동으로 움직이니 **끝날 때까지 키보드·마우스를 건드리지 마세요.**")
     if st.button("PC 카카오톡에서 이름 읽어 오기"):
         try:
-            with st.spinner("카톡 목록을 읽는 중... (카톡 창이 잠깐 맨 앞에 고정됩니다)"):
-                found, method = extract_names("chats" if tab == "채팅 목록" else "friends")
-            st.session_state["kakao_names"] = found
-            st.info(f"'{method}' 방법으로 읽었습니다. 이름이 아닌 글자가 섞였을 수 있으니 아래 목록을 확인하세요.")
+            target = "chats" if tab == "채팅 목록" else "friends"
+            if exact_mode:
+                status = st.empty()
+
+                def progress(count: int, name: str, exact: bool) -> None:
+                    status.info(f"{count}개 확인 중… {'✅' if exact else '⚠️'} {name}")
+
+                pairs = extract_names_exact(target, on_progress=progress)
+                st.session_state["kakao_names"] = [n for n, _ in pairs]
+                unverified = [n for n, ok in pairs if not ok]
+                status.success(f"{len(pairs)}개를 정확하게 읽었습니다."
+                               + (f" 그중 {len(unverified)}개는 창이 열리지 않아 글자 인식 결과입니다: "
+                                  + ", ".join(unverified[:10]) if unverified else ""))
+            else:
+                with st.spinner("카톡 목록을 읽는 중... (카톡 창이 잠깐 맨 앞에 고정됩니다)"):
+                    found, method = extract_names(target)
+                st.session_state["kakao_names"] = found
+                st.info(f"'{method}' 방법으로 읽었습니다. 글자가 틀린 이름이 있을 수 있으니 아래 표에서 확인하세요. "
+                        "정확한 이름이 필요하면 위의 '정확하게 읽기'를 켜고 다시 읽으세요.")
         except RuntimeError as exc:
             st.error(str(exc))
             if "한국어 글자 인식" in str(exc):

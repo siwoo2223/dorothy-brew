@@ -296,6 +296,11 @@ class OcrLine:
 
 
 def item_names_from_lines(lines: list[OcrLine], width: float) -> list[str]:
+    """목록 화면의 OCR 줄들에서 항목마다 이름만 골라낸다."""
+    return [ln.text for ln in item_title_lines(lines, width)]
+
+
+def item_title_lines(lines: list[OcrLine], width: float) -> list[OcrLine]:
     """목록 화면의 OCR 줄들에서 항목마다 맨 윗줄(이름)만 골라낸다.
 
     카톡 목록 항목은 [굵은 이름] 아래에 [상태메시지/대화 미리보기]가 붙어 있다.
@@ -315,13 +320,15 @@ def item_names_from_lines(lines: list[OcrLine], width: float) -> list[str]:
     heights = sorted(ln.h for ln in column)
     line_h = heights[len(heights) // 2]
 
-    names = []
+    titles = []
     prev_bottom = None
     for ln in column:
         if prev_bottom is None or ln.y - prev_bottom > line_h * 0.9:  # 간격이 넓으면 새 항목
-            names.append(ln.text)
+            cleaned = filter_ocr_lines([ln.text])
+            if cleaned:
+                titles.append(OcrLine(cleaned[0], ln.x, ln.y, ln.w, ln.h))
         prev_bottom = ln.y + ln.h
-    return filter_ocr_lines(names)
+    return titles
 
 
 def _dpi_aware() -> None:
@@ -334,7 +341,8 @@ def _dpi_aware() -> None:
         pass
 
 
-def _ocr_reader(hwnd: int):
+def _ocr_screen(hwnd: int):
+    """목록 창을 캡처해 OCR 하고, 항목 이름 줄을 '화면 좌표'로 돌려주는 함수를 만든다."""
     import asyncio
 
     import win32gui
@@ -348,6 +356,7 @@ def _ocr_reader(hwnd: int):
 
     engine = _korean_ocr_engine()
     _dpi_aware()
+    scale = 3
 
     async def recognize(img):
         writer = DataWriter()
@@ -357,11 +366,11 @@ def _ocr_reader(hwnd: int):
         )
         return await engine.recognize_async(bitmap)
 
-    def read_visible() -> list[str]:
-        img = ImageGrab.grab(bbox=win32gui.GetWindowRect(hwnd), all_screens=True)
+    def read_titles() -> list[OcrLine]:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
         # 크게·흑백·대비를 올리면 작은 한글 인식이 좋아진다
         img = ImageOps.autocontrast(ImageOps.grayscale(img))
-        scale = 3
         img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")
         result = asyncio.run(recognize(img))
         lines = []
@@ -374,9 +383,115 @@ def _ocr_reader(hwnd: int):
             x1 = max(r.x + r.width for r in rects)
             y1 = max(r.y + r.height for r in rects)
             lines.append(OcrLine(line.text, x0, y0, x1 - x0, y1 - y0))
-        return item_names_from_lines(lines, img.width)
+        return [
+            OcrLine(t.text, left + t.x / scale, top + t.y / scale, t.w / scale, t.h / scale)
+            for t in item_title_lines(lines, img.width)
+        ]
 
-    return read_visible
+    return read_titles
+
+
+def _ocr_reader(hwnd: int):
+    read_titles = _ocr_screen(hwnd)
+    return lambda: [t.text for t in read_titles()]
+
+
+# ───────────────────────── 정확하게 읽기: 채팅방을 열어 창 제목 읽기 ─────────────────────────
+def _process_windows(pid: int) -> set[int]:
+    import win32gui
+    import win32process
+
+    found: set[int] = set()
+
+    def visit(h, _):
+        if win32gui.IsWindowVisible(h) and win32gui.GetWindowText(h):
+            if win32process.GetWindowThreadProcessId(h)[1] == pid:
+                found.add(h)
+        return True
+
+    win32gui.EnumWindows(visit, None)
+    return found
+
+
+def _open_and_read_title(x: int, y: int, main: int, pid: int) -> str:
+    """목록의 (x, y) 항목을 더블클릭해 채팅방을 열고, 새 창의 제목(정확한 이름)을 읽은 뒤 닫는다."""
+    import win32api
+    import win32con
+    import win32gui
+
+    before = _process_windows(pid)
+    win32api.SetCursorPos((x, y))
+    for _ in range(2):
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.05)
+    new: list[int] = []
+    for _ in range(15):
+        time.sleep(0.2)
+        new = [h for h in _process_windows(pid) - before if h != main]
+        if new:
+            break
+    if not new:
+        return ""
+    title = win32gui.GetWindowText(new[0]).strip()
+    for h in new:
+        win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+    time.sleep(0.3)
+    return title if title != MAIN_TITLE else ""
+
+
+def _seen_before(text: str, done: list[str], similarity: float = 0.9) -> bool:
+    """이미 연 항목인지. 괄호 안 글자까지 비교해서, 비슷한 '다른 방'을 건너뛰지 않게 보수적으로 본다."""
+    def loose(t: str) -> str:
+        return re.sub(r"[\s\W_]+", "", t).lower() or t
+
+    key = loose(text)
+    return any(difflib.SequenceMatcher(None, key, loose(d)).ratio() >= similarity for d in done)
+
+
+def extract_names_exact(tab: str = "chats", wait: float = 0.4, on_progress=None) -> list[tuple[str, bool]]:
+    """채팅방(또는 친구)을 하나씩 열어 창 제목으로 정확한 이름을 읽는다.
+
+    돌려주는 값: [(이름, 정확히 확인했는지)] — 창이 안 열려 확인 못 한 항목은 글자 인식 결과를 False 로 담는다.
+    채팅방을 열기 때문에 안 읽은 메시지는 '읽음' 처리된다.
+    """
+    _require_windows()
+    import win32process
+
+    main = _main_window()
+    hwnd = _list_window(main)
+    pid = win32process.GetWindowThreadProcessId(main)[1]
+    _keep_on_top(main, True)
+    try:
+        read_titles = _ocr_screen(hwnd)
+        for _ in range(30):
+            _scroll(hwnd, 10)
+        time.sleep(wait)
+        results: list[tuple[str, bool]] = []
+        done_ocr: list[str] = []
+        previous, same = None, 0
+        for _ in range(400):
+            titles = read_titles()
+            for t in titles:
+                if _seen_before(t.text, done_ocr):
+                    continue
+                done_ocr.append(t.text)
+                title = _open_and_read_title(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2), main, pid)
+                name, exact = (title, True) if title else (t.text, False)
+                if all(name != n for n, _ in results):
+                    results.append((name, exact))
+                if on_progress:
+                    on_progress(len(results), name, exact)
+            signature = tuple(t.text for t in titles)
+            same = same + 1 if signature == previous else 0
+            if same >= 2:
+                break
+            previous = signature
+            _scroll(hwnd, -2)
+            time.sleep(wait)
+        return results
+    finally:
+        _keep_on_top(main, False)
 
 
 # ───────────────────────── 공개 함수 ─────────────────────────

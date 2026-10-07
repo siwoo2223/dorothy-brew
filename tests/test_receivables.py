@@ -388,3 +388,13 @@ def test_name_voter_majority_and_noise():
     exact = NameVoter(fuzzy=False)
     exact.add(["KF - 써니[CEBU]", "KF - 써니[CEBUI"])
     assert exact.result() == ["KF - 써니[CEBU]", "KF - 써니[CEBUI"]  # 정확히 읽는 방법은 합치지 않음
+
+
+def test_seen_before_is_conservative():
+    """정확하게 읽기: 비슷한 다른 방을 건너뛰면 안 되므로 거의 같은 표기만 '이미 본 것'으로 친다.
+    (한 글자 틀린 표기는 다시 열어도 같은 창 제목이 나와 중복은 결과에서 걸러진다)"""
+    from receivables.kakao_names import _seen_before
+
+    assert _seen_before("KF - 황소막장-막탄(CEBU)", ["KF - 황소막장-막단(CEBU)"])
+    assert not _seen_before("송장방", ["기나글로벌", "HARRY"])
+    assert not _seen_before("KF - 써니[CEBU]", ["KF - 써니네[CEBU]2호점"])
