@@ -210,3 +210,55 @@ def test_history_upgrades_old_header(tmp_path):
     history.append([{"발송시각": f"{dt.date.today()} 10:00:00", "방식": "PC카카오톡", "고객명": "나",
                      "결과": "성공"}], log)
     assert history.sent_on(dt.date.today(), log) == {"가|010", "나|"}
+
+
+# ───────────── 공지사항 / 테스트 모드 ─────────────
+from receivables.loader import load_recipients
+
+
+def test_load_recipients_includes_paid_customers(ledger):
+    people = load_recipients(ledger, today=TODAY)
+    assert [p.name for p in people] == ["카페하늘", "베이커리온", "오피스커피", "스튜디오"]  # 완납 고객도 포함, 중복 제거
+    assert people[0].variables["담당자"] == "김"
+    drafts = campaign.prepare(people, "#{고객명}님, 10월 9일은 휴무입니다.")
+    assert drafts[2].text == "오피스커피님, 10월 9일은 휴무입니다."
+
+
+def test_test_mode_redirects_and_is_not_counted_as_sent(ledger, tmp_path):
+    customers = group_customers(ledger, ColumnMap(), today=TODAY, require_phone=False)
+    drafts = campaign.prepare(customers, "#{고객명}님 #{미수총액}원")
+    kakao = FakeKakao({"사장님"})
+    log = tmp_path / "log.csv"
+    results = campaign.send(drafts[:2], KakaoPCSender(kakao, sleep=lambda s: None), log_path=log, test_to="사장님")
+    assert all(r.ok for r in results)
+    assert [chat for chat, _ in kakao.sent] == ["사장님", "사장님"]  # 고객이 아니라 나에게
+    assert kakao.sent[0][1] == "[테스트 · 원래 받는 사람: 카페하늘]\n카페하늘님 235,000원"
+    assert history.sent_on(dt.date.today(), log) == set()  # 테스트는 '이미 보냄'으로 치지 않음
+    assert history.count_sent(dt.date.today(), "PC카카오톡", log) == 2  # 하루 한도에는 포함
+
+
+def test_sent_on_is_per_kind(tmp_path):
+    log = tmp_path / "log.csv"
+    history.append([{"발송시각": f"{dt.date.today()} 10:00:00", "구분": "미수금 안내", "방식": "PC카카오톡",
+                     "고객명": "가", "전화번호": "", "결과": "성공"}], log)
+    assert history.sent_on(dt.date.today(), log, kind="미수금 안내") == {"가|"}
+    assert history.sent_on(dt.date.today(), log, kind="공지사항") == set()
+
+
+# ───────────── 카톡 이름 짝맞추기 ─────────────
+from receivables.kakao_names import clean_name, match_names
+
+
+def test_match_names():
+    kakao = ["카페하늘 김사장", "베이커리 온", "박지민", "오피스커피(강남점)", "스튜디오카페 대표님"]
+    m = {x.customer: x for x in match_names(["카페하늘", "베이커리온", "오피스커피", "스튜디오카페", "없는가게"], kakao)}
+    assert m["카페하늘"].kakao_name == "카페하늘 김사장" and m["카페하늘"].level == "비슷함"
+    assert m["베이커리온"].kakao_name == "베이커리 온" and m["베이커리온"].level == "일치"  # 띄어쓰기 무시
+    assert m["오피스커피"].kakao_name == "오피스커피(강남점)"  # 괄호 무시
+    assert m["스튜디오카페"].kakao_name == "스튜디오카페 대표님"  # 호칭 무시
+    assert m["없는가게"].kakao_name == "" and m["없는가게"].level == "없음"
+
+
+def test_clean_name():
+    assert clean_name("  홍길동\n오늘도 화이팅 ") == "홍길동"
+    assert clean_name("") == ""

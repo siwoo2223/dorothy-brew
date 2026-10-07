@@ -16,9 +16,11 @@ if not defined PY (
   exit /b 1
 )
 
-rem ---- 처음 한 번만 설치 (중간에 실패하면 다음에 다시 설치) ----
-if not exist ".venv\installed.txt" (
-  echo 처음 실행: 필요한 프로그램을 설치합니다. 몇 분 걸릴 수 있습니다...
+rem ---- 처음 실행하거나 필요한 프로그램 목록이 바뀌었을 때만 설치 ----
+set NEED_INSTALL=1
+if exist ".venv\installed.txt" fc /b requirements.txt ".venv\installed.txt" > nul && set NEED_INSTALL=
+if defined NEED_INSTALL (
+  echo 필요한 프로그램을 설치합니다. 몇 분 걸릴 수 있습니다...
   if not exist .venv %PY% -m venv .venv
   .venv\Scripts\python -m pip install --upgrade pip
   .venv\Scripts\python -m pip install -r requirements.txt
@@ -27,7 +29,7 @@ if not exist ".venv\installed.txt" (
     pause
     exit /b 1
   )
-  echo ok> ".venv\installed.txt"
+  copy /y requirements.txt ".venv\installed.txt" > nul
 )
 
 echo 프로그램을 시작합니다. 잠시 후 브라우저가 열립니다.

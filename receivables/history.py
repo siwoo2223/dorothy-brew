@@ -6,7 +6,8 @@ import datetime as dt
 from pathlib import Path
 
 DEFAULT_LOG = Path(__file__).resolve().parent.parent / "logs" / "send_log.csv"
-FIELDS = ["발송시각", "방식", "고객명", "전화번호", "카톡이름", "미수총액", "결과", "상세", "본문"]
+TEST_KIND = "테스트"
+FIELDS = ["발송시각", "구분", "방식", "고객명", "전화번호", "카톡이름", "미수총액", "결과", "상세", "본문"]
 
 
 def _read(path: Path) -> list[dict]:
@@ -47,11 +48,17 @@ def _sent_rows(day: dt.date, path: Path) -> list[dict]:
     ]
 
 
-def sent_on(day: dt.date, path: Path = DEFAULT_LOG) -> set[str]:
-    """해당 날짜에 실제로 발송 성공한 고객 key(이름|전화번호) 목록."""
-    return {f"{r.get('고객명', '')}|{r.get('전화번호', '')}" for r in _sent_rows(day, path)}
+def sent_on(day: dt.date, path: Path = DEFAULT_LOG, kind: str | None = None) -> set[str]:
+    """해당 날짜에 실제로 발송 성공한 고객 key(이름|전화번호) 목록.
+
+    kind 를 주면 그 구분(미수금 안내, 공지사항 등)으로 보낸 것만 센다. 테스트 발송은 빠진다."""
+    return {
+        f"{r.get('고객명', '')}|{r.get('전화번호', '')}"
+        for r in _sent_rows(day, path)
+        if r.get("구분") != TEST_KIND and (kind is None or r.get("구분") == kind)
+    }
 
 
 def count_sent(day: dt.date, method: str, path: Path = DEFAULT_LOG) -> int:
-    """해당 날짜에 특정 방식으로 발송 성공한 건수."""
+    """해당 날짜에 특정 방식으로 발송 성공한 건수 (테스트 발송 포함: 실제로 나간 메시지라서)."""
     return sum(1 for r in _sent_rows(day, path) if r.get("방식") == method)

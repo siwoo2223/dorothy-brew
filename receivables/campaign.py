@@ -64,15 +64,34 @@ def send(
     sender,
     log_path: Path = history.DEFAULT_LOG,
     on_result: Callable[[int, int, SendResult], None] | None = None,
+    kind: str = "미수금 안내",
+    test_to: str | None = None,
 ) -> list[SendResult]:
-    """발송하고 결과가 나올 때마다 바로 이력에 남긴다(중간에 멈춰도 보낸 건은 기록됨)."""
+    """발송하고 결과가 나올 때마다 바로 이력에 남긴다(중간에 멈춰도 보낸 건은 기록됨).
+
+    kind: 이력에 남길 구분(미수금 안내, 공지사항 등). 같은 날 같은 구분 중복 발송 판단에 쓴다.
+    test_to: 테스트 모드. 고객 대신 이 대상(카톡 이름 또는 휴대폰 번호)에게 모든 메시지를 보낸다.
+    """
     targets = [d for d in drafts if d.sendable]
-    messages = [
-        OutgoingMessage(
-            key=d.customer.key, to=d.customer.phone, text=d.text, variables=d.variables, chat_name=d.chat_name
-        )
-        for d in targets
-    ]
+    if test_to:
+        messages = [
+            OutgoingMessage(
+                key=d.customer.key,
+                to=test_to,
+                text=f"[테스트 · 원래 받는 사람: {d.customer.name}]\n{d.text}",
+                variables=d.variables,
+                chat_name=test_to,
+            )
+            for d in targets
+        ]
+        kind = history.TEST_KIND
+    else:
+        messages = [
+            OutgoingMessage(
+                key=d.customer.key, to=d.customer.phone, text=d.text, variables=d.variables, chat_name=d.chat_name
+            )
+            for d in targets
+        ]
     by_key = {d.customer.key: d for d in targets}
 
     def record(done: int, total: int, r: SendResult) -> None:
@@ -81,10 +100,11 @@ def send(
             [
                 {
                     "발송시각": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "구분": kind,
                     "방식": sender.label,
                     "고객명": d.customer.name,
                     "전화번호": d.customer.phone,
-                    "카톡이름": d.chat_name,
+                    "카톡이름": test_to or d.chat_name,
                     "미수총액": format_value(d.customer.variables.get("미수총액")),
                     "결과": "성공" if r.ok else "실패",
                     "상세": r.detail,

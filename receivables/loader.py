@@ -158,3 +158,37 @@ def group_customers(
             Customer(name=name, phone=phone, rows=open_rows, variables=variables, problems=problems)
         )
     return customers
+
+
+def load_recipients(
+    df: pd.DataFrame,
+    name_col: str = "고객명",
+    phone_col: str | None = "전화번호",
+    today: dt.date | None = None,
+    require_phone: bool = True,
+) -> list[Customer]:
+    """공지사항용: 미수금과 관계없이 명단의 고객을 한 명씩(중복 제거) 돌려준다."""
+    today = today or dt.date.today()
+    if name_col not in df.columns:
+        raise ValueError(f"엑셀에 '{name_col}' 열이 없습니다. 열 이름을 확인하거나 열 지정을 바꿔 주세요.")
+    if require_phone and (not phone_col or phone_col not in df.columns):
+        raise ValueError(f"엑셀에 '{phone_col}' 열이 없습니다. 열 이름을 확인하거나 열 지정을 바꿔 주세요.")
+
+    work = df.copy()
+    work["_이름"] = work[name_col].map(format_value)
+    work["_전화"] = work[phone_col].map(normalize_phone) if phone_col and phone_col in df.columns else ""
+    work = work[work["_이름"] != ""]
+
+    customers: list[Customer] = []
+    for (name, phone), rows in work.groupby(["_이름", "_전화"], sort=False):
+        variables: dict = {}
+        for col in df.columns:
+            uniq = rows[col].dropna().unique()
+            if len(uniq) == 1:
+                variables[col] = uniq[0]
+        variables.update({"고객명": name, "전화번호": phone, "기준일": today})
+        problems = []
+        if require_phone and not PHONE_PATTERN.match(phone):
+            problems.append(f"휴대폰 번호 형식 오류({phone or '빈 값'})")
+        customers.append(Customer(name=name, phone=phone, rows=rows, variables=variables, problems=problems))
+    return customers
