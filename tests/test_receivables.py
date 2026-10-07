@@ -69,7 +69,7 @@ def test_missing_column(ledger):
 
 def test_prepare_and_send(ledger, tmp_path):
     customers = group_customers(ledger, ColumnMap(), today=TODAY)
-    drafts = campaign.prepare(customers, "#{고객명}님 #{미수총액}원\n#{미수내역}", already_sent={"01098765432"})
+    drafts = campaign.prepare(customers, "#{고객명}님 #{미수총액}원\n#{미수내역}", already_sent={"베이커리온|01098765432"})
     by_name = {d.customer.name: d for d in drafts}
     assert by_name["카페하늘"].variables == {
         "고객명": "카페하늘",
@@ -145,3 +145,68 @@ def test_solapi_http_error_marks_all_failed():
 def test_alimtalk_requires_ids():
     with pytest.raises(ValueError):
         SolapiSender("K", "S", "0212345678", mode="alimtalk")
+
+
+# ───────────── PC 카카오톡 발송 ─────────────
+from receivables.kakao_pc import ChatNotFound, KakaoPCSender
+
+
+class FakeKakao:
+    """친구 목록에 있는 이름만 채팅방이 열리는 가짜 카카오톡."""
+
+    def __init__(self, friends):
+        self.friends = set(friends)
+        self.sent = []
+        self.closed = []
+
+    def open_chat(self, name):
+        if name not in self.friends:
+            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다")
+        return name
+
+    def send_text(self, chat, text):
+        self.sent.append((chat, text))
+
+    def close_chat(self, chat):
+        self.closed.append(chat)
+
+
+def test_kakao_pc_send_uses_chat_name_column(ledger, tmp_path):
+    ledger["카톡이름"] = ["하늘 사장님", "하늘 사장님", None, None, "스튜디오"]
+    customers = group_customers(ledger, ColumnMap(), today=TODAY, require_phone=False)
+    assert all(not c.problems for c in customers)  # 카톡 발송은 전화번호 형식을 따지지 않음
+    drafts = campaign.prepare(customers, "#{고객명}님 미수금 #{미수총액}원", chat_name_col="카톡이름")
+    assert [d.chat_name for d in drafts] == ["하늘 사장님", "베이커리온", "스튜디오"]  # 비면 고객명
+
+    kakao = FakeKakao({"하늘 사장님", "스튜디오"})
+    waits, progress = [], []
+    sender = KakaoPCSender(kakao, min_interval=8, max_interval=8, sleep=waits.append)
+    log = tmp_path / "log.csv"
+    results = campaign.send(drafts, sender, log_path=log, on_result=lambda i, n, r: progress.append((i, n, r.ok)))
+
+    assert [r.ok for r in results] == [True, False, True]
+    assert kakao.sent == [("하늘 사장님", "카페하늘님 미수금 235,000원"), ("스튜디오", "스튜디오님 미수금 76,000원")]
+    assert kakao.closed == ["하늘 사장님", "스튜디오"]
+    assert waits == [8, 8]  # 메시지 사이에만 대기
+    assert progress == [(1, 3, True), (2, 3, False), (3, 3, True)]
+    # 결과가 나올 때마다 기록되어 중복 발송/한도 계산에 쓰인다
+    assert history.sent_on(dt.date.today(), log) == {"카페하늘|01012345678", "스튜디오|0102222333"}
+    assert history.count_sent(dt.date.today(), "PC카카오톡", log) == 2
+
+
+def test_kakao_pc_stops_after_consecutive_failures():
+    kakao = FakeKakao(set())
+    sender = KakaoPCSender(kakao, max_consecutive_failures=2, sleep=lambda s: None)
+    msgs = [OutgoingMessage(str(i), "", "본문", {}, chat_name=f"고객{i}") for i in range(4)]
+    results = sender.send(msgs)
+    assert not any(r.ok for r in results)
+    assert "중단" in results[2].detail and "중단" in results[3].detail
+
+
+def test_history_upgrades_old_header(tmp_path):
+    log = tmp_path / "log.csv"
+    log.write_text("발송시각,방식,고객명,전화번호,미수총액,결과,상세,본문\n"
+                   f"{dt.date.today()} 09:00:00,문자,가,010,1,성공,,x\n", encoding="utf-8-sig")
+    history.append([{"발송시각": f"{dt.date.today()} 10:00:00", "방식": "PC카카오톡", "고객명": "나",
+                     "결과": "성공"}], log)
+    assert history.sent_on(dt.date.today(), log) == {"가|010", "나|"}

@@ -20,6 +20,8 @@ df = pd.DataFrame(
 df["거래일자"] = pd.to_datetime(df["거래일자"])
 df["납부기한"] = pd.to_datetime(df["납부기한"])
 df["입금계좌"] = ACCOUNT
+# 카톡에 저장된 이름이 고객명과 다를 때만 적는다 (비우면 고객명으로 찾음)
+df["카톡이름"] = ["하늘카페 이사장님"] * 3 + [None] * 3
 
 out = Path(__file__).with_name("미수금_샘플.xlsx")
 df.to_excel(out, index=False)

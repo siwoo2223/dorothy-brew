@@ -23,7 +23,7 @@ PHONE_PATTERN = re.compile(r"^(010\d{8}|01[16789]\d{7,8})$")
 @dataclass
 class ColumnMap:
     name: str = "고객명"
-    phone: str = "전화번호"
+    phone: str | None = "전화번호"
     amount: str = "미수금"
     due_date: str | None = "납부기한"
 
@@ -94,17 +94,22 @@ def group_customers(
     line_template: str = DEFAULT_LINE_TEMPLATE,
     today: dt.date | None = None,
     include_zero: bool = False,
+    require_phone: bool = True,
 ) -> list[Customer]:
     """거래 단위 행을 고객 단위로 묶고 안내용 변수를 만든다."""
     today = today or dt.date.today()
-    for col in (columns.name, columns.phone, columns.amount):
+    required = [columns.name, columns.amount] + ([columns.phone] if require_phone else [])
+    for col in required:
         if col not in df.columns:
             raise ValueError(f"엑셀에 '{col}' 열이 없습니다. 열 이름을 확인하거나 열 지정을 바꿔 주세요.")
     due_col = columns.due_date if columns.due_date in df.columns else None
 
     work = df.copy()
     work["_이름"] = work[columns.name].map(format_value)
-    work["_전화"] = work[columns.phone].map(normalize_phone)
+    if columns.phone and columns.phone in df.columns:
+        work["_전화"] = work[columns.phone].map(normalize_phone)
+    else:
+        work["_전화"] = ""
     work["_금액"] = work[columns.amount].map(to_number)
     work = work[work["_이름"] != ""]
 
@@ -146,7 +151,7 @@ def group_customers(
                 variables["연체일수"] = max((today - earliest).days, 0)
 
         problems = []
-        if not PHONE_PATTERN.match(phone):
+        if require_phone and not PHONE_PATTERN.match(phone):
             problems.append(f"휴대폰 번호 형식 오류({phone or '빈 값'})")
 
         customers.append(

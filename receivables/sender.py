@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
+from typing import Callable
 
 import requests
 
@@ -19,6 +20,7 @@ class OutgoingMessage:
     to: str
     text: str
     variables: dict[str, str]  # 알림톡 변수 (#{...} 없이 이름만)
+    chat_name: str = ""  # PC 카카오톡에서 찾을 친구/채팅방 이름
 
 
 @dataclass
@@ -29,13 +31,24 @@ class SendResult:
     detail: str
 
 
+ResultCallback = Callable[[int, int, SendResult], None]  # (완료 건수, 전체 건수, 결과)
+
+
+def _report(results: list[SendResult], done_before: int, total: int, on_result: ResultCallback | None) -> None:
+    if on_result:
+        for i, r in enumerate(results, start=done_before + 1):
+            on_result(i, total, r)
+
+
 class DryRunSender:
     """실제로 보내지 않고 성공으로 기록만 한다. 처음 연습할 때 쓴다."""
 
     label = "미리보기(실제 발송 안 함)"
 
-    def send(self, messages: list[OutgoingMessage]) -> list[SendResult]:
-        return [SendResult(m.key, m.to, True, "모의 발송") for m in messages]
+    def send(self, messages: list[OutgoingMessage], on_result: ResultCallback | None = None) -> list[SendResult]:
+        results = [SendResult(m.key, m.to, True, "모의 발송") for m in messages]
+        _report(results, 0, len(messages), on_result)
+        return results
 
 
 class SolapiSender:
@@ -95,11 +108,13 @@ class SolapiSender:
                 payload["subject"] = self.subject
         return payload
 
-    def send(self, messages: list[OutgoingMessage]) -> list[SendResult]:
+    def send(self, messages: list[OutgoingMessage], on_result: ResultCallback | None = None) -> list[SendResult]:
         results: list[SendResult] = []
         for start in range(0, len(messages), BATCH_SIZE):
             batch = messages[start : start + BATCH_SIZE]
-            results.extend(self._send_batch(batch))
+            batch_results = self._send_batch(batch)
+            _report(batch_results, len(results), len(messages), on_result)
+            results.extend(batch_results)
         return results
 
     def _send_batch(self, batch: list[OutgoingMessage]) -> list[SendResult]:

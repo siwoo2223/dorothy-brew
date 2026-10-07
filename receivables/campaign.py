@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from . import history
 from .loader import Customer
@@ -18,6 +19,7 @@ class Draft:
     variables: dict[str, str]
     problems: list[str] = field(default_factory=list)
     already_sent_today: bool = False
+    chat_name: str = ""
 
     @property
     def sendable(self) -> bool:
@@ -28,7 +30,10 @@ def prepare(
     customers: list[Customer],
     template: str,
     already_sent: set[str] | None = None,
+    chat_name_col: str | None = None,
 ) -> list[Draft]:
+    """already_sent: 오늘 이미 보낸 고객 key(이름|전화번호) 목록.
+    chat_name_col: PC 카카오톡에서 찾을 이름이 담긴 열. 비어 있으면 고객명을 쓴다."""
     already_sent = already_sent or set()
     drafts = []
     for c in customers:
@@ -47,7 +52,8 @@ def prepare(
                     name: format_value(c.variables.get(name)) for name in find_variables(template)
                 },
                 problems=problems,
-                already_sent_today=c.phone in already_sent,
+                already_sent_today=c.key in already_sent,
+                chat_name=(format_value(c.variables.get(chat_name_col)) if chat_name_col else "") or c.name,
             )
         )
     return drafts
@@ -57,29 +63,37 @@ def send(
     drafts: list[Draft],
     sender,
     log_path: Path = history.DEFAULT_LOG,
+    on_result: Callable[[int, int, SendResult], None] | None = None,
 ) -> list[SendResult]:
+    """발송하고 결과가 나올 때마다 바로 이력에 남긴다(중간에 멈춰도 보낸 건은 기록됨)."""
     targets = [d for d in drafts if d.sendable]
     messages = [
-        OutgoingMessage(key=d.customer.key, to=d.customer.phone, text=d.text, variables=d.variables)
+        OutgoingMessage(
+            key=d.customer.key, to=d.customer.phone, text=d.text, variables=d.variables, chat_name=d.chat_name
+        )
         for d in targets
     ]
-    results = sender.send(messages) if messages else []
     by_key = {d.customer.key: d for d in targets}
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    history.append(
-        [
-            {
-                "발송시각": now,
-                "방식": sender.label,
-                "고객명": by_key[r.key].customer.name,
-                "전화번호": r.to,
-                "미수총액": format_value(by_key[r.key].customer.variables.get("미수총액")),
-                "결과": "성공" if r.ok else "실패",
-                "상세": r.detail,
-                "본문": by_key[r.key].text,
-            }
-            for r in results
-        ],
-        log_path,
-    )
-    return results
+
+    def record(done: int, total: int, r: SendResult) -> None:
+        d = by_key[r.key]
+        history.append(
+            [
+                {
+                    "발송시각": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "방식": sender.label,
+                    "고객명": d.customer.name,
+                    "전화번호": d.customer.phone,
+                    "카톡이름": d.chat_name,
+                    "미수총액": format_value(d.customer.variables.get("미수총액")),
+                    "결과": "성공" if r.ok else "실패",
+                    "상세": r.detail,
+                    "본문": d.text,
+                }
+            ],
+            log_path,
+        )
+        if on_result:
+            on_result(done, total, r)
+
+    return sender.send(messages, on_result=record) if messages else []
