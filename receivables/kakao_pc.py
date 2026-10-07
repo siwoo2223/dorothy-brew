@@ -5,7 +5,7 @@
 채팅방 제목이 받는 사람 이름과 정확히 같을 때만 보낸다(엉뚱한 방에 보내지 않도록).
 
 동작 순서 (고객 1명마다)
-  1. 카카오톡 메인 창의 친구(또는 채팅) 검색칸에 이름 입력 → Enter → 채팅방이 열린다
+  1. 카카오톡 메인 창의 친구 검색칸(친구 이름) 또는 채팅 검색칸(채팅방 이름)에 입력 → Enter → 채팅방이 열린다
   2. 창 제목이 그 이름과 같은 채팅방을 찾는다. 없으면 '채팅방을 찾지 못함'으로 실패 처리
   3. 입력칸에 메시지를 넣고 Enter → 창을 닫는다
 """
@@ -31,7 +31,7 @@ class ChatNotFound(Exception):
 
 
 class KakaoDriver(Protocol):
-    def open_chat(self, name: str) -> object: ...
+    def open_chat(self, name: str, tab: str | None = None) -> object: ...
     def send_text(self, chat: object, text: str) -> None: ...
     def close_chat(self, chat: object) -> None: ...
 
@@ -65,7 +65,7 @@ class Win32KakaoDriver:
         time.sleep(0.05)
         win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0)
 
-    def _search_box(self):
+    def _search_box(self, tab: str):
         _, _, win32gui = self._w()
         main = win32gui.FindWindow(None, MAIN_TITLE)
         if not main:
@@ -73,21 +73,23 @@ class Win32KakaoDriver:
         child = win32gui.FindWindowEx(main, None, CLASS_CHILD, None)
         friends = win32gui.FindWindowEx(child, None, CLASS_PANEL, None)
         panel = friends
-        if self.search_tab == "chats":
+        if tab == "chats":
             panel = win32gui.FindWindowEx(child, friends, CLASS_PANEL, None)
         box = win32gui.FindWindowEx(panel, None, CLASS_SEARCH, None)
         if not box:
             raise RuntimeError(
                 "카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창에서 "
-                + ("'친구'" if self.search_tab == "friends" else "'채팅'")
+                + ("'친구'" if tab == "friends" else "'채팅'")
                 + " 탭을 한 번 눌러 두고 다시 시도해 주세요."
             )
         return box
 
     # ── KakaoDriver 구현 ──
-    def open_chat(self, name: str):
+    def open_chat(self, name: str, tab: str | None = None):
+        """tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값."""
         win32api, win32con, win32gui = self._w()
-        box = self._search_box()
+        tab = tab or self.search_tab
+        box = self._search_box(tab)
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
         time.sleep(self.wait)
         self._press_enter(box)
@@ -96,7 +98,8 @@ class Win32KakaoDriver:
 
         chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
         if not chat or chat == win32gui.FindWindow(None, MAIN_TITLE):
-            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다(카톡 친구 이름 확인 필요)")
+            where = "채팅방 이름" if tab == "chats" else "카톡 친구 이름"
+            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다({where} 확인 필요)")
         return chat
 
     def send_text(self, chat, text: str) -> None:
@@ -152,7 +155,7 @@ class KakaoPCSender:
     def _send_one(self, m: OutgoingMessage) -> SendResult:
         name = m.chat_name
         try:
-            chat = self.driver.open_chat(name)
+            chat = self.driver.open_chat(name, m.search_tab or None)
         except ChatNotFound as exc:
             return SendResult(m.key, m.to, False, str(exc))
         except Exception as exc:  # 카카오톡 창 문제 등
@@ -166,4 +169,5 @@ class KakaoPCSender:
                 self.driver.close_chat(chat)
             except Exception:
                 pass
-        return SendResult(m.key, m.to, True, f"'{name}'에게 전송")
+        where = "채팅방 " if m.search_tab == "chats" else ""
+        return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송")

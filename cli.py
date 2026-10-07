@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--line", default=DEFAULT_LINE_TEMPLATE, help="미수내역 한 줄 서식")
     p.add_argument("--resend", action="store_true", help="오늘 이미 보낸 고객에게도 다시 발송")
     p.add_argument("--chat-col", default="카톡이름", help="[kakao-pc] 카톡 이름 열 (비면 고객명)")
+    p.add_argument("--room-col", default="채팅방", help="[kakao-pc] 채팅방 이름 열 (값이 있으면 그 채팅방으로)")
     p.add_argument("--search-tab", choices=["friends", "chats"], default="friends", help="[kakao-pc] 찾을 곳")
     p.add_argument("--gap", type=float, nargs=2, default=[8, 15], metavar=("최소", "최대"),
                    help="[kakao-pc] 메시지 간격(초)")
@@ -58,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     template = Path(args.template).read_text(encoding="utf-8")
     already = set() if args.resend else history.sent_on(dt.date.today(), kind=kind)
     drafts = campaign.prepare(
-        customers, template, already_sent=already, chat_name_col=args.chat_col if args.chat_col in df.columns else None
+        customers, template, already_sent=already, chat_name_col=args.chat_col if args.chat_col in df.columns else None,
+        room_col=args.room_col if args.room_col in df.columns else None,
     )
 
     targets = []

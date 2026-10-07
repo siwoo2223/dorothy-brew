@@ -21,6 +21,7 @@ class OutgoingMessage:
     text: str
     variables: dict[str, str]  # 알림톡 변수 (#{...} 없이 이름만)
     chat_name: str = ""  # PC 카카오톡에서 찾을 친구/채팅방 이름
+    search_tab: str = ""  # PC 카카오톡: "friends"(친구) | "chats"(채팅방) | ""(기본 설정)
 
 
 @dataclass

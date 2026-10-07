@@ -159,7 +159,8 @@ class FakeKakao:
         self.sent = []
         self.closed = []
 
-    def open_chat(self, name):
+    def open_chat(self, name, tab=None):
+        self.tabs = getattr(self, "tabs", []) + [tab]
         if name not in self.friends:
             raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다")
         return name
@@ -262,3 +263,20 @@ def test_match_names():
 def test_clean_name():
     assert clean_name("  홍길동\n오늘도 화이팅 ") == "홍길동"
     assert clean_name("") == ""
+
+
+def test_chat_room_column_overrides_friend_name(ledger, tmp_path):
+    ledger["카톡이름"] = ["하늘 사장님", "하늘 사장님", None, None, None]
+    ledger["채팅방"] = [None, None, "베이커리온 납품방", None, None]
+    customers = group_customers(ledger, ColumnMap(), today=TODAY, require_phone=False)
+    drafts = campaign.prepare(customers, "#{고객명}님", chat_name_col="카톡이름", room_col="채팅방")
+    assert [(d.chat_name, d.search_tab) for d in drafts] == [
+        ("하늘 사장님", ""), ("베이커리온 납품방", "chats"), ("스튜디오", "")
+    ]
+    assert drafts[1].destination == "💬 베이커리온 납품방"
+
+    kakao = FakeKakao({"하늘 사장님", "베이커리온 납품방", "스튜디오"})
+    results = campaign.send(drafts, KakaoPCSender(kakao, sleep=lambda s: None), log_path=tmp_path / "l.csv")
+    assert all(r.ok for r in results)
+    assert kakao.tabs == [None, "chats", None]  # 채팅방만 채팅 목록에서 찾음
+    assert results[1].detail == "채팅방 '베이커리온 납품방'에게 전송"
