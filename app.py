@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from receivables import campaign, history
+from receivables import campaign, history, templates_store
 from receivables.kakao_names import diagnose, extract_names, install_korean_ocr, match_names
 from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver
 from receivables.loader import (
@@ -295,18 +295,57 @@ except ValueError as exc:
 st.subheader("2. " + ("공지 문구" if is_notice else "안내 문구(템플릿)"))
 template_dir = TEMPLATE_DIRS[kind]
 template_dir.mkdir(parents=True, exist_ok=True)
-template_files = sorted(template_dir.glob("*.txt"))
-choice = st.selectbox("저장된 문구", [p.stem for p in template_files])
-base_text = (template_dir / f"{choice}.txt").read_text(encoding="utf-8") if choice else ""
+NEW_TEMPLATE = "➕ 새 문구 (빈 칸에서 시작)"
+choice_key = f"tpl-choice-{kind}"
+if f"{choice_key}-pending" in st.session_state:  # 저장·삭제 직후 선택할 문구
+    st.session_state[choice_key] = st.session_state.pop(f"{choice_key}-pending")
+names_ = templates_store.list_templates(template_dir)
+if st.session_state.get(choice_key) not in names_ + [NEW_TEMPLATE]:
+    st.session_state.pop(choice_key, None)
+choice = st.selectbox(f"저장된 문구 ({len(names_)}개)", names_ + [NEW_TEMPLATE], key=choice_key)
+is_new = choice == NEW_TEMPLATE
+base_text = "" if is_new else templates_store.load_template(template_dir, choice)
+editor_key = f"tpl-{kind}-{choice}"
 
 left, right = st.columns([3, 2])
 with left:
-    template = st.text_area("문구 편집 (#{변수} 자리에 고객별 값이 들어갑니다)", base_text, height=320,
-                            key=f"tpl-{kind}-{choice}")
-    save_name = st.text_input("이 문구를 새 이름으로 저장", "")
-    if st.button("문구 저장") and save_name.strip():
-        (template_dir / f"{save_name.strip()}.txt").write_text(template, encoding="utf-8")
-        st.success(f"'{save_name.strip()}' 저장 완료")
+    template = st.text_area("문구 편집 (#{변수} 자리에 고객별 값이 들어갑니다)", base_text, height=320, key=editor_key)
+    if msg := st.session_state.pop("tpl-flash", None):
+        st.toast(msg, icon="✅")
+    changed = template != base_text
+    if changed and not is_new:
+        st.caption("✏️ 고친 내용이 아직 저장되지 않았습니다.")
+
+    def _after_save(name: str, message: str) -> None:
+        st.session_state.pop(f"tpl-{kind}-{name}", None)  # 편집칸을 저장된 내용으로 다시 읽게
+        st.session_state.pop(editor_key, None)
+        st.session_state[f"{choice_key}-pending"] = name
+        st.session_state["tpl-flash"] = message
+        st.rerun()
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("💾 덮어쓰기 저장", disabled=is_new or not changed, use_container_width=True,
+                     help="지금 고른 문구를 고친 내용으로 바꿉니다."):
+            templates_store.save_template(template_dir, choice, template, overwrite=True)
+            _after_save(choice, f"'{choice}' 저장 완료")
+    with b2:
+        with st.popover("➕ 새 이름으로 저장", use_container_width=True):
+            new_name = st.text_input("새 문구 이름", placeholder="예: 10월 휴무 안내", key=f"tpl-newname-{kind}")
+            if st.button("저장", key=f"tpl-save-new-{kind}", disabled=not template.strip()):
+                try:
+                    saved = templates_store.save_template(template_dir, new_name, template)
+                    _after_save(saved, f"'{saved}' 문구를 새로 저장했습니다.")
+                except ValueError as exc:
+                    st.error(str(exc))
+    if not is_new:
+        with st.popover("🗑️ 이 문구 삭제"):
+            st.write(f"'{choice}' 문구를 지울까요? 지우면 되돌릴 수 없습니다.")
+            if st.button("네, 삭제합니다", key=f"tpl-del-{kind}-{choice}", type="primary"):
+                templates_store.delete_template(template_dir, choice)
+                st.session_state[f"{choice_key}-pending"] = NEW_TEMPLATE
+                st.session_state["tpl-flash"] = f"'{choice}' 문구를 삭제했습니다."
+                st.rerun()
 with right:
     st.markdown("**쓸 수 있는 변수**")
     auto_vars = ["고객명", "기준일"] if is_notice else ["고객명", "전화번호", "미수총액", "미수건수", "미수내역", "기준일"]

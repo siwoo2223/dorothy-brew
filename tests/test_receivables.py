@@ -329,3 +329,21 @@ def test_files_only_without_text(tmp_path):
     r = KakaoPCSender(kakao, sleep=lambda s: None).send(
         [OutgoingMessage("k", "", "  ", {}, chat_name="가", attachments=[str(f)])])[0]
     assert r.ok and kakao.sent == [] and kakao.files == [("가", [str(f)])]
+
+
+# ───────────── 문구 저장소 ─────────────
+def test_templates_store(tmp_path):
+    from receivables import templates_store as ts
+
+    assert ts.safe_name(' 10월/휴무:안내? ') == "10월휴무안내"
+    assert ts.save_template(tmp_path, "휴무 안내", "A") == "휴무 안내"
+    with pytest.raises(ValueError, match="이미 있습니다"):
+        ts.save_template(tmp_path, "휴무 안내", "B")
+    ts.save_template(tmp_path, "휴무 안내", "B", overwrite=True)
+    assert ts.load_template(tmp_path, "휴무 안내") == "B"
+    with pytest.raises(ValueError):
+        ts.save_template(tmp_path, "  ", "C")
+    ts.save_template(tmp_path, "가격 변경", "C")
+    assert ts.list_templates(tmp_path) == ["가격 변경", "휴무 안내"]
+    ts.delete_template(tmp_path, "휴무 안내")
+    assert ts.list_templates(tmp_path) == ["가격 변경"]
