@@ -13,6 +13,12 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+import sys
+
+# 프로그램이 켜진 채로 새 버전 파일을 덮어써도 옛 코드가 메모리에 남지 않도록, 매번 새로 읽는다
+for _module in [m for m in sys.modules if m == "receivables" or m.startswith("receivables.")]:
+    del sys.modules[_module]
+
 from receivables import campaign, history, templates_store
 from receivables.kakao_names import (
     diagnose,
