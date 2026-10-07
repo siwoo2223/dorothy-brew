@@ -58,6 +58,7 @@ class Win32KakaoDriver:
         self.wait = wait
         self.trace: list[str] = []  # 마지막 발송의 단계별 기록 (발송 점검용)
         self.preferred: str = ""  # 이 PC 카톡에서 한 번 성공한 전송 방법
+        self.pasted = False
 
     # ── 내부 도우미 ──
     def _w(self):
@@ -200,16 +201,8 @@ class Win32KakaoDriver:
                 return True
         return False
 
-    def _try_post_enter(self, chat, box, text) -> None:
-        self._post_enter(box)
-
-    def _try_click_enter(self, chat, box, text) -> None:
-        win32api, win32con, _ = self._w()
-        self._bring_to_front(chat)
-        self._click(box)
-        self._key(win32con.VK_RETURN)
-
-    def _try_paste_enter(self, chat, box, text) -> None:
+    def _paste(self, chat, box, text) -> None:
+        """입력칸을 비우고 클립보드 붙여넣기(Ctrl+V)로 글을 넣는다 → 카톡이 '사람이 입력한 글'로 인식(전송 버튼 켜짐)."""
         import win32clipboard
 
         win32api, win32con, _ = self._w()
@@ -222,14 +215,59 @@ class Win32KakaoDriver:
             win32clipboard.CloseClipboard()
         self._bring_to_front(chat)
         self._click(box)
+        self._key(win32con.VK_CONTROL, ord("A"))  # 혹시 남은 글이 있으면 덮어쓰도록 전체 선택
         self._key(win32con.VK_CONTROL, ord("V"))
-        time.sleep(0.5)
+        time.sleep(0.6)
+        if not self._text_len(box):
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)  # 붙여넣기 실패 → 원래대로 채워 둠
+            raise RuntimeError("붙여넣기가 되지 않았습니다")
+        self.pasted = True
+
+    def _ensure_pasted(self, chat, box, text) -> None:
+        if not self.pasted:
+            self._paste(chat, box, text)
+        else:
+            self._bring_to_front(chat)
+
+    def _try_post_enter(self, chat, box, text) -> None:
+        self._post_enter(box)
+
+    def _try_paste_enter(self, chat, box, text) -> None:
+        win32api, win32con, _ = self._w()
+        self._ensure_pasted(chat, box, text)
+        before = self._text_len(box)
         self._key(win32con.VK_RETURN)
+        time.sleep(0.6)
+        after = self._text_len(box)
+        if after > before:  # 전송 대신 줄바꿈이 들어감 (카톡 설정이 'Enter = 줄바꿈'인 경우)
+            self._key(win32con.VK_BACK)
+            self._log("Enter 가 줄바꿈으로 들어가 지움 → 다음 방법으로")
+
+    def _try_ctrl_enter(self, chat, box, text) -> None:
+        win32api, win32con, _ = self._w()
+        self._ensure_pasted(chat, box, text)
+        self._key(win32con.VK_CONTROL, win32con.VK_RETURN)
+
+    def _try_send_button(self, chat, box, text) -> None:
+        """입력칸 아래 줄 오른쪽의 노란 [전송] 버튼을 누른다 (버튼은 따로 된 창이 아니라 위치로 누름)."""
+        win32api, win32con, win32gui = self._w()
+        self._ensure_pasted(chat, box, text)
+        _l, _t, right, bottom = win32gui.GetWindowRect(chat)
+        _bl, _bt, _br, box_bottom = win32gui.GetWindowRect(box)
+        strip = bottom - box_bottom  # 입력칸 아래 도구줄 높이 (화면 배율과 상관없이 비율로 계산)
+        if strip < 20:
+            raise RuntimeError("전송 버튼 위치를 알 수 없습니다")
+        x, y = int(right - strip * 1.1), int(box_bottom + strip / 2)
+        self._log(f"전송 버튼 위치 클릭 ({x},{y})")
+        win32api.SetCursorPos((x, y))
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
     SEND_METHODS = (
         ("Enter 메시지", "_try_post_enter"),
-        ("입력칸 클릭 + Enter", "_try_click_enter"),
         ("붙여넣기 + Enter", "_try_paste_enter"),
+        ("붙여넣기 + Ctrl+Enter", "_try_ctrl_enter"),
+        ("전송 버튼 클릭", "_try_send_button"),
     )
 
     def send_text(self, chat, text: str) -> None:
@@ -239,7 +277,8 @@ class Win32KakaoDriver:
             self._log("입력칸 못 찾음")
             raise RuntimeError("채팅방 입력칸을 찾지 못했습니다")
         self._log(f"입력칸 찾음({win32gui.GetClassName(box)})")
-        text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+        self.pasted = False
+        text = text.strip("\r\n ").replace("\r\n", "\n").replace("\n", "\r\n")  # 끝 빈 줄 제거(Enter 가 줄바꿈이 되지 않게)
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)
         time.sleep(0.5)
         if not self._text_len(box):
