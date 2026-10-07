@@ -56,6 +56,7 @@ class Win32KakaoDriver:
             raise RuntimeError("pywin32 가 필요합니다: pip install pywin32") from exc
         self.search_tab = search_tab  # "friends"(친구 탭) | "chats"(채팅 탭)
         self.wait = wait
+        self.trace: list[str] = []  # 마지막 발송의 단계별 기록 (발송 점검용)
 
     # ── 내부 도우미 ──
     def _w(self):
@@ -71,52 +72,132 @@ class Win32KakaoDriver:
         time.sleep(0.05)
         win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0)
 
-    def _search_box(self, tab: str):
-        _, _, win32gui = self._w()
+    def _log(self, text: str) -> None:
+        self.trace.append(text)
+
+    def _main(self) -> int:
+        win32api, win32con, win32gui = self._w()
         main = win32gui.FindWindow(None, MAIN_TITLE)
         if not main:
             raise RuntimeError("카카오톡이 실행되어 있지 않거나 로그인되지 않았습니다. PC 카카오톡을 먼저 켜 주세요.")
+        if not win32gui.IsWindowVisible(main) or win32gui.IsIconic(main):  # 트레이·최소화 상태면 꺼낸다
+            win32gui.ShowWindow(main, win32con.SW_SHOW)
+            win32gui.ShowWindow(main, win32con.SW_RESTORE)
+            time.sleep(0.5)
+        return main
+
+    def _panel_box(self, main: int, tab: str) -> int:
+        _, _, win32gui = self._w()
         child = win32gui.FindWindowEx(main, None, CLASS_CHILD, None)
         friends = win32gui.FindWindowEx(child, None, CLASS_PANEL, None)
-        panel = friends
-        if tab == "chats":
-            panel = win32gui.FindWindowEx(child, friends, CLASS_PANEL, None)
-        box = win32gui.FindWindowEx(panel, None, CLASS_SEARCH, None)
-        if not box:
-            raise RuntimeError(
-                "카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창에서 "
-                + ("'친구'" if tab == "friends" else "'채팅'")
-                + " 탭을 한 번 눌러 두고 다시 시도해 주세요."
-            )
-        return box
+        panel = win32gui.FindWindowEx(child, friends, CLASS_PANEL, None) if tab == "chats" else friends
+        return win32gui.FindWindowEx(panel, None, CLASS_SEARCH, None) if panel else 0
+
+    def _search_box(self, tab: str) -> tuple[int, str]:
+        """검색칸과 실제로 쓴 탭. 고른 탭의 검색칸이 숨겨져(크기 0) 있으면 다른 탭 검색칸을 쓴다."""
+        _, _, win32gui = self._w()
+        main = self._main()
+        for t in (tab, "chats" if tab == "friends" else "friends"):
+            box = self._panel_box(main, t)
+            if box:
+                left, top, right, bottom = win32gui.GetWindowRect(box)
+                self._log(f"검색칸({t}) 찾음: 크기 {right - left}x{bottom - top}")
+                if right - left > 0:
+                    return box, t
+        raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창에서 '채팅' 탭을 한 번 눌러 두고 다시 시도해 주세요.")
+
+    def _kakao_windows(self) -> dict[int, str]:
+        """카카오톡이 띄운 창들 {창: 제목}."""
+        import win32process
+
+        _, _, win32gui = self._w()
+        main = win32gui.FindWindow(None, MAIN_TITLE)
+        pid = win32process.GetWindowThreadProcessId(main)[1] if main else None
+        found: dict[int, str] = {}
+
+        def visit(h, _):
+            if win32gui.IsWindowVisible(h) and win32process.GetWindowThreadProcessId(h)[1] == pid:
+                found[h] = win32gui.GetWindowText(h)
+            return True
+
+        if pid:
+            win32gui.EnumWindows(visit, None)
+        return found
+
+    def _text_len(self, box: int) -> int:
+        """입력칸 글자 수 (다른 프로그램 창이라 WM_GETTEXTLENGTH 로 직접 묻는다)."""
+        win32api, win32con, _ = self._w()
+        return win32api.SendMessage(box, win32con.WM_GETTEXTLENGTH, 0, 0)
+
+    def _input_box(self, chat) -> int:
+        """채팅방 입력칸. 카톡 버전에 따라 창 안쪽 깊이 있을 수 있어 전체를 뒤진다."""
+        _, _, win32gui = self._w()
+        box = win32gui.FindWindowEx(chat, None, CLASS_INPUT, None)
+        if box:
+            return box
+        found: list[int] = []
+
+        def visit(h, _):
+            if not found and win32gui.GetClassName(h).startswith("RichEdit"):
+                found.append(h)
+            return True
+
+        win32gui.EnumChildWindows(chat, visit, None)
+        return found[0] if found else 0
 
     # ── KakaoDriver 구현 ──
     def open_chat(self, name: str, tab: str | None = None):
         """tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값."""
         win32api, win32con, win32gui = self._w()
+        self.trace = []
         tab = tab or self.search_tab
-        box = self._search_box(tab)
+        before = self._kakao_windows()
+        box, used = self._search_box(tab)
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
         time.sleep(self.wait)
         self._press_enter(box)
-        time.sleep(self.wait)
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
+        self._log(f"검색어 '{name}' 입력 후 Enter")
 
-        chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
-        if not chat or chat == win32gui.FindWindow(None, MAIN_TITLE):
-            where = "채팅방 이름" if tab == "chats" else "카톡 친구 이름"
-            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다({where} 확인 필요)")
+        chat = 0
+        for _ in range(int(4 / 0.2)):  # 최대 4초 동안 채팅방이 뜨기를 기다림
+            time.sleep(0.2)
+            chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
+            if chat and chat != win32gui.FindWindow(None, MAIN_TITLE):
+                break
+            chat = 0
+        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
+        if not chat:
+            opened = [t for h, t in self._kakao_windows().items() if h not in before and t != MAIN_TITLE]
+            where = "채팅방 이름" if used == "chats" else "카톡 친구 이름"
+            hint = f" 대신 열린 창: '{opened[0]}'" if opened else " 새로 열린 창 없음"
+            self._log("채팅방 창 못 찾음." + hint)
+            raise ChatNotFound(f"'{name}' 채팅방을 찾지 못했습니다({where} 확인 필요,{hint})")
+        self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
         return chat
 
     def send_text(self, chat, text: str) -> None:
         win32api, win32con, win32gui = self._w()
-        box = win32gui.FindWindowEx(chat, None, CLASS_INPUT, None)
+        box = self._input_box(chat)
         if not box:
+            self._log("입력칸 못 찾음")
             raise RuntimeError("채팅방 입력칸을 찾지 못했습니다")
+        self._log(f"입력칸 찾음({win32gui.GetClassName(box)})")
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text.replace("\r\n", "\n").replace("\n", "\r\n"))
         time.sleep(0.5)
+        if not self._text_len(box):
+            self._log("입력칸에 글이 들어가지 않음")
+            raise RuntimeError("채팅방 입력칸에 글을 넣지 못했습니다")
         self._press_enter(box)
         time.sleep(1.0)
+        if self._text_len(box):  # 글이 남아 있으면 Enter 가 안 먹힌 것 → 실제 키로 다시
+            self._log("Enter(메시지 방식)로 안 보내짐 → 창을 앞으로 가져와 실제 Enter")
+            self._bring_to_front(chat)
+            self._key(win32con.VK_RETURN)
+            time.sleep(1.0)
+        if self._text_len(box):
+            self._log("전송 실패: 입력칸에 글이 그대로 남아 있음")
+            raise RuntimeError("Enter 를 눌러도 전송되지 않았습니다(입력칸에 글이 남아 있음)")
+        self._log("전송됨(입력칸이 비워짐)")
 
     def _bring_to_front(self, hwnd) -> None:
         win32api, win32con, win32gui = self._w()
@@ -250,3 +331,23 @@ class KakaoPCSender:
             self.driver.close_chat(chat)
         except Exception:
             pass
+
+
+def check_send(name: str, tab: str = "friends",
+               text: str = "[발송 점검] KF로지스틱 발송 프로그램 점검 메시지입니다.") -> list[str]:
+    """테스트 받을 곳에 점검 메시지 1건을 보내며 단계별로 무엇이 됐는지 기록해 돌려준다."""
+    driver = Win32KakaoDriver(search_tab=tab)
+    chat = None
+    try:
+        chat = driver.open_chat(name, tab)
+        driver.send_text(chat, text)
+        driver.trace.append("✅ 점검 메시지 전송 성공")
+    except Exception as exc:
+        driver.trace.append(f"❌ 멈춘 곳: {exc}")
+    finally:
+        if chat:
+            try:
+                driver.close_chat(chat)
+            except Exception:
+                pass
+    return driver.trace

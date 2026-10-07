@@ -28,7 +28,7 @@ from receivables.kakao_names import (
     install_korean_ocr,
     match_names,
 )
-from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver
+from receivables.kakao_pc import KakaoPCSender, Win32KakaoDriver, check_send
 from receivables.loader import (
     DEFAULT_LINE_TEMPLATE,
     ColumnMap,
@@ -521,6 +521,15 @@ if not is_preview:
         with t2:
             test_count = st.number_input("몇 건만 보내 볼까요?", 1, 20, min(3, max(len(selected), 1)))
         selected = selected[: int(test_count)]
+        if is_kakao_pc and test_to:
+            if st.button("🔍 발송 단계 점검 (테스트 받을 곳에 점검 메시지 1건)",
+                         help="검색칸 찾기 → 채팅방 열기 → 입력칸 찾기 → 전송 확인을 차례로 하며 어디서 멈추는지 보여 줍니다."):
+                try:
+                    with st.spinner("점검 중..."):
+                        steps = check_send(test_to, test_tab or ("chats" if search_tab == "채팅 목록" else "friends"))
+                    st.code("\n".join(steps), language=None)
+                except RuntimeError as exc:
+                    st.error(str(exc))
         if not test_to:
             st.info("테스트 받을 " + ("카톡 이름" if is_kakao_pc else "휴대폰 번호") + "을 입력해 주세요.")
         else:
