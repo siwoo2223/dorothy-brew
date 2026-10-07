@@ -251,16 +251,45 @@ class Win32KakaoDriver:
         time.sleep(0.05)
         win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0xC01C0001)
 
-    def _click(self, hwnd) -> None:
+    def _raise_chat(self, chat) -> None:
+        """채팅방 창을 모든 창 위로 올리고 맨 앞(키보드 입력 대상)으로 만든다."""
+        win32api, win32con, win32gui = self._w()
+        main = win32gui.FindWindow(None, MAIN_TITLE)
+        flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+        if main:  # 메인 창이 '맨 위 고정'으로 남아 채팅방을 덮지 않게
+            win32gui.SetWindowPos(main, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags | win32con.SWP_NOACTIVATE)
+        win32gui.ShowWindow(chat, win32con.SW_RESTORE)
+        win32gui.SetWindowPos(chat, win32con.HWND_TOPMOST, 0, 0, 0, 0, flags)
+        win32gui.SetWindowPos(chat, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)  # 위로 올린 뒤 고정은 푼다
+        if win32gui.GetForegroundWindow() != chat:
+            self._bring_to_front(chat)
+        time.sleep(0.3)
+
+    def _guard(self, chat) -> None:
+        """키를 누르기 직전: 맨 앞 창이 채팅방이 아니면 멈춘다(다른 창에 키가 들어가지 않게)."""
+        _, _, win32gui = self._w()
+        fg = win32gui.GetForegroundWindow()
+        if fg != chat:
+            title = win32gui.GetWindowText(fg) if fg else ""
+            raise RuntimeError(f"채팅방이 아닌 창('{title}')이 앞에 있어 키 입력을 멈췄습니다")
+
+    def _click(self, hwnd, chat=None) -> None:
+        """hwnd 가운데를 클릭. chat 을 주면 그 자리가 정말 그 채팅방인지 먼저 확인한다."""
         win32api, win32con, win32gui = self._w()
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        win32api.SetCursorPos(((left + right) // 2, (top + bottom) // 2))
+        x, y = (left + right) // 2, (top + bottom) // 2
+        if chat is not None:
+            under = win32gui.WindowFromPoint((x, y))
+            if under != hwnd and win32gui.GetAncestor(under, 2) != chat:  # 2 = GA_ROOT
+                title = win32gui.GetWindowText(win32gui.GetAncestor(under, 2))
+                raise RuntimeError(f"채팅방 입력칸이 다른 창('{title}')에 가려져 있어 누르지 않았습니다")
+        win32api.SetCursorPos((x, y))
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
         time.sleep(0.3)
 
     def _paste(self, chat, box, text) -> None:
-        """입력칸 클릭 → 전체 선택 → 붙여넣기(Ctrl+V). 사람이 붙여넣은 것과 같아 카톡이 입력으로 인식한다."""
+        """채팅방을 맨 위로 → 입력칸 클릭 → 전체 선택 → 붙여넣기(Ctrl+V). 카톡이 사람이 입력한 글로 인식한다."""
         import win32clipboard
 
         win32api, win32con, _ = self._w()
@@ -270,9 +299,11 @@ class Win32KakaoDriver:
             win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
         finally:
             win32clipboard.CloseClipboard()
-        self._bring_to_front(chat)
-        self._click(box)  # 입력칸에 키보드 포커스
-        self._key(win32con.VK_CONTROL, ord("A"))
+        self._raise_chat(chat)
+        self._click(box, chat)  # 입력칸에 키보드 포커스 (가려져 있으면 누르지 않음)
+        self._guard(chat)
+        win32api.SendMessage(box, 0x00B1, 0, -1)  # EM_SETSEL: 입력칸 글 전체 선택 (Ctrl+A 는 메인 창에서 '친구 추가'라 쓰지 않음)
+        self._guard(chat)
         self._key(win32con.VK_CONTROL, ord("V"))
         time.sleep(0.6)
         if not self._text_len(box):
@@ -303,11 +334,13 @@ class Win32KakaoDriver:
         for combo in keys:
             label = "Ctrl+Enter" if len(combo) == 2 else "Enter"
             before = self._text_len(box)
+            self._guard(chat)
             self._key(*combo)  # 붙여넣기 바로 뒤에, 다른 동작 없이 누른다
             time.sleep(1.2)
             after = self._text_len(box)
             self._log(f"{label} 누름: 글자 수 {before} → {after}")
             if after > before:  # 줄바꿈이 들어감 = 확실히 안 보내짐 → 지우고 다음 키
+                self._guard(chat)
                 self._key(win32con.VK_BACK)
                 time.sleep(0.3)
                 self._log(f"{label} 가 줄바꿈으로 들어가 지움")
@@ -365,16 +398,19 @@ class Win32KakaoDriver:
         finally:
             win32clipboard.CloseClipboard()
 
-        self._bring_to_front(chat)
-        box = win32gui.FindWindowEx(chat, None, CLASS_INPUT, None)
-        if box:  # 입력칸을 눌러 커서를 둔다
-            left, top, right, bottom = win32gui.GetWindowRect(box)
-            win32api.SetCursorPos(((left + right) // 2, (top + bottom) // 2))
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(0.3)
+        self._raise_chat(chat)
+        box = self._input_box(chat)
+        if box:  # 입력칸을 눌러 커서를 둔다 (가려져 있으면 누르지 않음)
+            self._click(box, chat)
+        self._guard(chat)
         self._key(win32con.VK_CONTROL, ord("V"))
         time.sleep(2.0)
+        # 붙여넣으면 카톡의 '파일 전송' 확인 창이 뜬다 → 그 창(카톡 것)에서만 Enter
+        _, _, win32gui = self._w()
+        import win32process
+        fg = win32gui.GetForegroundWindow()
+        if not fg or win32process.GetWindowThreadProcessId(fg)[1] != win32process.GetWindowThreadProcessId(chat)[1]:
+            raise RuntimeError("파일 전송 확인 창이 카카오톡 창이 아니어서 Enter 를 누르지 않았습니다")
         self._key(win32con.VK_RETURN)  # '전송' 확인 창
         time.sleep(2.0 + 1.0 * len(paths))  # 업로드 시간
 
