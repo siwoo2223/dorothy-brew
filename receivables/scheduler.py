@@ -164,8 +164,11 @@ def _require_windows() -> None:
 
 
 def _service():
+    import pythoncom
     import win32com.client
 
+    # 화면 프로그램(Streamlit)은 별도 작업 줄(스레드)에서 돌기 때문에, Windows 기능(COM)을 쓰기 전에 매번 준비해야 한다
+    pythoncom.CoInitialize()
     svc = win32com.client.Dispatch("Schedule.Service")
     svc.Connect()
     return svc

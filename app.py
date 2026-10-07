@@ -686,6 +686,14 @@ if entries:
                 with st.popover("실행 기록"):
                     st.code(log_file.read_text(encoding="utf-8")[-4000:], language=None)
         with c3:
+            if not status and st.button("등록하기", key=f"reg-sched-{e.id}", type="primary"):
+                try:
+                    if e.schedule.repeat == "once":
+                        e.schedule.validate()
+                    scheduler.register(e)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"등록 실패: {exc}")
             if st.button("삭제", key=f"del-sched-{e.id}"):
                 scheduler.remove(e.id)
                 st.rerun()
