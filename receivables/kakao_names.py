@@ -77,7 +77,8 @@ def _keep_on_top(hwnd: int, on: bool) -> None:
     import win32gui
 
     try:
-        if on:
+        if on:  # 트레이로 숨겨진 창도 꺼내 보이게
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
         win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST if on else win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
@@ -462,6 +463,17 @@ def _press(*keys) -> None:
         time.sleep(0.03)
 
 
+def _post_key(hwnd: int, vk: int) -> None:
+    """창(목록)에 키 입력 메시지를 직접 보낸다. 다른 창이 앞에 있어도 된다."""
+    import win32api
+    import win32con
+
+    scan = win32api.MapVirtualKey(vk, 0)
+    win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, 1 | (scan << 16))
+    time.sleep(0.03)
+    win32api.PostMessage(hwnd, win32con.WM_KEYUP, vk, 1 | (scan << 16) | (0xC0 << 24))
+
+
 def _focus(hwnd: int) -> None:
     import win32api
     import win32con
@@ -502,10 +514,10 @@ def extract_names_by_keyboard(tab: str = "chats", wait: float = 0.4, on_progress
 
     _dpi_aware()
     main = _main_window()
-    hwnd = _list_window(main)
     pid = win32process.GetWindowThreadProcessId(main)[1]
     _keep_on_top(main, True)
     try:
+        hwnd = _list_window(main)
         for _ in range(30):  # 목록 맨 위로
             _scroll(hwnd, 10)
         time.sleep(wait)
@@ -518,10 +530,24 @@ def extract_names_by_keyboard(tab: str = "chats", wait: float = 0.4, on_progress
 
         names: list[str] = []
         last_title, repeats, misses = None, 0, 0
+        mode = None  # "post"(목록 창에 직접 키 보내기) 또는 "keys"(실제 키 누르기). 처음에 되는 쪽으로 정함
+
+        def send_key(vk: int, how: str) -> None:
+            if how == "post":
+                _post_key(hwnd, vk)
+            else:
+                _focus(main)
+                _press(vk)
+
         for _ in range(max_items):
             before = _process_windows(pid)
-            _press(win32con.VK_RETURN)
-            new = _wait_new_window(before, main, pid)
+            new: list[int] = []
+            for how in ([mode] if mode else ["post", "keys"]):
+                send_key(win32con.VK_RETURN, how)
+                new = _wait_new_window(before, main, pid, timeout=2.0 if mode else 1.5)
+                if new:
+                    mode = how
+                    break
             if new:
                 misses = 0
                 title = win32gui.GetWindowText(new[0]).strip()
@@ -543,9 +569,7 @@ def extract_names_by_keyboard(tab: str = "chats", wait: float = 0.4, on_progress
                 misses += 1
                 if misses >= 5:
                     break
-                _press(win32con.VK_ESCAPE)
-            _focus(main)
-            _press(win32con.VK_DOWN)
+            send_key(win32con.VK_DOWN, mode or "keys")
             time.sleep(0.15)
         return names
     finally:
@@ -575,10 +599,10 @@ def _extract_exact_by_ocr(tab: str = "chats", wait: float = 0.4, on_progress=Non
     import win32process
 
     main = _main_window()
-    hwnd = _list_window(main)
     pid = win32process.GetWindowThreadProcessId(main)[1]
     _keep_on_top(main, True)
     try:
+        hwnd = _list_window(main)
         read_titles = _ocr_screen(hwnd)
         for _ in range(30):
             _scroll(hwnd, 10)
@@ -618,9 +642,13 @@ def extract_names(tab: str = "friends", wait: float = 0.4) -> tuple[list[str], s
     """
     _require_windows()
     main = _main_window()
-    hwnd = _list_window(main)
+    _keep_on_top(main, True)  # 숨겨진 창을 꺼내고, 글자 인식 중 가려지지 않게 맨 앞에 고정
+    try:
+        hwnd = _list_window(main)
+    except Exception:
+        _keep_on_top(main, False)
+        raise
     errors = []
-    _keep_on_top(main, True)  # 글자 인식(OCR)은 화면을 캡처하므로 카톡 창이 가려지면 안 된다
     try:
         for label, make in (("MSAA", _msaa_reader), ("UIA", _uia_reader), ("OCR(글자 인식)", _ocr_reader)):
             try:
@@ -638,13 +666,20 @@ def extract_names(tab: str = "friends", wait: float = 0.4) -> tuple[list[str], s
                        "아래 '진단 정보'를 복사해서 보내 주세요.")
 
 
-def diagnose() -> str:
-    """카카오톡 창 구조를 글로 정리한다 (개발자에게 보내 문제를 고치는 데 쓴다)."""
+def diagnose(open_test: bool = False) -> str:
+    """카카오톡 창 구조를 글로 정리한다 (개발자에게 보내 문제를 고치는 데 쓴다).
+
+    open_test: 목록 첫 방을 Enter 로 열어 보는 시험까지 한다 (그 방은 '읽음' 처리됨).
+    """
     _require_windows()
+    import win32api
+    import win32con
     import win32gui
+    import win32process
 
     lines = []
     main = _main_window()
+    _keep_on_top(main, True)
     try:
         lines.append(f"OCR 언어: {ocr_languages()}")
     except Exception as exc:
@@ -655,7 +690,6 @@ def diagnose() -> str:
             f"  hwnd={h} parent={win32gui.GetParent(h)} class={win32gui.GetClassName(h)!r} "
             f"text={win32gui.GetWindowText(h)!r} visible={win32gui.IsWindowVisible(h)} rect={win32gui.GetWindowRect(h)}"
         )
-    _keep_on_top(main, True)
     try:
         hwnd = _list_window(main)
         lines.append(f"list hwnd={hwnd}")
@@ -673,6 +707,28 @@ def diagnose() -> str:
                 lines.append(f"    uia type={info.control_type} class={info.class_name!r} name={info.name!r}")
         except Exception as exc:
             lines.append(f"UIA 트리 오류: {exc}")
+        if open_test:
+            pid = win32process.GetWindowThreadProcessId(main)[1]
+            for how in ("post", "keys"):
+                before = _process_windows(pid)
+                if how == "post":
+                    _post_key(hwnd, win32con.VK_HOME)
+                    _post_key(hwnd, win32con.VK_RETURN)
+                else:
+                    left, top, right, _ = win32gui.GetWindowRect(hwnd)
+                    _focus(main)
+                    win32api.SetCursorPos(((left + right) // 2, top + 30))
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                    time.sleep(0.3)
+                    _press(win32con.VK_RETURN)
+                new = _wait_new_window(before, main, pid, timeout=2.0)
+                titles = [(win32gui.GetClassName(h), win32gui.GetWindowText(h)) for h in new]
+                lines.append(f"열기 시험({how}): {titles or '창이 열리지 않음'}")
+                for h in new:
+                    win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+                if new:
+                    break
     except Exception as exc:
         lines.append(f"목록 창 오류: {exc}")
     finally:

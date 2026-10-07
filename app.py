@@ -118,10 +118,11 @@ def names_tool() -> None:
     with st.expander("읽기가 안 될 때: 진단 정보 만들기"):
         st.caption("버튼을 누르면 카카오톡 창 구조를 글로 정리합니다. 대화 내용은 들어가지 않고, 목록에 보이는 이름 일부가 들어갈 수 있습니다. "
                    "내용을 복사해서 개발자에게 보내 주세요.")
+        open_test = st.checkbox("첫 채팅방을 열어 보는 시험도 하기 (그 방은 '읽음' 처리됨)", value=True)
         if st.button("진단 정보 만들기"):
             try:
                 with st.spinner("카톡 창 구조를 확인하는 중..."):
-                    st.code(diagnose(), language=None)
+                    st.code(diagnose(open_test=open_test), language=None)
             except RuntimeError as exc:
                 st.error(str(exc))
     pasted = st.text_area("또는 이름을 직접 붙여 넣기 (한 줄에 하나)", height=100)
