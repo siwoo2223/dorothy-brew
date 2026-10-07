@@ -19,7 +19,8 @@ import sys
 for _module in [m for m in sys.modules if m == "receivables" or m.startswith("receivables.")]:
     del sys.modules[_module]
 
-from receivables import campaign, history, templates_store
+from receivables import campaign, history, scheduler, templates_store
+from receivables.runner import Job
 from receivables.kakao_names import (
     diagnose,
     extract_names,
@@ -253,6 +254,7 @@ if is_notice:
 else:
     st.write("거래 1건이 엑셀 1줄인 형식이면 됩니다. 같은 고객의 여러 줄은 자동으로 묶입니다.")
 
+upload = None
 if source == "이름 직접 입력":
     names_text = st.text_area("받는 사람 (한 줄에 한 명, 카톡에 보이는 이름 그대로)", height=150,
                               placeholder="KF - OKGUCHON(서명교)[ANGELES]\n송장방\nHARRY")
@@ -503,6 +505,7 @@ if skipped:
 # 테스트 모드: 고객 대신 나에게 보내 본다
 test_to = None
 test_tab = ""
+test_count = 3
 if not is_preview:
     test_mode = st.toggle("🧪 테스트 모드 — 고객에게 보내지 않고 **나에게** 보내 보기", value=True,
                           help="선택한 고객들의 메시지를 전부 아래 '나'에게 보냅니다. 각 메시지 맨 위에 원래 받을 고객 이름이 붙습니다.")
@@ -587,6 +590,105 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
         st.info("받은 메시지를 확인해 보고 괜찮으면, 위의 테스트 모드를 끄고 실제로 발송하세요.")
     if not is_kakao_pc and not is_preview:
         st.caption("'접수 완료'는 솔라피가 요청을 받았다는 뜻입니다. 최종 도착 여부는 솔라피 콘솔에서 확인하세요.")
+
+# ───────────────────────── 5. 예약 발송 ─────────────────────────
+st.subheader("5. ⏰ 예약 발송")
+st.caption("지금 화면의 설정(문구·열 지정·발송 방식·첨부·테스트 모드)을 저장해 두고, 정해진 시간에 Windows 가 자동으로 보냅니다. "
+           "브라우저 화면은 꺼져 있어도 되지만 **PC 는 켜져 있고 로그인(화면 잠금 해제) 상태**여야 하며, PC 카카오톡도 로그인돼 있어야 합니다.")
+MODE_KEYS = {"미리보기(실제 발송 안 함)": "dry-run", "PC 카카오톡(내 계정)": "kakao-pc",
+             "카카오 알림톡": "alimtalk", "문자(SMS/LMS)": "sms"}
+with st.expander("새 예약 만들기", expanded=False):
+    sched_name = st.text_input("예약 이름", f"{kind} {dt.date.today():%m월}")
+    repeat_label = st.radio("반복", ["한 번", "매일", "매주", "매월"], horizontal=True)
+    repeat = {"한 번": "once", "매일": "daily", "매주": "weekly", "매월": "monthly"}[repeat_label]
+    r1, r2 = st.columns(2)
+    weekdays_sel: list[int] = []
+    month_day = 1
+    with r1:
+        if repeat == "once":
+            run_date = st.date_input("날짜", dt.date.today() + dt.timedelta(days=1))
+        elif repeat == "weekly":
+            weekdays_sel = st.multiselect("요일", list(range(7)), default=[0], format_func=lambda i: scheduler.WEEKDAYS[i])
+        elif repeat == "monthly":
+            month_day = st.number_input("매월 며칠", 1, 31, 25)
+    with r2:
+        h_col, m_col = st.columns(2)
+        hour = h_col.selectbox("시", list(range(24)), index=9, format_func=lambda h: f"{'오전' if h < 12 else '오후'} {h % 12 or 12}시")
+        minute = m_col.selectbox("분", list(range(0, 60, 5)), format_func=lambda m: f"{m:02d}분")
+        run_time = dt.time(hour, minute)
+    if repeat == "monthly" and month_day > 28:
+        st.caption(f"{month_day}일이 없는 달에는 보내지 않습니다.")
+
+    ledger_mode = "사본"
+    ledger_path = ""
+    if source == "엑셀 파일":
+        ledger_mode = st.radio(
+            "엑셀은 어떻게 할까요?",
+            ["지금 올린 엑셀을 저장해서 사용", "이 경로의 엑셀을 예약 시간에 다시 읽기 (매번 최신 원장)"],
+            help="반복 예약이라면 원장 파일을 늘 같은 위치에 덮어써 두고 두 번째를 고르세요. 예약 시간 기준의 미수금으로 보냅니다.",
+        )
+        if ledger_mode.startswith("이 경로"):
+            ledger_path = st.text_input("엑셀 파일 경로", placeholder=r"예) C:\미수금\원장.xlsx").strip().strip('"')
+
+    st.caption("예약 발송은 3번 표의 체크와 관계없이, 예약 시간에 **보낼 수 있는 모든 고객**에게 보냅니다"
+               "(문제가 있거나 그날 이미 보낸 고객은 자동 제외)."
+               + (f" 지금은 테스트 모드라 **{test_to}** 에게 {int(test_count)}건만 갑니다." if test_to else ""))
+    if mode in ("카카오 알림톡", "문자(SMS/LMS)") and not os.getenv("SOLAPI_API_KEY"):
+        st.warning("알림톡·문자 예약은 .env 파일의 솔라피 키를 씁니다. .env 에 키를 먼저 저장해 주세요.")
+
+    if st.button("⏰ 예약 저장", type="primary", disabled=not template.strip() or (test_to == "")):
+        try:
+            at = dt.datetime.combine(run_date if repeat == "once" else dt.date.today(), run_time)
+            sch = scheduler.Schedule(repeat, at.isoformat(timespec="minutes"), weekdays_sel, int(month_day))
+            sch.validate()
+            if source == "엑셀 파일" and ledger_mode.startswith("이 경로") and not Path(ledger_path).is_file():
+                raise ValueError(f"엑셀 파일을 찾을 수 없습니다: {ledger_path or '(경로 없음)'}")
+            job = Job(
+                kind=kind, mode=MODE_KEYS[mode], template=template,
+                ledger=ledger_path if ledger_path else (str(SAMPLE_FILE) if source == "엑셀 파일" and upload is None else ""),
+                names=df.to_dict("records") if source == "이름 직접 입력" else [],
+                name_col=name_col, phone_col=phone_col, amount_col=amount_col, due_col=due_col,
+                line_template=line_template, chat_col=chat_col, room_col=room_col, attach_col=attach_col,
+                attachments=attachments,
+                search_tab="chats" if search_tab == "채팅 목록" else "friends", gap=tuple(gap), daily_cap=int(daily_cap),
+                template_id=template_id, sms_fallback=sms_fallback, subject=subject,
+                test_to=test_to or "", test_tab=test_tab, test_count=int(test_count),
+            )
+            entry = scheduler.Entry(scheduler.new_id(), sched_name.strip() or kind, sch, job)
+            snapshot = upload.getvalue() if (upload is not None and not ledger_path) else None
+            scheduler.save(entry, ledger_bytes=snapshot, ledger_name=upload.name if upload is not None else "원장.xlsx")
+            try:
+                scheduler.register(entry)
+                st.success(f"예약했습니다: {entry.name} — {sch.describe()}")
+            except Exception as exc:
+                st.warning(f"설정은 저장했지만 Windows 작업 스케줄러 등록에 실패했습니다: {exc}")
+        except ValueError as exc:
+            st.error(str(exc))
+
+entries = scheduler.list_entries()
+if entries:
+    st.markdown(f"**예약 목록 ({len(entries)}개)**")
+    for e in entries:
+        status = scheduler.task_status(e.id)
+        mode_label = {v: k for k, v in MODE_KEYS.items()}.get(e.job.mode, e.job.mode)
+        c1, c2, c3 = st.columns([5, 2, 1])
+        with c1:
+            st.markdown(f"**{e.name}** · {e.schedule.describe()} · {e.job.kind} · {mode_label}"
+                        + (f" · 🧪 테스트({e.job.test_to})" if e.job.test_to else ""))
+            st.caption(
+                (f"다음 실행: {status['next'] or '없음'} · 마지막 실행: {status['last'] or '아직 없음'}" if status
+                 else "⚠️ Windows 작업 스케줄러에 등록돼 있지 않습니다")
+                + f" · 엑셀: {Path(e.job.ledger).name if e.job.ledger else '직접 입력 명단'}"
+            )
+        with c2:
+            log_file = e.folder / "실행기록.txt"
+            if log_file.exists():
+                with st.popover("실행 기록"):
+                    st.code(log_file.read_text(encoding="utf-8")[-4000:], language=None)
+        with c3:
+            if st.button("삭제", key=f"del-sched-{e.id}"):
+                scheduler.remove(e.id)
+                st.rerun()
 
 if history.DEFAULT_LOG.exists():
     st.download_button(

@@ -1,4 +1,5 @@
 import datetime as dt
+from pathlib import Path
 import hashlib
 import hmac
 import re
@@ -398,3 +399,69 @@ def test_seen_before_is_conservative():
     assert _seen_before("KF - 황소막장-막탄(CEBU)", ["KF - 황소막장-막단(CEBU)"])
     assert not _seen_before("송장방", ["기나글로벌", "HARRY"])
     assert not _seen_before("KF - 써니[CEBU]", ["KF - 써니네[CEBU]2호점"])
+
+
+# ───────────── 공용 실행기 / 예약 ─────────────
+def test_run_job_dry_run_and_test_mode(tmp_path, capsys):
+    from receivables.runner import KIND_NOTICE, Job, run_job
+
+    ledger = tmp_path / "원장.xlsx"
+    pd.DataFrame({"고객명": ["가", "가", "나"], "전화번호": ["010-1111-2222", "010-1111-2222", "010-3333-4444"],
+                  "미수금": [1000, 2000, 0]}).to_excel(ledger, index=False)
+    log = tmp_path / "log.csv"
+    lines = []
+    s = run_job(Job(template="#{고객명} #{미수총액}", ledger=str(ledger)), log=lines.append, log_path=log)
+    assert (s.sent, s.failed) == (1, 0) and any("가 3,000" in ln for ln in lines)
+
+    # 공지: 직접 입력 명단 + 테스트 모드 → 나에게만
+    kakao = FakeKakao({"나"})
+    job = Job(kind=KIND_NOTICE, mode="kakao-pc", template="#{고객명}님 공지", names=[{"고객명": "A"}, {"고객명": "B"}],
+              test_to="나", test_count=1)
+    s = run_job(job, log=lines.append, sender=KakaoPCSender(kakao, sleep=lambda x: None), log_path=log)
+    assert s.sent == 1 and kakao.sent == [("나", "[테스트 · 원래 받는 사람: A]\nA님 공지")]
+
+    s = run_job(Job(ledger=str(tmp_path / "없음.xlsx")), log=lines.append, log_path=log)
+    assert not s.ok and "찾을 수 없습니다" in s.message
+
+
+def test_schedule_trigger_spec_and_validation():
+    import datetime as _dt
+
+    from receivables.scheduler import Schedule, trigger_spec
+
+    now = _dt.datetime(2026, 10, 7, 15, 0)
+    once = Schedule("once", "2026-10-08T09:00")
+    assert trigger_spec(once, now) == {"start": "2026-10-08T09:00:00", "type": 1}
+    assert once.describe() == "2026-10-08 09:00 한 번"
+    with pytest.raises(ValueError, match="지났습니다"):
+        Schedule("once", "2026-10-07T09:00").validate(now)
+
+    weekly = Schedule("weekly", "2026-10-08T09:30", weekdays=[0, 4, 6])  # 월·금·일
+    spec = trigger_spec(weekly, now)
+    assert spec["start"] == "2026-10-07T09:30:00" and spec["days_of_week"] == 2 | 32 | 1
+    assert weekly.describe() == "매주 월,금,일 09:30"
+
+    monthly = Schedule("monthly", "2026-10-08T10:00", day=25)
+    assert trigger_spec(monthly, now)["days_of_month"] == 1 << 24
+    assert monthly.describe() == "매월 25일 10:00"
+    with pytest.raises(ValueError):
+        Schedule("weekly", "2026-10-08T09:00").validate(now)
+
+
+def test_schedule_save_load_copies_files(tmp_path):
+    from receivables import scheduler
+    from receivables.runner import Job
+
+    att = tmp_path / "공지.png"; att.write_bytes(b"x")
+    entry = scheduler.Entry("e1", "10월 공지", scheduler.Schedule("daily", "2026-10-08T09:00"),
+                            Job(template="T", attachments=[str(att)]))
+    base = tmp_path / "schedules"
+    scheduler.save(entry, ledger_bytes=b"xlsx", ledger_name="원장.xlsx", base=base)
+    loaded = scheduler.load("e1", base=base)
+    assert Path(loaded.job.ledger).read_bytes() == b"xlsx"
+    assert Path(loaded.job.attachments[0]).parent == base / "e1" / "첨부"
+    assert [e.name for e in scheduler.list_entries(base)] == ["10월 공지"]
+    scheduler.append_run_log("e1", "실행 완료", base=base)
+    assert "실행 완료" in (base / "e1" / "실행기록.txt").read_text(encoding="utf-8")
+    scheduler.remove("e1", base=base)
+    assert scheduler.list_entries(base) == []

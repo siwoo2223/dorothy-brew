@@ -37,8 +37,8 @@ if not defined SRC (
   exit
 )
 
-echo  [3/4] 이 폴더에 덮어씁니다. (설치된 프로그램 .venv, 발송 이력 logs, 첨부 attachments 는 그대로 둡니다)
-robocopy "%SRC%" "%APPDIR%." /E /XD .venv logs attachments /NFL /NDL /NJH /NJS /NP > nul
+echo  [3/4] 이 폴더에 덮어씁니다. (설치된 프로그램 .venv, 발송 이력 logs, 첨부 attachments, 예약 schedules 는 그대로 둡니다)
+robocopy "%SRC%" "%APPDIR%." /E /XD .venv logs attachments schedules /NFL /NDL /NJH /NJS /NP > nul
 if %errorlevel% GEQ 8 (
   echo  [오류] 파일을 덮어쓰지 못했습니다. 이 폴더의 파일이 열려 있으면 닫고 다시 실행해 주세요.
   pause
