@@ -21,6 +21,7 @@ class Draft:
     already_sent_today: bool = False
     chat_name: str = ""
     search_tab: str = ""  # "chats" 면 채팅방 이름으로 찾는다
+    attachments: list[str] = field(default_factory=list)  # 함께 보낼 사진·파일 경로
 
     @property
     def destination(self) -> str:
@@ -38,10 +39,14 @@ def prepare(
     already_sent: set[str] | None = None,
     chat_name_col: str | None = None,
     room_col: str | None = None,
+    attachments: list[str] | None = None,
+    attach_col: str | None = None,
 ) -> list[Draft]:
     """already_sent: 오늘 이미 보낸 고객 key(이름|전화번호) 목록.
     chat_name_col: PC 카카오톡에서 찾을 친구 이름이 담긴 열. 비어 있으면 고객명을 쓴다.
-    room_col: 채팅방 이름이 담긴 열. 값이 있는 고객은 친구 대신 그 채팅방(단톡방 포함)으로 보낸다."""
+    room_col: 채팅방 이름이 담긴 열. 값이 있는 고객은 친구 대신 그 채팅방(단톡방 포함)으로 보낸다.
+    attachments: 모든 고객에게 함께 보낼 사진·파일 경로.
+    attach_col: 고객마다 다른 첨부 파일 경로가 담긴 열 (여러 개면 ; 로 구분)."""
     already_sent = already_sent or set()
     drafts = []
     for c in customers:
@@ -49,6 +54,12 @@ def prepare(
         room = format_value(c.variables.get(room_col)) if room_col else ""
         friend = (format_value(c.variables.get(chat_name_col)) if chat_name_col else "") or c.name
         problems = list(c.problems)
+        files = list(attachments or [])
+        if attach_col:
+            files += [f.strip().strip('"') for f in format_value(c.variables.get(attach_col)).split(";") if f.strip()]
+        missing_files = [f for f in files if not Path(f).is_file()]
+        if missing_files:
+            problems.append("첨부 파일 없음: " + ", ".join(Path(f).name for f in missing_files))
         if result.missing:
             problems.append("값이 없는 변수: " + ", ".join(result.missing))
         if len(result.text) > ALIMTALK_MAX_LENGTH:
@@ -65,6 +76,7 @@ def prepare(
                 already_sent_today=c.key in already_sent,
                 chat_name=room or friend,
                 search_tab="chats" if room else "",
+                attachments=files,
             )
         )
     return drafts
@@ -94,6 +106,7 @@ def send(
                 text=f"[테스트 · 원래 받는 사람: {d.customer.name}]\n{d.text}",
                 variables=d.variables,
                 chat_name=test_to,
+                attachments=d.attachments,
             )
             for d in targets
         ]
@@ -104,7 +117,7 @@ def send(
         messages = [
             OutgoingMessage(
                 key=d.customer.key, to=d.customer.phone, text=d.text, variables=d.variables,
-                chat_name=d.chat_name, search_tab=d.search_tab,
+                chat_name=d.chat_name, search_tab=d.search_tab, attachments=d.attachments,
             )
             for d in targets
         ]

@@ -5,7 +5,7 @@ import datetime as dt
 import hashlib
 import hmac
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import requests
@@ -22,6 +22,7 @@ class OutgoingMessage:
     variables: dict[str, str]  # 알림톡 변수 (#{...} 없이 이름만)
     chat_name: str = ""  # PC 카카오톡에서 찾을 친구/채팅방 이름
     search_tab: str = ""  # PC 카카오톡: "friends"(친구) | "chats"(채팅방) | ""(기본 설정)
+    attachments: list[str] = field(default_factory=list)  # PC 카카오톡: 함께 보낼 사진·파일 경로
 
 
 @dataclass

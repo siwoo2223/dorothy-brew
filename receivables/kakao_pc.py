@@ -7,13 +7,18 @@
 동작 순서 (고객 1명마다)
   1. 카카오톡 메인 창의 친구 검색칸(친구 이름) 또는 채팅 검색칸(채팅방 이름)에 입력 → Enter → 채팅방이 열린다
   2. 창 제목이 그 이름과 같은 채팅방을 찾는다. 없으면 '채팅방을 찾지 못함'으로 실패 처리
-  3. 입력칸에 메시지를 넣고 Enter → 창을 닫는다
+  3. 입력칸에 메시지를 넣고 Enter
+  4. 첨부(사진·파일)가 있으면 파일을 클립보드에 담아 채팅방에 붙여넣기(Ctrl+V) → 전송 확인 Enter
+     (이 단계는 채팅방 창을 맨 앞으로 가져와 키보드 입력을 쓰므로, 발송 중에는 키보드·마우스를 쓰지 않는다)
+  5. 창을 닫는다
 """
 from __future__ import annotations
 
 import random
+import struct
 import sys
 import time
+from pathlib import Path
 from typing import Callable, Protocol
 
 from .sender import OutgoingMessage, ResultCallback, SendResult
@@ -33,6 +38,7 @@ class ChatNotFound(Exception):
 class KakaoDriver(Protocol):
     def open_chat(self, name: str, tab: str | None = None) -> object: ...
     def send_text(self, chat: object, text: str) -> None: ...
+    def send_files(self, chat: object, files: list[str]) -> None: ...
     def close_chat(self, chat: object) -> None: ...
 
 
@@ -112,6 +118,67 @@ class Win32KakaoDriver:
         self._press_enter(box)
         time.sleep(1.0)
 
+    def _bring_to_front(self, hwnd) -> None:
+        win32api, win32con, win32gui = self._w()
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        # Windows 는 다른 프로그램 창을 함부로 앞으로 못 가져오게 막아서, Alt 키를 눌렀다 떼는 방법을 쓴다
+        win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.5)
+        if win32gui.GetForegroundWindow() != hwnd:
+            raise RuntimeError("채팅방 창을 맨 앞으로 가져오지 못했습니다(발송 중에는 다른 창을 누르지 마세요)")
+
+    def _key(self, *keys) -> None:
+        """keys 를 차례로 누르고 거꾸로 뗀다. 예: _key(VK_CONTROL, ord('V')) → Ctrl+V"""
+        win32api, win32con, _ = self._w()
+        for k in keys:
+            win32api.keybd_event(k, 0, 0, 0)
+            time.sleep(0.05)
+        for k in reversed(keys):
+            win32api.keybd_event(k, 0, win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(0.05)
+
+    def send_files(self, chat, files: list[str]) -> None:
+        import win32clipboard
+
+        win32api, win32con, win32gui = self._w()
+        paths = [str(Path(f).resolve()) for f in files]
+        missing = [p for p in paths if not Path(p).is_file()]
+        if missing:
+            raise RuntimeError("첨부 파일이 없습니다: " + ", ".join(missing))
+
+        # 탐색기에서 파일을 복사한 것과 같은 형식(CF_HDROP)으로 클립보드에 담는다
+        dropfiles = struct.pack("<IiiII", 20, 0, 0, 0, 1)  # pFiles, pt.x, pt.y, fNC, fWide
+        data = dropfiles + ("\0".join(paths) + "\0\0").encode("utf-16-le")
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
+        finally:
+            win32clipboard.CloseClipboard()
+
+        self._bring_to_front(chat)
+        box = win32gui.FindWindowEx(chat, None, CLASS_INPUT, None)
+        if box:  # 입력칸을 눌러 커서를 둔다
+            left, top, right, bottom = win32gui.GetWindowRect(box)
+            win32api.SetCursorPos(((left + right) // 2, (top + bottom) // 2))
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.3)
+        self._key(win32con.VK_CONTROL, ord("V"))
+        time.sleep(2.0)
+        self._key(win32con.VK_RETURN)  # '전송' 확인 창
+        time.sleep(2.0 + 1.0 * len(paths))  # 업로드 시간
+
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+        finally:
+            win32clipboard.CloseClipboard()
+
     def close_chat(self, chat) -> None:
         win32api, win32con, _ = self._w()
         win32api.PostMessage(chat, win32con.WM_CLOSE, 0, 0)
@@ -160,14 +227,26 @@ class KakaoPCSender:
             return SendResult(m.key, m.to, False, str(exc))
         except Exception as exc:  # 카카오톡 창 문제 등
             return SendResult(m.key, m.to, False, f"채팅방 열기 실패: {exc}")
-        try:
-            self.driver.send_text(chat, m.text)
-        except Exception as exc:
-            return SendResult(m.key, m.to, False, f"메시지 입력 실패: {exc}")
-        finally:
-            try:
-                self.driver.close_chat(chat)
-            except Exception:
-                pass
         where = "채팅방 " if m.search_tab == "chats" else ""
-        return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송")
+        try:
+            if m.text.strip():
+                self.driver.send_text(chat, m.text)
+        except Exception as exc:
+            self._close(chat)
+            return SendResult(m.key, m.to, False, f"메시지 입력 실패: {exc}")
+        note = ""
+        if m.attachments:
+            try:
+                self.driver.send_files(chat, m.attachments)
+                note = f" (+첨부 {len(m.attachments)}개)"
+            except Exception as exc:
+                # 글은 이미 갔으므로 '성공'으로 남겨 중복 발송을 막고, 첨부 실패는 경고로 알린다
+                note = f" ⚠️ 첨부 실패: {exc}"
+        self._close(chat)
+        return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송{note}")
+
+    def _close(self, chat) -> None:
+        try:
+            self.driver.close_chat(chat)
+        except Exception:
+            pass

@@ -171,6 +171,11 @@ class FakeKakao:
     def close_chat(self, chat):
         self.closed.append(chat)
 
+    def send_files(self, chat, files):
+        if getattr(self, "fail_files", False):
+            raise RuntimeError("붙여넣기 실패")
+        self.files = getattr(self, "files", []) + [(chat, list(files))]
+
 
 def test_kakao_pc_send_uses_chat_name_column(ledger, tmp_path):
     ledger["카톡이름"] = ["하늘 사장님", "하늘 사장님", None, None, "스튜디오"]
@@ -289,3 +294,38 @@ def test_filter_ocr_lines_keeps_names_only():
              "KF물류", "01064450246", "기나글로벌 15", "오전 11:43", "300+", "1개의 채팅방", "29",
              "본건 딜레이 공문 전달 드립니다 확인 부탁드리며 일정 공유드리겠습니다"]
     assert filter_ocr_lines(lines) == ["Jung-woong", "사장님 노력", "항상 조심을", "KF물류", "기나글로벌"]
+
+
+# ───────────── 첨부 (사진·파일) ─────────────
+def test_attachments_common_and_per_customer(ledger, tmp_path):
+    notice = tmp_path / "공지.png"; notice.write_bytes(b"png")
+    stmt = tmp_path / "명세서_하늘.pdf"; stmt.write_bytes(b"pdf")
+    ledger["첨부파일"] = [str(stmt), str(stmt), None, None, str(tmp_path / "없는파일.pdf")]
+    customers = group_customers(ledger, ColumnMap(), today=TODAY, require_phone=False)
+    drafts = campaign.prepare(customers, "#{고객명}님", attachments=[str(notice)], attach_col="첨부파일")
+    assert drafts[0].attachments == [str(notice), str(stmt)]
+    assert drafts[1].attachments == [str(notice)]
+    assert "첨부 파일 없음: 없는파일.pdf" in drafts[2].problems[0]  # 없는 파일은 보내기 전에 막는다
+
+    kakao = FakeKakao({"카페하늘", "베이커리온"})
+    results = campaign.send(drafts, KakaoPCSender(kakao, sleep=lambda s: None), log_path=tmp_path / "l.csv")
+    assert [r.ok for r in results] == [True, True]
+    assert kakao.files == [("카페하늘", [str(notice), str(stmt)]), ("베이커리온", [str(notice)])]
+    assert results[0].detail.endswith("(+첨부 2개)")
+
+
+def test_attachment_failure_keeps_text_success(tmp_path):
+    f = tmp_path / "a.png"; f.write_bytes(b"x")
+    kakao = FakeKakao({"가"}); kakao.fail_files = True
+    r = KakaoPCSender(kakao, sleep=lambda s: None).send(
+        [OutgoingMessage("k", "", "본문", {}, chat_name="가", attachments=[str(f)])])[0]
+    assert r.ok and "⚠️ 첨부 실패" in r.detail  # 글은 갔으니 성공(중복 발송 방지) + 경고
+    assert kakao.sent == [("가", "본문")] and kakao.closed == ["가"]
+
+
+def test_files_only_without_text(tmp_path):
+    f = tmp_path / "a.png"; f.write_bytes(b"x")
+    kakao = FakeKakao({"가"})
+    r = KakaoPCSender(kakao, sleep=lambda s: None).send(
+        [OutgoingMessage("k", "", "  ", {}, chat_name="가", attachments=[str(f)])])[0]
+    assert r.ok and kakao.sent == [] and kakao.files == [("가", [str(f)])]

@@ -319,11 +319,41 @@ with right:
     if used:
         st.markdown("이 문구에 쓰인 변수: " + ", ".join(used))
 
+# 첨부: PC 카카오톡에서만 보낼 수 있다 (미리보기에서는 확인용으로 보여 준다)
+attachments: list[str] = []
+attach_col = None
+if is_kakao_pc or is_preview:
+    st.markdown("##### 📎 함께 보낼 사진·파일 (PC 카카오톡 전용, 선택)")
+    a1, a2 = st.columns([3, 2])
+    with a1:
+        uploaded_files = st.file_uploader(
+            "모든 받는 사람에게 같이 보낼 사진·파일 (여러 개 가능)", accept_multiple_files=True, key=f"att-{kind}"
+        )
+        if uploaded_files:
+            att_dir = ROOT / "attachments" / dt.date.today().isoformat()
+            att_dir.mkdir(parents=True, exist_ok=True)
+            for f in uploaded_files:
+                path = att_dir / Path(f.name).name
+                path.write_bytes(f.getvalue())
+                attachments.append(str(path))
+            st.caption("문구를 보낸 뒤 " + ", ".join(Path(a).name for a in attachments) + " 을(를) 이어서 보냅니다.")
+    with a2:
+        if source == "엑셀 파일":
+            attach_col = pick("고객별 첨부파일 열", "첨부파일", optional=True)
+            st.caption("고객마다 다른 파일(예: 거래명세서)을 보낼 때, 엑셀에 파일 경로를 적은 열. "
+                       "예) C:\\명세서\\카페하늘.pdf  (여러 개면 ; 로 구분)")
+    if is_kakao_pc and (attachments or attach_col):
+        st.warning("첨부를 보낼 때는 채팅방 창이 맨 앞으로 나오고 붙여넣기·Enter 가 자동으로 눌립니다. "
+                   "**발송이 끝날 때까지 키보드·마우스를 건드리지 마세요.**")
+    if is_preview and (attachments or attach_col):
+        st.caption("※ 첨부는 'PC 카카오톡' 방식으로 보낼 때만 실제로 전송됩니다.")
+
 # ───────────────────────── 3. 고객별 미리보기 ─────────────────────────
 st.subheader("3. 고객별 미리보기")
 today = dt.date.today()
 drafts = campaign.prepare(customers, template, already_sent=history.sent_on(today, kind=kind),
-                          chat_name_col=chat_col, room_col=room_col)
+                          chat_name_col=chat_col, room_col=room_col,
+                          attachments=attachments, attach_col=attach_col)
 if is_kakao_pc and search_tab == "채팅 목록":  # 기본 찾는 곳이 채팅 목록이면 모두 채팅방으로 표시·발송
     for d in drafts:
         d.search_tab = "chats"
@@ -343,6 +373,8 @@ if not is_notice:
     columns["미수총액"] = [format_value(d.customer.variables["미수총액"]) for d in drafts]
     columns["건수"] = [d.customer.variables["미수건수"] for d in drafts]
 columns["글자수"] = [len(d.text) for d in drafts]
+if any(d.attachments for d in drafts):
+    columns["첨부"] = [f"📎 {len(d.attachments)}" if d.attachments else "" for d in drafts]
 columns["상태"] = [
     "⚠️ " + " / ".join(d.problems) if d.problems else (f"오늘 이미 {kind} 보냄" if d.already_sent_today else "정상")
     for d in drafts
@@ -368,6 +400,8 @@ p1, p2 = st.columns([2, 3])
 with p1:
     st.text_area("받는 사람에게 보이는 내용", preview.text, height=360, disabled=True)
     st.caption(f"{len(preview.text)} / {ALIMTALK_MAX_LENGTH}자")
+    if preview.attachments:
+        st.markdown("**📎 이어서 보낼 파일**  \n" + "  \n".join(f"- {Path(a).name}" for a in preview.attachments))
 if not is_notice:
     with p2:
         st.markdown("**이 고객의 미수 건**")
@@ -455,6 +489,9 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
     (st.success if ok == len(results) else st.warning)(
         ("[테스트] " if is_test else "") + f"성공 {ok}건 / 실패 {len(results) - ok}건"
     )
+    attach_warnings = sum("⚠️ 첨부 실패" in r.detail for r in results)
+    if attach_warnings:
+        st.warning(f"{attach_warnings}건은 글은 보냈지만 첨부를 보내지 못했습니다. 아래 상세를 확인하고 해당 고객에게만 파일을 따로 보내 주세요.")
     by_key = {d.customer.key: d for d in selected}
     st.dataframe(
         pd.DataFrame([{"고객명": by_key[r.key].customer.name, "결과": "성공" if r.ok else "실패", "상세": r.detail}
