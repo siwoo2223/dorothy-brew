@@ -198,30 +198,46 @@ class Win32KakaoDriver:
         return wrong
 
     def _open_by_ocr(self, name: str, results: int, before: dict[int, str]) -> tuple[int, list[str]]:
-        """글자 인식으로 검색 결과에서 가장 비슷한 줄(최대 2개)을 골라 열고 창 제목으로 확인."""
-        from .kakao_names import _ocr_screen, rank_search_results
+        """글자 인식으로 검색 결과에서 맞는 줄을 찾아 열고 창 제목으로 확인.
 
-        titles = _ocr_screen(results)() if results else []
-        names = [t.text for t in titles]
-        self._log("검색 결과: " + (" | ".join(names) if names else "(읽지 못함)"))
-        order = rank_search_results(name, names)
-        if not order:
-            raise ChatNotFound(
-                f"검색 결과에 '{name}' 방이 없습니다(비슷한 이름도 없어 아무 방도 열지 않음)"
-                + (f". 검색된 방: {', '.join(names[:5])}" if names else "")
-            )
+        화면에 안 보이는 아래쪽 결과까지 목록을 내리며 찾는다(최대 6화면).
+        정확히 같은 줄이 있으면 그 줄을, 없으면 가장 비슷한 줄(최대 2개, 짧은 이름은 제외)을 연다.
+        """
+        from .kakao_names import _ocr_screen, _scroll, rank_search_results
+
+        if not results:
+            raise ChatNotFound(f"검색 결과에 '{name}' 방이 없습니다(검색 결과 목록이 보이지 않음)")
+        read = _ocr_screen(results)
+        seen: list[str] = []
+        previous = None
         chat, tried = 0, []
-        for idx in order:  # 가장 비슷한 줄부터, 최대 2개
-            t = titles[idx]
-            self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
-            self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
-            chat = self._wait_chat(name, seconds=3.0)  # 창 제목이 엑셀 이름과 '정확히' 같아야 함
-            if chat:
+        for page in range(6):
+            titles = read()
+            names = [t.text for t in titles]
+            self._log(f"검색 결과({page + 1}화면): " + (" | ".join(names) if names else "(읽지 못함)"))
+            seen += [n for n in names if n not in seen]
+            order = rank_search_results(name, names)
+            for idx in order:  # 정확히 같은 줄 하나, 또는 가장 비슷한 줄부터 최대 2개
+                t = titles[idx]
+                self._log(f"'{t.text}' 더블클릭")
+                self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
+                chat = self._wait_chat(name, seconds=3.0)  # 창 제목이 엑셀 이름과 '정확히' 같아야 함
+                if chat:
+                    return chat, tried
+                wrong = self._close_wrong(before, name)
+                tried.append(wrong or t.text)
+                self._log(f"열린 방 '{wrong}' 은(는) 이름이 달라 바로 닫음" if wrong else "창이 열리지 않음")
+                time.sleep(0.5)
+            if tried or names == previous:  # 이미 시도했거나, 내려도 화면이 그대로 = 결과 끝
                 break
-            wrong = self._close_wrong(before, name)
-            tried.append(wrong or t.text)
-            self._log(f"열린 방 '{wrong}' 은(는) 이름이 달라 바로 닫음" if wrong else "창이 열리지 않음")
+            previous = names
+            _scroll(results, -5)  # 아래쪽 결과 보기
             time.sleep(0.5)
+        if not tried:
+            raise ChatNotFound(
+                f"검색 결과에 '{name}' 방이 없습니다(같은 이름이 없어 아무 방도 열지 않음)"
+                + (f". 검색된 방: {', '.join(seen[:8])}" if seen else "")
+            )
         return chat, tried
 
     def _open_by_keyboard(self, name: str, results: int, main: int, before: dict[int, str]) -> tuple[int, list[str]]:

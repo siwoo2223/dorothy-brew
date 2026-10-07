@@ -544,3 +544,11 @@ def test_control_stop_file(tmp_path, monkeypatch):
     assert control.stop_requested()
     control.clear_stop()
     assert not control.stop_requested()
+
+
+def test_short_names_only_exact():
+    from receivables.kakao_names import rank_search_results
+
+    titles = ["보홀교민 & 사업자 정보교환...", "교민방 2017년역사 세부 오...", "건우네", "KF 일반 냉동 물류", "건"]
+    assert rank_search_results("건", titles) == [4]
+    assert rank_search_results("건", ["건우네", "긴"]) == []  # 비슷해도 열지 않음

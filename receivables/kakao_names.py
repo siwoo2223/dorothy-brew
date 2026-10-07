@@ -836,7 +836,7 @@ def rank_search_results(name: str, titles: list[str], minimum: float = 0.5, limi
     if exact is not None:
         return [exact]
     target = _key(name)
-    if not target:
+    if not target or len(target) <= 2:  # 1~2글자 이름은 비슷한 이름(건 ↔ 건우)이 많아 정확히 같은 줄만 연다
         return []
     scored = []
     for i, t in enumerate(titles):
