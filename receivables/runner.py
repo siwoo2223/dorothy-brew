@@ -39,6 +39,7 @@ class Job:
     attachments: list[str] = field(default_factory=list)
     # PC 카카오톡
     search_tab: str = "friends"
+    find_mode: str = "ocr"  # 검색 결과에서 방 고르기: "ocr" | "keyboard"
     gap: tuple[float, float] = (8, 15)
     daily_cap: int = 500
     # 솔라피(알림톡·문자) — 키는 .env 에서 읽는다
@@ -94,8 +95,8 @@ def make_sender(job: Job):
     if job.mode == "kakao-pc":
         from .kakao_pc import KakaoPCSender, Win32KakaoDriver
 
-        return KakaoPCSender(Win32KakaoDriver(search_tab=job.search_tab), min_interval=job.gap[0],
-                             max_interval=job.gap[1])
+        return KakaoPCSender(Win32KakaoDriver(search_tab=job.search_tab, find_mode=job.find_mode),
+                             min_interval=job.gap[0], max_interval=job.gap[1])
     return SolapiSender(
         os.getenv("SOLAPI_API_KEY", ""),
         os.getenv("SOLAPI_API_SECRET", ""),
@@ -169,6 +170,9 @@ def run_job(
         log("보낼 대상이 없습니다.")
         return RunSummary(skipped=len(drafts))
 
+    from .control import clear_stop
+
+    clear_stop()  # 지난번 '발송 중지' 요청이 남아 있지 않게
     if sender is None:
         try:
             sender = make_sender(job)

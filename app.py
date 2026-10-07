@@ -19,7 +19,7 @@ import sys
 for _module in [m for m in sys.modules if m == "receivables" or m.startswith("receivables.")]:
     del sys.modules[_module]
 
-from receivables import campaign, history, scheduler, templates_store
+from receivables import campaign, control, history, scheduler, templates_store
 from receivables.runner import Job
 from receivables.kakao_names import (
     diagnose,
@@ -204,6 +204,10 @@ if kind == MENU_NAMES:
 
 with st.sidebar:
 
+    if st.button("⏹ 발송 중지", use_container_width=True,
+                 help="지금 보내고 있는 1건을 마치고 멈춥니다(예약 발송 포함). 키보드 ESC 를 1초 정도 누르고 있어도 멈춥니다."):
+        control.request_stop()
+        st.warning("발송 중지를 요청했습니다. 지금 보내는 1건을 마치고 멈춥니다.")
     st.header("발송 설정")
     mode = st.radio(
         "발송 방식",
@@ -217,9 +221,18 @@ with st.sidebar:
     sms_fallback = True
     subject = ""
     search_tab, gap, daily_cap = "친구 목록", (8, 15), 500
+    find_mode = "ocr"
     if is_kakao_pc:
         st.warning("카카오 공식 기능이 아니라서 **계정이 제한될 수 있습니다.** "
                    "간격을 넉넉히 두고 하루 발송 수를 적게 유지하세요.")
+        find_label = st.radio(
+            "방 찾는 방식",
+            ["글자 인식으로 고르기", "차례로 열어 확인 (글자 인식 없음)"],
+            help="검색 결과에서 맞는 방을 고르는 방법입니다.\n\n"
+                 "• 글자 인식으로 고르기: 결과 목록을 읽어 가장 비슷한 방만 엽니다. 다른 방을 거의 열지 않지만, 글자를 잘못 읽으면 못 찾을 수 있습니다.\n\n"
+                 "• 차례로 열어 확인: 결과를 위에서부터 열어 창 제목이 같은지 확인합니다(최대 5줄). 확실하지만, 위에 있는 다른 방이 읽음 처리될 수 있습니다.",
+        )
+        find_mode = "keyboard" if find_label.startswith("차례로") else "ocr"
         search_tab = st.radio("고객명·카톡이름으로 찾을 곳", ["친구 목록", "채팅 목록"], horizontal=True,
                               help="엑셀의 '채팅방' 열에 값이 있는 고객은 이 설정과 관계없이 채팅 목록에서 그 채팅방을 찾습니다.")
         gap = st.slider("메시지 간격(초)", 3, 60, (8, 15), help="이 범위에서 매번 무작위로 기다립니다.")
@@ -526,7 +539,8 @@ if not is_preview:
                          help="검색칸 찾기 → 채팅방 열기 → 입력칸 찾기 → 전송 확인을 차례로 하며 어디서 멈추는지 보여 줍니다."):
                 try:
                     with st.spinner("점검 중..."):
-                        steps = check_send(test_to, test_tab or ("chats" if search_tab == "채팅 목록" else "friends"))
+                        steps = check_send(test_to, test_tab or ("chats" if search_tab == "채팅 목록" else "friends"),
+                                           find_mode=find_mode)
                     st.code("\n".join(steps), language=None)
                 except RuntimeError as exc:
                     st.error(str(exc))
@@ -548,7 +562,7 @@ def make_sender():
     if is_preview:
         return DryRunSender()
     if is_kakao_pc:
-        driver = Win32KakaoDriver(search_tab="chats" if search_tab == "채팅 목록" else "friends")
+        driver = Win32KakaoDriver(search_tab="chats" if search_tab == "채팅 목록" else "friends", find_mode=find_mode)
         return KakaoPCSender(driver, min_interval=gap[0], max_interval=gap[1])
     return SolapiSender(
         api_key, api_secret, sender_number,
@@ -575,6 +589,9 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
         st.error(str(exc))
         st.stop()
 
+    control.clear_stop()
+    if is_kakao_pc:
+        st.info("멈추려면 왼쪽 **⏹ 발송 중지** 버튼을 누르거나, 키보드 **ESC** 를 1초 정도 누르고 계세요. 지금 보내는 1건을 마치고 멈춥니다.")
     bar = st.progress(0.0, text="발송 준비 중...")
 
     def on_result(done: int, total: int, r) -> None:
@@ -663,7 +680,8 @@ with st.expander("새 예약 만들기", expanded=False):
                 name_col=name_col, phone_col=phone_col, amount_col=amount_col, due_col=due_col,
                 line_template=line_template, chat_col=chat_col, room_col=room_col, attach_col=attach_col,
                 attachments=attachments,
-                search_tab="chats" if search_tab == "채팅 목록" else "friends", gap=tuple(gap), daily_cap=int(daily_cap),
+                search_tab="chats" if search_tab == "채팅 목록" else "friends", find_mode=find_mode,
+                gap=tuple(gap), daily_cap=int(daily_cap),
                 template_id=template_id, sms_fallback=sms_fallback, subject=subject,
                 test_to=test_to or "", test_tab=test_tab, test_count=int(test_count),
             )

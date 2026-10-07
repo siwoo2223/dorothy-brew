@@ -45,7 +45,7 @@ class KakaoDriver(Protocol):
 class Win32KakaoDriver:
     """pywin32 로 PC 카카오톡 창에 직접 메시지를 보내는 드라이버 (Windows 전용)."""
 
-    def __init__(self, search_tab: str = "friends", wait: float = 1.5):
+    def __init__(self, search_tab: str = "friends", wait: float = 1.5, find_mode: str = "ocr"):
         if sys.platform != "win32":
             raise RuntimeError("PC 카카오톡 발송은 Windows 에서만 됩니다.")
         try:
@@ -56,6 +56,9 @@ class Win32KakaoDriver:
             raise RuntimeError("pywin32 가 필요합니다: pip install pywin32") from exc
         self.search_tab = search_tab  # "friends"(친구 탭) | "chats"(채팅 탭)
         self.wait = wait
+        # 검색 결과에서 방을 고르는 방식: "ocr"(글자 인식으로 비슷한 줄 고르기) | "keyboard"(위에서부터 차례로 열어 창 제목 확인)
+        self.find_mode = find_mode
+        self.max_open_tries = 5
         self.trace: list[str] = []  # 마지막 발송의 단계별 기록 (발송 점검용)
         self.pasted = False
         self.send_key = ""  # 이 PC 카톡의 전송 키: "enter" 또는 "ctrl+enter" (한 번 확인되면 기억)
@@ -194,6 +197,77 @@ class Win32KakaoDriver:
                 win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
         return wrong
 
+    def _open_by_ocr(self, name: str, results: int, before: dict[int, str]) -> tuple[int, list[str]]:
+        """글자 인식으로 검색 결과에서 가장 비슷한 줄(최대 2개)을 골라 열고 창 제목으로 확인."""
+        from .kakao_names import _ocr_screen, rank_search_results
+
+        titles = _ocr_screen(results)() if results else []
+        names = [t.text for t in titles]
+        self._log("검색 결과: " + (" | ".join(names) if names else "(읽지 못함)"))
+        order = rank_search_results(name, names)
+        if not order:
+            raise ChatNotFound(
+                f"검색 결과에 '{name}' 방이 없습니다(비슷한 이름도 없어 아무 방도 열지 않음)"
+                + (f". 검색된 방: {', '.join(names[:5])}" if names else "")
+            )
+        chat, tried = 0, []
+        for idx in order:  # 가장 비슷한 줄부터, 최대 2개
+            t = titles[idx]
+            self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
+            self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
+            chat = self._wait_chat(name, seconds=3.0)  # 창 제목이 엑셀 이름과 '정확히' 같아야 함
+            if chat:
+                break
+            wrong = self._close_wrong(before, name)
+            tried.append(wrong or t.text)
+            self._log(f"열린 방 '{wrong}' 은(는) 이름이 달라 바로 닫음" if wrong else "창이 열리지 않음")
+            time.sleep(0.5)
+        return chat, tried
+
+    def _open_by_keyboard(self, name: str, results: int, main: int, before: dict[int, str]) -> tuple[int, list[str]]:
+        """글자 인식 없이: 검색 결과 첫 줄 선택 → Enter(열기) → 창 제목 확인 → 다르면 닫고 ↓ 다음 줄. 최대 max_open_tries 줄."""
+        from .kakao_names import _focus, _post_key, _press, _process_windows, _wait_new_window
+
+        win32api, win32con, win32gui = self._w()
+        import win32process
+
+        if not results:
+            raise ChatNotFound(f"검색 결과에 '{name}' 방이 없습니다(검색 결과 목록이 보이지 않음)")
+        pid = win32process.GetWindowThreadProcessId(main)[1]
+        left, top, right, _bottom = win32gui.GetWindowRect(results)
+        win32api.SetCursorPos(((left + right) // 2, top + 30))  # 첫 줄을 한 번 눌러 선택만 한다
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.4)
+        tried: list[str] = []
+        last = None
+        for i in range(self.max_open_tries):
+            opened = _process_windows(pid)
+            _post_key(results, win32con.VK_RETURN)
+            new = _wait_new_window(opened, main, pid, timeout=2.0)
+            if not new:  # 목록에 직접 보낸 키가 안 먹으면 실제 키로 (카톡 메인 창이 맨 앞일 때만)
+                _focus(main)
+                if win32gui.GetForegroundWindow() == main:
+                    _press(win32con.VK_RETURN)
+                    new = _wait_new_window(opened, main, pid, timeout=2.0)
+            if not new:
+                self._log(f"{i + 1}번째 줄: 창이 열리지 않음")
+                break
+            title = win32gui.GetWindowText(new[0]).strip()
+            self._log(f"{i + 1}번째 줄 열림: '{title}'")
+            if title == name:
+                return new[0], tried
+            for h in new:
+                win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+            time.sleep(0.4)
+            if title == last:  # ↓ 를 눌러도 같은 방 = 결과 끝
+                break
+            last = title
+            tried.append(title)
+            _post_key(results, win32con.VK_DOWN)
+            time.sleep(0.3)
+        return 0, tried
+
     # ── KakaoDriver 구현 ──
     def open_chat(self, name: str, tab: str | None = None):
         """검색 결과에서 가장 비슷한 줄을 열고, 창 제목이 엑셀 이름과 정확히 같을 때만 그 방을 쓴다.
@@ -203,7 +277,7 @@ class Win32KakaoDriver:
 
         tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값.
         """
-        from .kakao_names import _keep_on_top, _ocr_screen, rank_search_results
+        from .kakao_names import _keep_on_top
 
         win32api, win32con, win32gui = self._w()
         self.trace = []
@@ -222,27 +296,10 @@ class Win32KakaoDriver:
             time.sleep(self.wait)
             self._log(f"검색어 '{name}' 입력({used})")
             results = self._search_list(main, used)
-            titles = _ocr_screen(results)() if results else []
-            names = [t.text for t in titles]
-            self._log("검색 결과: " + (" | ".join(names) if names else "(읽지 못함)"))
-            order = rank_search_results(name, names)
-            if not order:
-                raise ChatNotFound(
-                    f"검색 결과에 '{name}' 방이 없습니다(비슷한 이름도 없어 아무 방도 열지 않음)"
-                    + (f". 검색된 방: {', '.join(names[:5])}" if names else "")
-                )
-            chat, tried = 0, []
-            for idx in order:  # 가장 비슷한 줄부터, 최대 2개
-                t = titles[idx]
-                self._log(f"{idx + 1}번째 결과 '{t.text}' 더블클릭")
-                self._double_click(int(t.x + min(t.w, 40) / 2), int(t.y + t.h / 2))
-                chat = self._wait_chat(name, seconds=3.0)  # 창 제목이 엑셀 이름과 '정확히' 같아야 함
-                if chat:
-                    break
-                wrong = self._close_wrong(before, name)
-                tried.append(wrong or t.text)
-                self._log(f"열린 방 '{wrong}' 은(는) 이름이 달라 바로 닫음" if wrong else "창이 열리지 않음")
-                time.sleep(0.5)
+            if self.find_mode == "keyboard":
+                chat, tried = self._open_by_keyboard(name, results, main, before)
+            else:
+                chat, tried = self._open_by_ocr(name, results, before)
         finally:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
             _keep_on_top(main, False)
@@ -447,18 +504,28 @@ class KakaoPCSender:
         max_interval: float = 15.0,
         max_consecutive_failures: int = 3,
         sleep: Callable[[float], None] = time.sleep,
+        should_stop: Callable[[], bool] | None = None,
     ):
         self.driver = driver
         self.min_interval = min_interval
         self.max_interval = max(max_interval, min_interval)
         self.max_consecutive_failures = max_consecutive_failures
         self.sleep = sleep
+        if should_stop is None:
+            from .control import stop_requested
+
+            should_stop = stop_requested
+        self.should_stop = should_stop  # '발송 중지' 버튼·ESC 키
 
     def send(self, messages: list[OutgoingMessage], on_result: ResultCallback | None = None) -> list[SendResult]:
         results: list[SendResult] = []
         failures_in_row = 0
+        stopped = False
         for i, m in enumerate(messages):
-            if failures_in_row >= self.max_consecutive_failures:
+            if stopped or self.should_stop():
+                stopped = True
+                result = SendResult(m.key, m.to, False, "발송 중지됨(미발송)")
+            elif failures_in_row >= self.max_consecutive_failures:
                 result = SendResult(m.key, m.to, False, f"연속 {failures_in_row}건 실패로 발송 중단(미발송)")
             else:
                 result = self._send_one(m)
@@ -467,11 +534,20 @@ class KakaoPCSender:
                 elif not result.detail.startswith("검색 결과에"):  # '방 없음'은 아무 방도 안 연 안전한 건너뛰기라 세지 않음
                     failures_in_row += 1
                 if i < len(messages) - 1:
-                    self.sleep(random.uniform(self.min_interval, self.max_interval))
+                    self._pause(random.uniform(self.min_interval, self.max_interval))
             results.append(result)
             if on_result:
                 on_result(i + 1, len(messages), result)
         return results
+
+    def _pause(self, seconds: float) -> None:
+        """메시지 사이 대기. 기다리는 중에도 중지 요청이 오면 바로 끝낸다."""
+        if self.sleep is not time.sleep:  # 테스트용 가짜 대기
+            self.sleep(seconds)
+            return
+        end = time.time() + seconds
+        while time.time() < end and not self.should_stop():
+            time.sleep(min(0.3, max(end - time.time(), 0)))
 
     def _send_one(self, m: OutgoingMessage) -> SendResult:
         name = m.chat_name
@@ -507,9 +583,9 @@ class KakaoPCSender:
 
 
 def check_send(name: str, tab: str = "friends",
-               text: str = "[발송 점검] KF로지스틱 발송 프로그램 점검 메시지입니다.") -> list[str]:
+               text: str = "[발송 점검] KF로지스틱 발송 프로그램 점검 메시지입니다.", find_mode: str = "ocr") -> list[str]:
     """테스트 받을 곳에 점검 메시지 1건을 보내며 단계별로 무엇이 됐는지 기록해 돌려준다."""
-    driver = Win32KakaoDriver(search_tab=tab)
+    driver = Win32KakaoDriver(search_tab=tab, find_mode=find_mode)
     chat = None
     try:
         chat = driver.open_chat(name, tab)

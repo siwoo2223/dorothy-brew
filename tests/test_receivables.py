@@ -519,3 +519,28 @@ def test_rank_search_results_tolerates_ocr_errors():
     assert rank_search_results("ㄱ레이첼☆salon4u", ["신호석, 이창하, kimberly.HAN, ...", "세부 한인회 특방 시즌 2 장..."]) == []
     # 후보는 최대 2개, 비슷한 순서
     assert rank_search_results("한식원", ["한식원 본점", "KF 일반 냉동 물류", "한식원2"]) == [2, 0]
+
+
+def test_stop_request_stops_after_current_message():
+    kakao = FakeKakao({"가", "나", "다"})
+    calls = {"n": 0}
+
+    def should_stop():  # 첫 메시지를 보낸 뒤 '발송 중지'를 누른 상황
+        calls["n"] += 1
+        return len(kakao.sent) >= 1
+
+    msgs = [OutgoingMessage(n, "", "본문", {}, chat_name=n) for n in ("가", "나", "다")]
+    results = KakaoPCSender(kakao, sleep=lambda s: None, should_stop=should_stop).send(msgs)
+    assert [r.ok for r in results] == [True, False, False]
+    assert results[1].detail == "발송 중지됨(미발송)" and len(kakao.sent) == 1
+
+
+def test_control_stop_file(tmp_path, monkeypatch):
+    from receivables import control
+
+    monkeypatch.setattr(control, "STOP_FILE", tmp_path / "STOP")
+    assert not control.stop_requested()
+    control.request_stop()
+    assert control.stop_requested()
+    control.clear_stop()
+    assert not control.stop_requested()
