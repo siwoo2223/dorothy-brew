@@ -449,7 +449,123 @@ def _seen_before(text: str, done: list[str], similarity: float = 0.9) -> bool:
     return any(difflib.SequenceMatcher(None, key, loose(d)).ratio() >= similarity for d in done)
 
 
+def _press(*keys) -> None:
+    """키를 차례로 누르고 거꾸로 뗀다 (지금 맨 앞 창에 입력됨)."""
+    import win32api
+    import win32con
+
+    for k in keys:
+        win32api.keybd_event(k, 0, 0, 0)
+        time.sleep(0.03)
+    for k in reversed(keys):
+        win32api.keybd_event(k, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.03)
+
+
+def _focus(hwnd: int) -> None:
+    import win32api
+    import win32con
+    import win32gui
+
+    win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)  # 다른 프로그램 창을 앞으로 가져오기 위한 Alt 요령
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+    finally:
+        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+    time.sleep(0.3)
+
+
+def _wait_new_window(before: set[int], main: int, pid: int, timeout: float = 3.0) -> list[int]:
+    end = time.time() + timeout
+    while time.time() < end:
+        time.sleep(0.15)
+        new = [h for h in _process_windows(pid) - before if h != main]
+        if new:
+            time.sleep(0.2)  # 창 제목이 채워질 때까지
+            return new
+    return []
+
+
+def extract_names_by_keyboard(tab: str = "chats", wait: float = 0.4, on_progress=None,
+                              max_items: int = 1500) -> list[str]:
+    """나인톡처럼: 목록 첫 항목을 선택 → Enter 로 채팅방 열기 → 창 제목(정확한 이름) 읽고 닫기 → ↓ 반복.
+
+    글자 인식(OCR)을 쓰지 않으므로 이름이 정확하다. 채팅방을 열기 때문에 안 읽은 메시지는 '읽음' 처리된다.
+    """
+    _require_windows()
+    import win32api
+    import win32con
+    import win32gui
+    import win32process
+
+    _dpi_aware()
+    main = _main_window()
+    hwnd = _list_window(main)
+    pid = win32process.GetWindowThreadProcessId(main)[1]
+    _keep_on_top(main, True)
+    try:
+        for _ in range(30):  # 목록 맨 위로
+            _scroll(hwnd, 10)
+        time.sleep(wait)
+        _focus(main)
+        left, top, right, _bottom = win32gui.GetWindowRect(hwnd)
+        win32api.SetCursorPos(((left + right) // 2, top + 30))  # 첫 항목을 한 번 눌러 선택
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(wait)
+
+        names: list[str] = []
+        last_title, repeats, misses = None, 0, 0
+        for _ in range(max_items):
+            before = _process_windows(pid)
+            _press(win32con.VK_RETURN)
+            new = _wait_new_window(before, main, pid)
+            if new:
+                misses = 0
+                title = win32gui.GetWindowText(new[0]).strip()
+                for h in new:
+                    win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+                time.sleep(0.3)
+                if title == last_title:  # ↓ 를 눌러도 같은 방 = 목록 끝
+                    repeats += 1
+                    if repeats >= 2:
+                        break
+                else:
+                    repeats = 0
+                    last_title = title
+                    if title and title != MAIN_TITLE and title not in names:
+                        names.append(title)
+                        if on_progress:
+                            on_progress(len(names), title, True)
+            else:  # 창이 안 열리는 항목(폴더·광고 등): 건너뜀
+                misses += 1
+                if misses >= 5:
+                    break
+                _press(win32con.VK_ESCAPE)
+            _focus(main)
+            _press(win32con.VK_DOWN)
+            time.sleep(0.15)
+        return names
+    finally:
+        _keep_on_top(main, False)
+
+
 def extract_names_exact(tab: str = "chats", wait: float = 0.4, on_progress=None) -> list[tuple[str, bool]]:
+    """정확한 이름 읽기. 먼저 키보드 방식(나인톡 방식)을 쓰고, 안 되면 글자 인식으로 위치를 찾아 여는 방식을 쓴다."""
+    try:
+        names = extract_names_by_keyboard(tab, wait, on_progress)
+    except RuntimeError:
+        raise
+    except Exception:
+        names = []
+    if names:
+        return [(n, True) for n in names]
+    return _extract_exact_by_ocr(tab, wait, on_progress)
+
+
+def _extract_exact_by_ocr(tab: str = "chats", wait: float = 0.4, on_progress=None) -> list[tuple[str, bool]]:
     """채팅방(또는 친구)을 하나씩 열어 창 제목으로 정확한 이름을 읽는다.
 
     돌려주는 값: [(이름, 정확히 확인했는지)] — 창이 안 열려 확인 못 한 항목은 글자 인식 결과를 False 로 담는다.
