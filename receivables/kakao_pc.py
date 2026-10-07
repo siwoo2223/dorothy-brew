@@ -194,11 +194,10 @@ class Win32KakaoDriver:
         time.sleep(0.3)
 
     def _paste(self, chat, box, text) -> None:
-        """입력칸을 비우고 클립보드 붙여넣기(Ctrl+V)로 글을 넣는다 → 카톡이 '사람이 입력한 글'로 인식(전송 버튼 켜짐)."""
+        """입력칸 클릭 → 전체 선택 → 붙여넣기(Ctrl+V). 사람이 붙여넣은 것과 같아 카톡이 입력으로 인식한다."""
         import win32clipboard
 
         win32api, win32con, _ = self._w()
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
         win32clipboard.OpenClipboard()
         try:
             win32clipboard.EmptyClipboard()
@@ -206,12 +205,11 @@ class Win32KakaoDriver:
         finally:
             win32clipboard.CloseClipboard()
         self._bring_to_front(chat)
-        self._click(box)
-        self._key(win32con.VK_CONTROL, ord("A"))  # 혹시 남은 글이 있으면 덮어쓰도록 전체 선택
+        self._click(box)  # 입력칸에 키보드 포커스
+        self._key(win32con.VK_CONTROL, ord("A"))
         self._key(win32con.VK_CONTROL, ord("V"))
         time.sleep(0.6)
         if not self._text_len(box):
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)  # 붙여넣기 실패 → 원래대로 채워 둠
             raise RuntimeError("붙여넣기가 되지 않았습니다")
         self.pasted = True
 
@@ -239,8 +237,7 @@ class Win32KakaoDriver:
         for combo in keys:
             label = "Ctrl+Enter" if len(combo) == 2 else "Enter"
             before = self._text_len(box)
-            self._bring_to_front(chat)
-            self._key(*combo)
+            self._key(*combo)  # 붙여넣기 바로 뒤에, 다른 동작 없이 누른다
             time.sleep(1.2)
             after = self._text_len(box)
             self._log(f"{label} 누름: 글자 수 {before} → {after}")
@@ -251,19 +248,17 @@ class Win32KakaoDriver:
                 continue
             self.send_key = "ctrl+enter" if label == "Ctrl+Enter" else "enter"
             if after < before:
-                self._log(f"전송됨({label})")
-            else:
-                # 이 카톡은 전송한 뒤에도 입력칸 글을 그대로 두는 경우가 있다(실제 화면에서 확인).
-                # 줄바꿈이 아니었으므로 전송된 것으로 보고, 남은 글은 지워 임시 저장·실수 재전송·창 안 닫힘을 막는다.
-                self._key(win32con.VK_CONTROL, ord("A"))
-                self._key(win32con.VK_DELETE)
-                time.sleep(0.3)
-                self._log(f"전송됨({label}) — 입력칸에 남은 글 지움(글자 수 {self._text_len(box)})")
+                self._log(f"전송됨({label}, 입력칸 비워짐)")
+            else:  # 입력칸이 그대로면 확신할 수 없음 → 다시 보내지도, 지우지도 않는다
+                self.unverified = True
+                self._log(f"{label} 누름 — 입력칸에 글이 그대로 있음(전송 확인 필요, 글은 남겨 둠)")
             return
         raise RuntimeError("Enter·Ctrl+Enter 모두 줄바꿈으로만 들어가 전송되지 않았습니다")
 
     def _bring_to_front(self, hwnd) -> None:
         win32api, win32con, win32gui = self._w()
+        if win32gui.GetForegroundWindow() == hwnd:
+            return  # 이미 맨 앞이면 Alt 를 누르지 않는다(Alt 가 입력칸 포커스를 빼앗아 Enter 가 안 먹힘)
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         # Windows 는 다른 프로그램 창을 함부로 앞으로 못 가져오게 막아서, Alt 키를 눌렀다 떼는 방법을 쓴다
         win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
