@@ -586,6 +586,10 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
     (st.success if ok == len(results) else st.warning)(
         ("[테스트] " if is_test else "") + f"성공 {ok}건 / 실패 {len(results) - ok}건"
     )
+    unverified = [r for r in results if "전송 확인 필요" in r.detail]
+    if unverified:
+        st.warning(f"{len(unverified)}건은 Enter 는 눌렀지만 전송됐는지 확인하지 못했습니다(중복을 막으려고 다시 보내지 않았습니다). "
+                   "해당 채팅방에서 직접 확인해 주세요.")
     attach_warnings = sum("⚠️ 첨부 실패" in r.detail for r in results)
     if attach_warnings:
         st.warning(f"{attach_warnings}건은 글은 보냈지만 첨부를 보내지 못했습니다. 아래 상세를 확인하고 해당 고객에게만 파일을 따로 보내 주세요.")

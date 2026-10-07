@@ -57,8 +57,9 @@ class Win32KakaoDriver:
         self.search_tab = search_tab  # "friends"(친구 탭) | "chats"(채팅 탭)
         self.wait = wait
         self.trace: list[str] = []  # 마지막 발송의 단계별 기록 (발송 점검용)
-        self.preferred: str = ""  # 이 PC 카톡에서 한 번 성공한 전송 방법
         self.pasted = False
+        self.send_key = ""  # 이 PC 카톡의 전송 키: "enter" 또는 "ctrl+enter" (한 번 확인되면 기억)
+        self.unverified = False
 
     # ── 내부 도우미 ──
     def _w(self):
@@ -192,15 +193,6 @@ class Win32KakaoDriver:
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
         time.sleep(0.3)
 
-    def _sent(self, box, wait: float = 1.0) -> bool:
-        """입력칸이 비었으면(=전송됨) True."""
-        end = time.time() + wait
-        while time.time() < end:
-            time.sleep(0.2)
-            if not self._text_len(box):
-                return True
-        return False
-
     def _paste(self, chat, box, text) -> None:
         """입력칸을 비우고 클립보드 붙여넣기(Ctrl+V)로 글을 넣는다 → 카톡이 '사람이 입력한 글'로 인식(전송 버튼 켜짐)."""
         import win32clipboard
@@ -223,90 +215,48 @@ class Win32KakaoDriver:
             raise RuntimeError("붙여넣기가 되지 않았습니다")
         self.pasted = True
 
-    def _ensure_pasted(self, chat, box, text) -> None:
-        if not self.pasted:
-            self._paste(chat, box, text)
-        else:
-            self._bring_to_front(chat)
-
-    def _try_post_enter(self, chat, box, text) -> None:
-        self._post_enter(box)
-
-    def _try_paste_enter(self, chat, box, text) -> None:
-        win32api, win32con, _ = self._w()
-        self._ensure_pasted(chat, box, text)
-        before = self._text_len(box)
-        self._key(win32con.VK_RETURN)
-        time.sleep(0.6)
-        after = self._text_len(box)
-        if after > before:  # 전송 대신 줄바꿈이 들어감 (카톡 설정이 'Enter = 줄바꿈'인 경우)
-            self._key(win32con.VK_BACK)
-            self._log("Enter 가 줄바꿈으로 들어가 지움 → 다음 방법으로")
-
-    def _try_ctrl_enter(self, chat, box, text) -> None:
-        win32api, win32con, _ = self._w()
-        self._ensure_pasted(chat, box, text)
-        self._key(win32con.VK_CONTROL, win32con.VK_RETURN)
-
-    def _try_send_button(self, chat, box, text) -> None:
-        """입력칸 아래 줄 오른쪽의 노란 [전송] 버튼을 누른다 (버튼은 따로 된 창이 아니라 위치로 누름)."""
-        win32api, win32con, win32gui = self._w()
-        self._ensure_pasted(chat, box, text)
-        _l, _t, right, bottom = win32gui.GetWindowRect(chat)
-        _bl, _bt, _br, box_bottom = win32gui.GetWindowRect(box)
-        strip = bottom - box_bottom  # 입력칸 아래 도구줄 높이 (화면 배율과 상관없이 비율로 계산)
-        if strip < 20:
-            raise RuntimeError("전송 버튼 위치를 알 수 없습니다")
-        x, y = int(right - strip * 1.1), int(box_bottom + strip / 2)
-        self._log(f"전송 버튼 위치 클릭 ({x},{y})")
-        win32api.SetCursorPos((x, y))
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-    SEND_METHODS = (
-        ("Enter 메시지", "_try_post_enter"),
-        ("붙여넣기 + Enter", "_try_paste_enter"),
-        ("붙여넣기 + Ctrl+Enter", "_try_ctrl_enter"),
-        ("전송 버튼 클릭", "_try_send_button"),
-    )
-
     def send_text(self, chat, text: str) -> None:
+        """붙여넣기로 글을 넣고 전송 키를 '한 번만' 누른다.
+
+        중복 전송을 막기 위해, '확실히 안 보내졌다'는 증거(Enter 가 줄바꿈으로 들어가 글자가 늘어남)가 있을 때만
+        다른 키(Ctrl+Enter)로 한 번 더 시도한다. 판단이 애매하면 다시 보내지 않고 self.unverified 로 표시한다.
+        """
         win32api, win32con, win32gui = self._w()
+        self.unverified = False
         box = self._input_box(chat)
         if not box:
             self._log("입력칸 못 찾음")
             raise RuntimeError("채팅방 입력칸을 찾지 못했습니다")
         self._log(f"입력칸 찾음({win32gui.GetClassName(box)})")
         self.pasted = False
-        text = text.strip("\r\n ").replace("\r\n", "\n").replace("\n", "\r\n")  # 끝 빈 줄 제거(Enter 가 줄바꿈이 되지 않게)
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)
-        time.sleep(0.5)
-        if not self._text_len(box):
-            self._log("입력칸에 글이 들어가지 않음")
-            raise RuntimeError("채팅방 입력칸에 글을 넣지 못했습니다")
+        text = text.strip("\r\n ").replace("\r\n", "\n").replace("\n", "\r\n")  # 끝 빈 줄 제거
+        self._paste(chat, box, text)  # 실패하면 예외 → 아무것도 안 보낸 상태
+        self._log(f"붙여넣기 완료(글자 수 {self._text_len(box)})")
 
-        # 한 번 성공한 방법을 먼저 쓰고, 안 되면 다음 방법. 전송되면(입력칸이 비면) 바로 멈추므로 두 번 가지 않는다.
-        methods = list(self.SEND_METHODS)
-        if self.preferred:
-            methods.sort(key=lambda m: m[0] != self.preferred)
-        previous = ""
-        for label, attr in methods:
-            if not self._text_len(box):  # 앞 방법이 늦게 전송됨 → 다시 넣지 않고 멈춘다(중복 발송 방지)
-                self.preferred = previous
-                self._log(f"전송됨({previous}, 늦게 처리됨)")
-                return
-            previous = label
-            try:
-                getattr(self, attr)(chat, box, text)
-            except Exception as exc:
-                self._log(f"{label}: 오류 {exc}")
+        keys = [(win32con.VK_CONTROL, win32con.VK_RETURN)] if self.send_key == "ctrl+enter" else [(win32con.VK_RETURN,)]
+        if self.send_key != "ctrl+enter":
+            keys.append((win32con.VK_CONTROL, win32con.VK_RETURN))
+        for combo in keys:
+            label = "Ctrl+Enter" if len(combo) == 2 else "Enter"
+            before = self._text_len(box)
+            self._bring_to_front(chat)
+            self._key(*combo)
+            time.sleep(1.2)
+            after = self._text_len(box)
+            self._log(f"{label} 누름: 글자 수 {before} → {after}")
+            if after > before:  # 줄바꿈이 들어감 = 확실히 안 보내짐 → 지우고 다음 키
+                self._key(win32con.VK_BACK)
+                time.sleep(0.3)
+                self._log(f"{label} 가 줄바꿈으로 들어가 지움")
                 continue
-            if self._sent(box, wait=1.5):
-                self.preferred = label
+            self.send_key = "ctrl+enter" if label == "Ctrl+Enter" else "enter"
+            if after < before:
                 self._log(f"전송됨({label})")
-                return
-            self._log(f"{label}: 전송 안 됨")
-        raise RuntimeError("Enter 를 눌러도 전송되지 않았습니다(입력칸에 글이 남아 있음)")
+            else:  # 글자 수가 그대로 → 보내졌는지 알 수 없음. 중복을 막기 위해 다시 보내지 않는다
+                self.unverified = True
+                self._log(f"{label} 누름 — 전송 여부 확인 불가(다시 보내지 않음)")
+            return
+        raise RuntimeError("Enter·Ctrl+Enter 모두 줄바꿈으로만 들어가 전송되지 않았습니다")
 
     def _bring_to_front(self, hwnd) -> None:
         win32api, win32con, win32gui = self._w()
@@ -424,14 +374,14 @@ class KakaoPCSender:
         except Exception as exc:
             self._close(chat)
             return SendResult(m.key, m.to, False, f"메시지 입력 실패: {exc}")
-        note = ""
+        note = " ⚠️ 전송 확인 필요(카톡 창에서 확인)" if getattr(self.driver, "unverified", False) else ""
         if m.attachments:
             try:
                 self.driver.send_files(chat, m.attachments)
-                note = f" (+첨부 {len(m.attachments)}개)"
+                note += f" (+첨부 {len(m.attachments)}개)"
             except Exception as exc:
                 # 글은 이미 갔으므로 '성공'으로 남겨 중복 발송을 막고, 첨부 실패는 경고로 알린다
-                note = f" ⚠️ 첨부 실패: {exc}"
+                note += f" ⚠️ 첨부 실패: {exc}"
         self._close(chat)
         return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송{note}")
 
