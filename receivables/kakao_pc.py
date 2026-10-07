@@ -252,9 +252,13 @@ class Win32KakaoDriver:
             self.send_key = "ctrl+enter" if label == "Ctrl+Enter" else "enter"
             if after < before:
                 self._log(f"전송됨({label})")
-            else:  # 글자 수가 그대로 → 보내졌는지 알 수 없음. 중복을 막기 위해 다시 보내지 않는다
-                self.unverified = True
-                self._log(f"{label} 누름 — 전송 여부 확인 불가(다시 보내지 않음)")
+            else:
+                # 이 카톡은 전송한 뒤에도 입력칸 글을 그대로 두는 경우가 있다(실제 화면에서 확인).
+                # 줄바꿈이 아니었으므로 전송된 것으로 보고, 남은 글은 지워 임시 저장·실수 재전송·창 안 닫힘을 막는다.
+                self._key(win32con.VK_CONTROL, ord("A"))
+                self._key(win32con.VK_DELETE)
+                time.sleep(0.3)
+                self._log(f"전송됨({label}) — 입력칸에 남은 글 지움(글자 수 {self._text_len(box)})")
             return
         raise RuntimeError("Enter·Ctrl+Enter 모두 줄바꿈으로만 들어가 전송되지 않았습니다")
 
