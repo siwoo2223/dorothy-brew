@@ -150,6 +150,28 @@ def test_waits_while_user_is_using_pc(tmp_path):
     assert agent.tick() == 1 and api.busy_flags[-1] is False and kakao.sent == [("방A", "본문")]
 
 
+def test_test_send_goes_out_immediately_while_pc_in_use(tmp_path):
+    """테스트 발송은 60초 기다리지 않고 바로 보낸다. 같이 온 고객 발송은 대기로 돌린다."""
+    api = FakeAPI([{**msg(1, "방A", "테스트"), "test": True}, msg(2, "방B", "고객")])
+    user = FakeInput(idle=2)
+    kakao = FakeKakao({"방A", "방B"})
+    agent = make_agent(api, kakao, tmp_path, idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    assert agent.tick() == 1
+    assert kakao.sent == [("방A", "테스트")] and api.status() == {1: "sent", 2: "pending"}
+
+
+def test_touching_pc_does_not_stop_test_sends(tmp_path):
+    api = FakeAPI([{**msg(i, "방A"), "test": True} for i in (1, 2)])
+    user = FakeInput(idle=999)
+    kakao = FakeKakao({"방A"})
+    agent = Agent(api, lambda s: KakaoPCSender(kakao, sleep=lambda x: None, should_stop=lambda: False,
+                                               max_consecutive_failures=99),
+                  log=lambda s: None, sleep=lambda s: user.touch(), download_dir=tmp_path,
+                  idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    agent.tick()
+    assert api.status() == {1: "sent", 2: "sent"}
+
+
 def test_touching_pc_between_messages_stops_the_rest(tmp_path):
     """메시지 사이 쉬는 시간에 마우스를 움직이면 남은 건은 보내지 않고 대기로 돌린다."""
     api = FakeAPI([msg(1, "방A"), msg(2, "방A"), msg(3, "방A")])

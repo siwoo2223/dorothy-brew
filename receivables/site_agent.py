@@ -218,13 +218,21 @@ class Agent:
         messages = [SiteMessage.from_dict(m) for m in data.get("messages") or []]
         req = data.get("names_request")
         if busy:
-            for m in messages:  # 옛 사이트는 busy 를 모르고 넘겨줄 수 있다 - 그대로 대기로 돌려준다
+            # 2026-10-08 요청 - "테스트발송은 60초 대기가 아닌 바로 확인 할 수 있게 해줘":
+            # 테스트 발송은 PC 를 쓰는 중이어도 바로 보내고, 고객 발송만 손을 뗄 때까지 기다린다.
+            waiting = [m for m in messages if not m.test]
+            messages = [m for m in messages if m.test]
+            for m in waiting:  # 옛 사이트는 busy 를 모르고 넘겨줄 수 있다 - 그대로 대기로 돌려준다
                 self.reporter.add(m.id, "pending")
-            if (messages or req) and not self.waiting_logged:
+            if (waiting or req) and not self.waiting_logged:
                 self.log(f"PC 사용 중 - 마우스·키보드를 {int(self.need_idle)}초 동안 안 쓰면 보내기 시작합니다.")
                 self.waiting_logged = True
-            return 0
-        self.waiting_logged = False
+            if not messages:
+                return 0
+            self.log("🧪 테스트 발송은 기다리지 않고 바로 보냅니다.")
+            req = None
+        else:
+            self.waiting_logged = False
         if req and self.extract_names:
             self._names(req)
             self.own_tick = self.input_tick()
@@ -241,7 +249,7 @@ class Agent:
         failures = 0
         self.own_tick = self.input_tick()
         for i, m in enumerate(messages):
-            if i > 0 and self.user_touched():
+            if i > 0 and not m.test and self.user_touched():
                 self.log("🖱 PC 사용 감지 - 멈춥니다. 손을 떼면 남은 메시지를 이어서 보냅니다.")
                 for rest in messages[i:]:
                     self.reporter.add(rest.id, "pending")
