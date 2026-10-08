@@ -19,8 +19,9 @@ import sys
 for _module in [m for m in sys.modules if m == "receivables" or m.startswith("receivables.")]:
     del sys.modules[_module]
 
-from receivables import campaign, control, history, scheduler, templates_store
-from receivables.runner import Job
+from receivables import campaign, control, envfile, history, inbound, scheduler, templates_store
+from receivables.runner import KIND_INBOUND, Job
+from receivables.runner import run_job as runner_run_job
 from receivables.kakao_names import (
     diagnose,
     extract_names,
@@ -44,6 +45,9 @@ SAMPLE_FILE = ROOT / "samples" / "미수금_샘플.xlsx"
 KIND_RECEIVABLE = "미수금 안내"
 KIND_NOTICE = "공지사항"
 MENU_NAMES = "카톡 이름 정리"
+MENU_INBOUND = "입고 알림 (사이트)"
+MODE_KEYS = {"미리보기(실제 발송 안 함)": "dry-run", "PC 카카오톡(내 계정)": "kakao-pc",
+             "카카오 알림톡": "alimtalk", "문자(SMS/LMS)": "sms"}
 TEMPLATE_DIRS = {KIND_RECEIVABLE: ROOT / "templates" / "미수금", KIND_NOTICE: ROOT / "templates" / "공지"}
 
 load_dotenv(ROOT / ".env")
@@ -52,7 +56,7 @@ st.set_page_config(page_title="미수금·공지 발송", page_icon="💬", layo
 # ───────────────────────── 사이드바: 발송 설정 ─────────────────────────
 with st.sidebar:
     st.header("메뉴")
-    kind = st.radio("메뉴", [KIND_RECEIVABLE, KIND_NOTICE, MENU_NAMES], label_visibility="collapsed")
+    kind = st.radio("메뉴", [KIND_RECEIVABLE, KIND_NOTICE, MENU_INBOUND, MENU_NAMES], label_visibility="collapsed")
     is_notice = kind == KIND_NOTICE
 
 
@@ -60,6 +64,168 @@ def to_excel(frame: pd.DataFrame) -> bytes:
     buf = io.BytesIO()
     frame.to_excel(buf, index=False)
     return buf.getvalue()
+
+
+def schedule_list(entries: list) -> None:
+    """예약 목록: 다음/마지막 실행, 실행 기록, 등록·삭제."""
+    if not entries:
+        return
+    st.markdown(f"**예약 목록 ({len(entries)}개)**")
+    for e in entries:
+        status = scheduler.task_status(e.id)
+        mode_label = {v: k for k, v in MODE_KEYS.items()}.get(e.job.mode, e.job.mode)
+        c1, c2, c3 = st.columns([5, 2, 1])
+        with c1:
+            st.markdown(f"**{e.name}** · {e.schedule.describe()} · {e.job.kind} · {mode_label}"
+                        + (f" · 🧪 테스트({e.job.test_to})" if e.job.test_to else ""))
+            source_label = ("사이트 입고" if e.job.kind == KIND_INBOUND
+                            else f"엑셀: {Path(e.job.ledger).name}" if e.job.ledger else "직접 입력 명단")
+            st.caption(
+                (f"다음 실행: {status['next'] or '없음'} · 마지막 실행: {status['last'] or '아직 없음'}" if status
+                 else "⚠️ Windows 작업 스케줄러에 등록돼 있지 않습니다")
+                + f" · {source_label}"
+            )
+        with c2:
+            log_file = e.folder / "실행기록.txt"
+            if log_file.exists():
+                with st.popover("실행 기록"):
+                    st.code(log_file.read_text(encoding="utf-8")[-4000:], language=None)
+        with c3:
+            if not status and st.button("등록하기", key=f"reg-sched-{e.id}", type="primary"):
+                try:
+                    if e.schedule.repeat == "once":
+                        e.schedule.validate()
+                    scheduler.register(e)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"등록 실패: {exc}")
+            if st.button("삭제", key=f"del-sched-{e.id}"):
+                scheduler.remove(e.id)
+                st.rerun()
+
+
+def stop_button() -> None:
+    if st.button("⏹ 발송 중지", use_container_width=True,
+                 help="지금 보내고 있는 1건을 마치고 멈춥니다(예약 발송 포함). 키보드 ESC 를 1초 정도 누르고 있어도 멈춥니다."):
+        control.request_stop()
+        st.warning("발송 중지를 요청했습니다. 지금 보내는 1건을 마치고 멈춥니다.")
+
+
+def inbound_tool() -> None:
+    """kflogistics 사이트(워드프레스)에 등록된 입고를 가져와 고객 카톡 방으로 사진과 함께 보낸다."""
+    with st.sidebar:
+        stop_button()
+    st.title("📦 입고 알림 (kflogistics 사이트 연동)")
+    st.caption("사이트 [입고 알림] 메뉴에서 직원이 입고(사진·내용)를 등록해 두면, 정해진 시간에 이 PC 카카오톡으로 "
+               "고객(카톡 방)별로 모아서 보냅니다. 결과(완료·실패)는 사이트 입고 목록에 표시됩니다.")
+
+    st.subheader("1. 사이트 연결")
+    st.caption("사이트 관리자 화면 > 입고 알림 > 문구·연결 설정 에 있는 '사이트 주소'와 '연결 키'를 넣으세요.")
+    c1, c2 = st.columns(2)
+    site_url = c1.text_input("사이트 주소", os.getenv("KF_SITE_URL", ""), placeholder="https://kflogistics.co.kr")
+    site_key = c2.text_input("연결 키", os.getenv("KF_SITE_KEY", ""), type="password")
+    b1, b2, _ = st.columns([1, 1, 3])
+    if b1.button("저장", use_container_width=True):
+        envfile.set_values(ROOT / ".env", {"KF_SITE_URL": site_url.strip(), "KF_SITE_KEY": site_key.strip()})
+        st.success("저장했습니다. 예약 발송도 이 값을 씁니다.")
+    if b2.button("연결 확인", use_container_width=True):
+        try:
+            info = inbound.SiteClient(site_url, site_key).ping()
+            st.success(f"연결됐습니다: {info.get('site', '')} · 발송 대기 {info.get('pending', 0)}건")
+        except (ValueError, inbound.SiteError) as exc:
+            st.error(str(exc))
+
+    st.subheader("2. 대기 중인 입고 미리보기")
+    if st.button("사이트에서 불러오기"):
+        try:
+            entries, tmpl, line = inbound.SiteClient(site_url, site_key).pending()
+            st.session_state["inbound_preview"] = (entries, tmpl, line)
+        except (ValueError, inbound.SiteError) as exc:
+            st.error(str(exc))
+    if "inbound_preview" in st.session_state:
+        entries, tmpl, line = st.session_state["inbound_preview"]
+        if not entries:
+            st.info("발송 대기 중인 입고가 없습니다.")
+        groups = inbound.group_entries(entries)
+        no_room = [g for g in groups if not g.room]
+        if no_room:
+            st.warning("카톡 방 이름이 없는 고객은 보내지 않고 '실패'로 표시됩니다: "
+                       + ", ".join(g.customer for g in no_room) + " → 사이트 [고객·채팅방]에서 방 이름을 넣어 주세요.")
+        for g in groups:
+            if g.room:
+                with st.expander(f"💬 {g.room} · 입고 {len(g.entries)}건 · 사진 {g.photo_count}장"):
+                    st.text(inbound.build_text(g, tmpl, line, dt.date.today()))
+
+    st.subheader("3. 발송 설정")
+    st.warning("카카오 공식 기능이 아니라서 **계정이 제한될 수 있습니다.** 간격을 넉넉히 두세요. "
+               "발송하는 동안 이 PC 의 마우스·키보드를 쓰지 마세요.")
+    s1, s2 = st.columns(2)
+    find_label = s1.radio("방 찾는 방식", ["글자 인식으로 고르기", "차례로 열어 확인 (글자 인식 없음)"], key="in_find")
+    gap = s2.slider("메시지 간격(초)", 3, 60, (8, 15), key="in_gap")
+    daily_cap = s2.number_input("하루 최대 발송 수", 1, 500, 500, key="in_cap", help="미수금·공지·입고·테스트를 모두 합친 수")
+    is_test = st.toggle("🧪 테스트 모드 (고객 대신 나에게 보내기)", value=True, key="in_test",
+                        help="입고 건은 '대기'로 그대로 남고, 메시지만 아래 테스트 받을 곳으로 갑니다.")
+    test_to, test_tab, test_count = "", "", 3
+    if is_test:
+        t1, t2, t3 = st.columns([3, 2, 1])
+        test_to = t1.text_input("테스트 받을 곳 (카톡 이름 또는 채팅방 이름)", key="in_test_to").strip()
+        test_tab = "chats" if t2.radio("찾을 곳", ["친구 목록", "채팅 목록"], horizontal=True, key="in_test_tab") == "채팅 목록" else "friends"
+        test_count = t3.number_input("건수", 1, 50, 3, key="in_test_count")
+
+    def make_job(mode: str) -> Job:
+        return Job(kind=KIND_INBOUND, mode=mode,
+                   find_mode="keyboard" if find_label.startswith("차례로") else "ocr",
+                   gap=tuple(gap), daily_cap=int(daily_cap),
+                   test_to=test_to if is_test else "", test_tab=test_tab, test_count=int(test_count))
+
+    st.subheader("4. 지금 보내기")
+    blocked = is_test and not test_to
+    if blocked:
+        st.caption("테스트 받을 곳을 입력하거나 테스트 모드를 끄세요.")
+    if st.button("📨 " + ("테스트로 보내기" if is_test else "대기 중인 입고 지금 모두 보내기"), type="primary", disabled=blocked):
+        lines: list[str] = []
+        box = st.empty()
+
+        def log(text: str) -> None:
+            lines.append(text)
+            box.code("\n".join(lines[-40:]), language=None)
+
+        summary = runner_run_job(make_job("kakao-pc"), log=log)
+        (st.success if summary.ok else st.warning)(
+            ("[테스트] " if is_test else "") + f"성공 {summary.sent}건 / 실패 {summary.failed}건"
+            + (f" · {summary.message}" if summary.message else ""))
+        st.session_state.pop("inbound_preview", None)
+
+    st.subheader("5. ⏰ 자동 발송 (예: 매일 17시)")
+    st.caption("정한 시간에 그때까지 등록된 입고를 고객별로 모아 보냅니다. 그 뒤에 등록한 입고는 다음 발송 때 갑니다. "
+               "**PC 는 켜져 있고 로그인(화면 잠금 해제) 상태**, PC 카카오톡도 로그인돼 있어야 합니다.")
+    r1, r2, r3 = st.columns([2, 1, 1])
+    days = r1.multiselect("요일", list(range(7)), default=list(range(6)), format_func=lambda i: scheduler.WEEKDAYS[i],
+                          key="in_days")
+    hour = r2.selectbox("시", list(range(24)), index=17, key="in_hour",
+                        format_func=lambda h: f"{'오전' if h < 12 else '오후'} {h % 12 or 12}시")
+    minute = r3.selectbox("분", list(range(0, 60, 5)), key="in_min", format_func=lambda m: f"{m:02d}분")
+    if is_test:
+        st.info(f"지금은 테스트 모드라 예약해도 **{test_to or '(테스트 받을 곳)'}** 에게만 갑니다. 실제 고객에게 보내려면 테스트 모드를 끄고 예약하세요.")
+    if st.button("⏰ 자동 발송 예약", disabled=blocked or not days):
+        try:
+            if not (site_url and site_key):
+                raise ValueError("1번에서 사이트 주소와 연결 키를 넣고 '저장'을 먼저 눌러 주세요.")
+            if os.getenv("KF_SITE_URL", "") != site_url.strip() or os.getenv("KF_SITE_KEY", "") != site_key.strip():
+                envfile.set_values(ROOT / ".env", {"KF_SITE_URL": site_url.strip(), "KF_SITE_KEY": site_key.strip()})
+            at = dt.datetime.combine(dt.date.today(), dt.time(hour, minute)).isoformat(timespec="minutes")
+            sch = scheduler.Schedule("daily" if len(days) == 7 else "weekly", at, sorted(days))
+            sch.validate()
+            entry = scheduler.Entry(scheduler.new_id(), f"입고 알림 {hour:02d}:{minute:02d}", sch, make_job("kakao-pc"))
+            scheduler.save(entry)
+            try:
+                scheduler.register(entry)
+                st.success(f"예약했습니다: {sch.describe()}")
+            except Exception as exc:
+                st.warning(f"설정은 저장했지만 Windows 작업 스케줄러 등록에 실패했습니다: {exc}")
+        except ValueError as exc:
+            st.error(str(exc))
+    schedule_list([e for e in scheduler.list_entries() if e.job.kind == KIND_INBOUND])
 
 
 def names_tool() -> None:
@@ -201,13 +367,12 @@ def names_tool() -> None:
 if kind == MENU_NAMES:
     names_tool()
     st.stop()
+if kind == MENU_INBOUND:
+    inbound_tool()
+    st.stop()
 
 with st.sidebar:
-
-    if st.button("⏹ 발송 중지", use_container_width=True,
-                 help="지금 보내고 있는 1건을 마치고 멈춥니다(예약 발송 포함). 키보드 ESC 를 1초 정도 누르고 있어도 멈춥니다."):
-        control.request_stop()
-        st.warning("발송 중지를 요청했습니다. 지금 보내는 1건을 마치고 멈춥니다.")
+    stop_button()
     st.header("발송 설정")
     mode = st.radio(
         "발송 방식",
@@ -630,8 +795,6 @@ if st.button(button_label, type="primary", disabled=not selected or not confirm 
 st.subheader("5. ⏰ 예약 발송")
 st.caption("지금 화면의 설정(문구·열 지정·발송 방식·첨부·테스트 모드)을 저장해 두고, 정해진 시간에 Windows 가 자동으로 보냅니다. "
            "브라우저 화면은 꺼져 있어도 되지만 **PC 는 켜져 있고 로그인(화면 잠금 해제) 상태**여야 하며, PC 카카오톡도 로그인돼 있어야 합니다.")
-MODE_KEYS = {"미리보기(실제 발송 안 함)": "dry-run", "PC 카카오톡(내 계정)": "kakao-pc",
-             "카카오 알림톡": "alimtalk", "문자(SMS/LMS)": "sms"}
 with st.expander("새 예약 만들기", expanded=False):
     sched_name = st.text_input("예약 이름", f"{kind} {dt.date.today():%m월}")
     repeat_label = st.radio("반복", ["한 번", "매일", "매주", "매월"], horizontal=True)
@@ -701,38 +864,7 @@ with st.expander("새 예약 만들기", expanded=False):
         except ValueError as exc:
             st.error(str(exc))
 
-entries = scheduler.list_entries()
-if entries:
-    st.markdown(f"**예약 목록 ({len(entries)}개)**")
-    for e in entries:
-        status = scheduler.task_status(e.id)
-        mode_label = {v: k for k, v in MODE_KEYS.items()}.get(e.job.mode, e.job.mode)
-        c1, c2, c3 = st.columns([5, 2, 1])
-        with c1:
-            st.markdown(f"**{e.name}** · {e.schedule.describe()} · {e.job.kind} · {mode_label}"
-                        + (f" · 🧪 테스트({e.job.test_to})" if e.job.test_to else ""))
-            st.caption(
-                (f"다음 실행: {status['next'] or '없음'} · 마지막 실행: {status['last'] or '아직 없음'}" if status
-                 else "⚠️ Windows 작업 스케줄러에 등록돼 있지 않습니다")
-                + f" · 엑셀: {Path(e.job.ledger).name if e.job.ledger else '직접 입력 명단'}"
-            )
-        with c2:
-            log_file = e.folder / "실행기록.txt"
-            if log_file.exists():
-                with st.popover("실행 기록"):
-                    st.code(log_file.read_text(encoding="utf-8")[-4000:], language=None)
-        with c3:
-            if not status and st.button("등록하기", key=f"reg-sched-{e.id}", type="primary"):
-                try:
-                    if e.schedule.repeat == "once":
-                        e.schedule.validate()
-                    scheduler.register(e)
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"등록 실패: {exc}")
-            if st.button("삭제", key=f"del-sched-{e.id}"):
-                scheduler.remove(e.id)
-                st.rerun()
+schedule_list([e for e in scheduler.list_entries() if e.job.kind != KIND_INBOUND])
 
 if history.DEFAULT_LOG.exists():
     st.download_button(

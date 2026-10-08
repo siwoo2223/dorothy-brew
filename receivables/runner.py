@@ -18,6 +18,7 @@ from .loader import DEFAULT_LINE_TEMPLATE, ColumnMap, group_customers, load_reci
 
 KIND_RECEIVABLE = "미수금 안내"
 KIND_NOTICE = "공지사항"
+KIND_INBOUND = "입고 안내"  # 사이트(워드프레스)에 등록된 입고를 가져와 보냄 → inbound.py
 MODES = ("dry-run", "kakao-pc", "alimtalk", "sms")
 
 
@@ -117,6 +118,10 @@ def run_job(
     today: dt.date | None = None,
 ) -> RunSummary:
     """엑셀을 읽어 메시지를 만들고 보낸다. sender 를 주면 그것으로 보낸다(테스트용)."""
+    if job.kind == KIND_INBOUND:
+        from . import inbound
+
+        return inbound.run_job(job, log=log, sender=sender, log_path=log_path, today=today)
     today = today or dt.date.today()
     kakao_pc = job.mode == "kakao-pc"
     try:
