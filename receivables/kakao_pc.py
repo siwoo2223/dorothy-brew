@@ -530,9 +530,32 @@ class Win32KakaoDriver:
         # 붙여넣으면 카톡의 '파일 전송' 확인 창이 뜬다 → 그 창(카톡 것)에서만 Enter
         self._paste_and_confirm(chat, wait_upload=2.0 + 1.0 * len(paths))
 
+    CLOSE_WAIT_MAX = 300  # 사진·파일 올리기가 끝나길 최대 몇 초 기다릴지
+
     def close_chat(self, chat) -> None:
-        win32api, win32con, _ = self._w()
-        win32api.PostMessage(chat, win32con.WM_CLOSE, 0, 0)
+        """채팅방을 닫는다. 사진·파일이 아직 올라가는 중이면 끝날 때까지 기다렸다가 닫는다.
+
+        2026-10-08 요청 - "전송을 하다가 말고 그러고 있어 그러니까 다 전송을 하면 끄는 시스템으로 바꿔줘":
+        올리는 중에 창을 닫으면 카톡이 '전송 중인 파일이 있습니다. 창을 닫으면 전송이 취소됩니다' 창을 띄운다.
+        그 창이 뜨면 '닫지 않기'(그 확인 창만 닫음 = 취소)로 답하고 몇 초 뒤 다시 닫아 본다. 끝내 안 끝나면
+        채팅방을 열어 둔 채로 둔다(닫아서 전송이 취소되는 것보다 낫다).
+        """
+        win32api, win32con, win32gui = self._w()
+        deadline = time.time() + self.CLOSE_WAIT_MAX
+        while True:
+            before = set(self._kakao_windows())
+            win32api.PostMessage(chat, win32con.WM_CLOSE, 0, 0)
+            time.sleep(1.0)
+            if not win32gui.IsWindow(chat) or not win32gui.IsWindowVisible(chat):
+                return
+            # 채팅방이 안 닫혔으면 '전송 중인 파일이 있습니다' 확인 창이 뜬 것 → 그 창만 닫는다(= 취소, 전송 계속)
+            for h in set(self._kakao_windows()) - before:
+                if h != chat:
+                    win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+            if time.time() > deadline:
+                self.trace.append("⚠️ 사진·파일 올리기가 오래 걸려 채팅방을 닫지 않고 두었습니다")
+                return
+            time.sleep(5.0)
 
 
 class KakaoPCSender:
