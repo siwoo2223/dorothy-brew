@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import platform
+import re
 import sys
 import time
 from pathlib import Path
@@ -44,16 +45,46 @@ def ask(prompt: str) -> str:
         return ""
 
 
+DEFAULT_SITE = "https://kflogistics-group.com"
+TOKEN_RE = re.compile(r"^[0-9a-f]{32,64}$", re.I)
+
+
+def looks_like_site(url: str) -> bool:
+    """사이트 주소처럼 생겼는지(점이 있는 도메인). 연결 키를 주소 칸에 넣는 실수를 잡는다."""
+    host = re.sub(r"^https?://", "", url.strip(), flags=re.I).split("/")[0]
+    return "." in host and " " not in host and not TOKEN_RE.match(host)
+
+
 def setup() -> tuple[str, str]:
     url = os.getenv("KF_SITE_URL", "").strip()
     token = os.getenv("KF_AGENT_TOKEN", "").strip()
-    if url and token:
+    # 2026-10-08 - 사이트 주소 칸에 연결 키를 넣어 '4ca0c5…' 라는 주소로 접속하려다 실패한 일이 있었다.
+    # 주소와 키가 서로 바뀌어 저장돼 있으면 바로잡고, 주소가 이상하면 다시 묻는다.
+    if TOKEN_RE.match(re.sub(r"^https?://", "", url, flags=re.I)) and not TOKEN_RE.match(token):
+        token = token if token else re.sub(r"^https?://", "", url, flags=re.I)
+        url = DEFAULT_SITE
+        envfile.set_values(ROOT / ".env", {"KF_SITE_URL": url, "KF_AGENT_TOKEN": token})
+        print("사이트 주소 칸에 연결 키가 들어가 있어 바로잡았습니다.")
+    if url and token and looks_like_site(url):
         return url, token
     print("=" * 60)
     print(" 처음 설정: 관리자 페이지 > 카톡 발송 > 설정 에 있는 값을 넣어 주세요.")
     print("=" * 60)
-    url = ask("사이트 주소 (예: https://kflogistics-group.com) : ") or "https://kflogistics-group.com"
-    token = ask("연결 키 : ")
+    while True:
+        url = ask(f"① 사이트 주소 (그냥 Enter 를 누르면 {DEFAULT_SITE}) : ") or DEFAULT_SITE
+        if TOKEN_RE.match(url):
+            print("   ↳ 그건 연결 키예요. 연결 키는 다음 칸에 넣고, 여기는 그냥 Enter 를 누르세요.")
+            token = url
+            continue
+        if looks_like_site(url):
+            break
+        print("   ↳ 사이트 주소가 아닌 것 같아요. 예: https://kflogistics-group.com")
+    while True:
+        typed = ask("② 연결 키 (관리자 페이지 > 카톡 발송 > 설정 > 키 보기) : ") or token
+        if TOKEN_RE.match(typed.strip()):
+            token = typed.strip()
+            break
+        print("   ↳ 연결 키는 영어·숫자로 된 긴 값입니다. 화면의 키를 그대로 복사해 붙여 넣으세요.")
     envfile.set_values(ROOT / ".env", {"KF_SITE_URL": url, "KF_AGENT_TOKEN": token})
     if sys.platform == "win32" and ask("PC를 켤 때 발송 도우미를 자동으로 실행할까요? (Y/N) : ").lower().startswith("y"):
         install_startup()
@@ -83,6 +114,9 @@ def main(argv: list[str]) -> int:
         if "연결 키" in str(exc):
             envfile.set_values(ROOT / ".env", {"KF_AGENT_TOKEN": ""})
             print("다음에 실행하면 연결 키를 다시 물어봅니다.")
+        elif "getaddrinfo" in str(exc) or "NameResolution" in str(exc) or "찾지 못했습니다" in str(exc):
+            envfile.set_values(ROOT / ".env", {"KF_SITE_URL": ""})
+            print("사이트 주소가 잘못된 것 같습니다. 다음에 실행하면 사이트 주소를 다시 물어봅니다.")
         ask("Enter 를 누르면 닫힙니다.")
         return 1
 
