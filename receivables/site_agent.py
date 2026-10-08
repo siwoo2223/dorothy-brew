@@ -78,8 +78,9 @@ class SiteAPI:
         except ValueError as exc:
             raise SiteError("사이트 응답을 읽지 못했습니다: " + r.text[:200]) from exc
 
-    def pull(self, info: str = "") -> dict:
-        return self._post({"action": "pull", "info": info})
+    def pull(self, info: str = "", busy: bool = False) -> dict:
+        # busy=True: 사람이 PC 를 쓰는 중 - 사이트는 메시지를 넘기지 않고 '사용 중'으로만 표시
+        return self._post({"action": "pull", "info": info, "busy": busy})
 
     def stop_requested(self) -> bool:
         try:
@@ -145,7 +146,9 @@ class Agent:
 
     def __init__(self, api: SiteAPI, make_sender: Callable[[dict], object], log: Callable[[str], None] = print,
                  sleep: Callable[[float], None] = time.sleep, local_stop: Callable[[], bool] = lambda: False,
-                 download_dir: Path = DOWNLOAD_DIR, max_failures: int = 3, extract_names=None):
+                 download_dir: Path = DOWNLOAD_DIR, max_failures: int = 3, extract_names=None,
+                 idle_seconds: Callable[[], float] = lambda: 1e9, input_tick: Callable[[], int] = lambda: 0,
+                 need_idle: float = 60):
         self.api = api
         self.make_sender = make_sender
         self.log = log
@@ -156,10 +159,28 @@ class Agent:
         self.reporter = Reporter(api, log)
         self.extract_names = extract_names
         self.cooldown_until = 0.0
+        # 2026-10-08 요청 - "도우미기능으로 진행을 해보자": 사장님이 쓰는 PC 에서 같이 돌기 때문에
+        # 마우스·키보드를 need_idle 초 동안 안 쓸 때만 보내고, 보내는 중에 손을 대면 바로 멈춘다.
+        self.idle_seconds = idle_seconds
+        self.input_tick = input_tick
+        self.need_idle = need_idle  # 사이트 설정(idle_seconds)이 오면 그 값으로 바뀐다. 0 이면 끔
+        self.own_tick = 0           # 도우미가 마지막으로 키보드·마우스를 쓴 시각(이보다 뒤 입력 = 사람)
+        self.waiting_logged = False
+
+    def user_busy(self) -> bool:
+        if self.need_idle <= 0:
+            return False
+        if self.own_tick and self.input_tick() == self.own_tick:
+            return False  # 마지막 입력이 도우미 자신의 것(방금 보낸 묶음) - 사람은 손대지 않았음
+        return self.idle_seconds() < self.need_idle
+
+    def user_touched(self) -> bool:
+        """도우미가 마지막으로 보낸 뒤 사람이 마우스·키보드를 썼는지"""
+        return self.need_idle > 0 and self.input_tick() != self.own_tick
 
     def _wait(self, seconds: float) -> None:
         end = time.time() + seconds
-        while time.time() < end and not self.local_stop():
+        while time.time() < end and not self.local_stop() and not self.user_touched():
             self.sleep(min(0.5, max(end - time.time(), 0)))
             if self.sleep is not time.sleep:  # 테스트용 가짜 대기
                 return
@@ -167,24 +188,43 @@ class Agent:
     def tick(self, info: str = "") -> int:
         """한 번 확인해서 보낼 것을 보낸다. 반환: 처리한 메시지 수."""
         self.reporter.flush()
-        data = self.api.pull(info)
+        busy = self.user_busy()
+        data = self.api.pull(info, busy=busy)
+        settings = data.get("settings") or {}
+        if str(settings.get("idle_seconds", "")).strip().isdigit():
+            self.need_idle = float(settings["idle_seconds"])
+            busy = self.user_busy()
+        messages = [SiteMessage.from_dict(m) for m in data.get("messages") or []]
         req = data.get("names_request")
+        if busy:
+            for m in messages:  # 옛 사이트는 busy 를 모르고 넘겨줄 수 있다 - 그대로 대기로 돌려준다
+                self.reporter.add(m.id, "pending")
+            if (messages or req) and not self.waiting_logged:
+                self.log(f"PC 사용 중 - 마우스·키보드를 {int(self.need_idle)}초 동안 안 쓰면 보내기 시작합니다.")
+                self.waiting_logged = True
+            return 0
+        self.waiting_logged = False
         if req and self.extract_names:
             self._names(req)
-        messages = [SiteMessage.from_dict(m) for m in data.get("messages") or []]
+            self.own_tick = self.input_tick()
         if not messages:
             return 0
         if time.time() < self.cooldown_until:
             for m in messages:
                 self.reporter.add(m.id, "pending")
             return 0
-        settings = data.get("settings") or {}
         gap_min = float(settings.get("gap_min") or 8)
         gap_max = max(float(settings.get("gap_max") or 15), gap_min)
         sender = self.make_sender(settings)
         self.log(f"보낼 메시지 {len(messages)}건을 가져왔습니다.")
         failures = 0
+        self.own_tick = self.input_tick()
         for i, m in enumerate(messages):
+            if i > 0 and self.user_touched():
+                self.log("🖱 PC 사용 감지 - 멈춥니다. 손을 떼면 남은 메시지를 이어서 보냅니다.")
+                for rest in messages[i:]:
+                    self.reporter.add(rest.id, "pending")
+                break
             if self.local_stop() or self.api.stop_requested():
                 self.log("⏹ 발송 중지 - 남은 메시지는 사이트에서 대기로 돌아갑니다.")
                 for rest in messages[i:]:
@@ -197,6 +237,7 @@ class Agent:
                 self.cooldown_until = time.time() + 300
                 break
             result = self._send(sender, m)
+            self.own_tick = self.input_tick()  # 방금 도우미가 누른 키·클릭까지는 사람 입력이 아님
             if result.ok or result.detail.startswith(NOT_FOUND_PREFIX):
                 failures = 0 if result.ok else failures
             else:

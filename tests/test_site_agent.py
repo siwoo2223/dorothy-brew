@@ -36,7 +36,8 @@ class FakeAPI:
         self.names = None
         self.fail_report = False
 
-    def pull(self, info=""):
+    def pull(self, info="", busy=False):
+        self.busy_flags = getattr(self, "busy_flags", []) + [busy]
         msgs, self.messages = self.messages, []
         return {"ok": True, "settings": {"gap_min": "3", "gap_max": "3", "find_mode": "ocr"},
                 "messages": msgs, "names_request": self.names_request}
@@ -124,3 +125,63 @@ def test_names_request_is_handled(tmp_path):
     agent = make_agent(api, FakeKakao(set()), tmp_path, extract_names=lambda tab, exact, log: ["송장방", "HARRY"])
     agent.tick()
     assert api.names == ("chats", True, ["송장방", "HARRY"], "")
+
+
+class FakeInput:
+    """마우스·키보드 입력 흉내: tick 이 바뀌면 누군가 입력한 것, idle 은 마지막 입력 뒤 초."""
+
+    def __init__(self, idle=999):
+        self.tick, self.idle = 1000, idle
+
+    def touch(self):
+        self.tick += 1
+        self.idle = 0
+
+
+def test_waits_while_user_is_using_pc(tmp_path):
+    api = FakeAPI([msg(1, "방A")])
+    user = FakeInput(idle=5)  # 5초 전에 마우스를 씀
+    kakao = FakeKakao({"방A"})
+    agent = make_agent(api, kakao, tmp_path, idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    assert agent.tick() == 0 and api.busy_flags == [True]
+    assert kakao.sent == [] and api.status() == {1: "pending"}  # 옛 사이트가 넘겨줘도 대기로 돌려줌
+    user.idle = 61  # 1분 넘게 손 안 댐
+    api.messages = [msg(1, "방A")]
+    assert agent.tick() == 1 and api.busy_flags[-1] is False and kakao.sent == [("방A", "본문")]
+
+
+def test_touching_pc_between_messages_stops_the_rest(tmp_path):
+    """메시지 사이 쉬는 시간에 마우스를 움직이면 남은 건은 보내지 않고 대기로 돌린다."""
+    api = FakeAPI([msg(1, "방A"), msg(2, "방A"), msg(3, "방A")])
+    user = FakeInput(idle=999)
+    kakao = FakeKakao({"방A"})
+    agent = Agent(api, lambda s: KakaoPCSender(kakao, sleep=lambda x: None, should_stop=lambda: False,
+                                               max_consecutive_failures=99),
+                  log=lambda s: None, sleep=lambda s: user.touch(), download_dir=tmp_path,
+                  idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    agent.tick()
+    assert len(kakao.sent) == 1
+    assert api.status() == {1: "sent", 2: "pending", 3: "pending"}
+
+
+def test_own_input_does_not_count_as_busy(tmp_path):
+    """한 묶음을 다 보낸 직후에도(도우미 자신의 입력뿐이면) 다음 묶음을 바로 이어서 보낸다."""
+    api = FakeAPI([msg(1, "방A")])
+    user = FakeInput(idle=999)
+    kakao = FakeKakao({"방A"})
+    agent = make_agent(api, kakao, tmp_path, idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    agent.tick()
+    user.idle = 3  # 방금 도우미가 보냈으니 '입력 후 3초' 이지만 tick 은 도우미가 기억한 그대로
+    api.messages = [msg(2, "방A")]
+    assert agent.tick() == 1 and api.status() == {1: "sent", 2: "sent"}
+
+
+def test_site_setting_zero_disables_idle_wait(tmp_path):
+    api = FakeAPI([msg(1, "방A")])
+    api.pull_settings = {"idle_seconds": "0"}
+    orig = api.pull
+    api.pull = lambda info="", busy=False: {**orig(info, busy), "settings": {"gap_min": "3", "gap_max": "3", "idle_seconds": "0"}}
+    user = FakeInput(idle=1)
+    kakao = FakeKakao({"방A"})
+    agent = make_agent(api, kakao, tmp_path, idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
+    assert agent.tick() == 1 and kakao.sent

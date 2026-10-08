@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from receivables import control, envfile  # noqa: E402
+from receivables import control, envfile, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
 VERSION = "2026-10-08"
@@ -90,9 +90,10 @@ def main(argv: list[str]) -> int:
         log("이 도우미는 카카오톡이 설치된 Windows PC 에서만 보낼 수 있습니다.")
         return 1
 
-    agent = Agent(api, windows_sender, log=log, local_stop=control.escape_held, extract_names=windows_extract_names)
+    agent = Agent(api, windows_sender, log=log, local_stop=control.escape_held, extract_names=windows_extract_names,
+                  idle_seconds=user_activity.idle_seconds, input_tick=user_activity.last_input_tick)
     log(f"사이트 {url} 에 연결됐습니다. {POLL_SECONDS}초마다 보낼 메시지를 확인합니다. (끄려면 이 창을 닫으세요)")
-    log("보내는 동안 이 PC 의 마우스·키보드를 쓰지 마세요. 멈추려면 ESC 를 1초 누르고 있거나 관리자 페이지의 '발송 중지'.")
+    log("PC 를 쓰는 중에는 기다렸다가, 마우스·키보드를 잠시(기본 60초) 안 쓰면 보냅니다. 보내는 중에 손을 대면 바로 멈춥니다.")
     errors = 0
     while True:
         try:
