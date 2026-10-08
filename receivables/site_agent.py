@@ -102,17 +102,38 @@ class SiteAPI:
         if "file" in att:  # 관리자 화면에서 올린 첨부: 연결 키로 받는다
             r = self._call("GET", params={"action": "file", "file": att["file"]})
         else:
-            url = str(att.get("url", ""))
-            if url.startswith("/"):
-                url = self.base + url
-            try:
-                r = self.session.get(url, timeout=self.timeout)
-            except requests.RequestException as exc:
-                raise SiteError(f"사진을 받지 못했습니다: {exc}") from exc
-            if r.status_code >= 400:
-                raise SiteError(f"사진을 받지 못했습니다({r.status_code}): {url}")
+            return self._download_photo(str(att.get("url", "")), path)
         path.write_bytes(r.content)
         return path
+
+    def _download_photo(self, url: str, path: Path) -> Path:
+        """사이트 입고 사진 받기. 사진이 아니라 웹페이지(구글 로그인 화면 등)를 받으면 다른 주소로 다시 시도."""
+        from .photo_merge import is_image
+
+        if url.startswith("/"):
+            url = self.base + url
+        tries = [url]
+        m = re.search(r"drive\.google\.com/.*?[?&/]id[=/]([\w-]+)|drive\.google\.com/file/d/([\w-]+)", url)
+        if m:  # 구글 드라이브 입고사진 - 썸네일 주소가 막히면 다른 공개 주소로
+            fid = m.group(1) or m.group(2)
+            tries += [f"https://lh3.googleusercontent.com/d/{fid}=w2000",
+                      f"https://drive.google.com/uc?export=download&id={fid}"]
+        last = ""
+        for u in tries:
+            try:
+                r = self.session.get(u, timeout=self.timeout)
+            except requests.RequestException as exc:
+                last = str(exc)
+                continue
+            if r.status_code >= 400:
+                last = f"{r.status_code}"
+                continue
+            path.write_bytes(r.content)
+            if is_image(path):
+                return path
+            last = "사진이 아닌 웹페이지를 받음(구글 드라이브 공유 설정 확인)"
+        path.unlink(missing_ok=True)
+        raise SiteError(f"사진을 받지 못했습니다({last}): {url}")
 
 
 class Reporter:

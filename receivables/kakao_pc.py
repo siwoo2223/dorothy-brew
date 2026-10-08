@@ -464,6 +464,50 @@ class Win32KakaoDriver:
             win32api.keybd_event(k, 0, win32con.KEYEVENTF_KEYUP, 0)
             time.sleep(0.05)
 
+    def send_image(self, chat, image_path: str) -> None:
+        """사진 한 장을 '그림'으로 클립보드에 넣고 붙여넣는다(사이트 '전체 복사'와 같은 방식).
+        파일(CF_HDROP)로 붙여넣으면 카톡이 사진을 안 보내는 경우가 있어 이 방식을 쓴다."""
+        import io
+
+        import win32clipboard
+        from PIL import Image
+
+        win32api, win32con, win32gui = self._w()
+        buf = io.BytesIO()
+        Image.open(image_path).convert("RGB").save(buf, "BMP")
+        dib = buf.getvalue()[14:]  # BMP 파일 머리(14바이트)를 뺀 나머지가 CF_DIB
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_DIB, dib)
+        finally:
+            win32clipboard.CloseClipboard()
+        self._paste_and_confirm(chat, wait_upload=3.0)
+
+    def _paste_and_confirm(self, chat, wait_upload: float) -> None:
+        """클립보드 내용을 채팅 입력칸에 붙여넣고, 카톡이 띄우는 '전송' 확인 창에서 Enter."""
+        import win32clipboard
+
+        win32api, win32con, win32gui = self._w()
+        self._raise_chat(chat)
+        box = self._input_box(chat)
+        if box:  # 입력칸을 눌러 커서를 둔다 (가려져 있으면 누르지 않음)
+            self._click(box, chat)
+        self._guard(chat)
+        self._key(win32con.VK_CONTROL, ord("V"))
+        time.sleep(2.0)
+        import win32process
+        fg = win32gui.GetForegroundWindow()
+        if not fg or win32process.GetWindowThreadProcessId(fg)[1] != win32process.GetWindowThreadProcessId(chat)[1]:
+            raise RuntimeError("전송 확인 창이 카카오톡 창이 아니어서 Enter 를 누르지 않았습니다")
+        self._key(win32con.VK_RETURN)  # '전송' 확인 창
+        time.sleep(wait_upload)  # 업로드 시간
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+        finally:
+            win32clipboard.CloseClipboard()
+
     def send_files(self, chat, files: list[str]) -> None:
         import win32clipboard
 
@@ -483,27 +527,8 @@ class Win32KakaoDriver:
         finally:
             win32clipboard.CloseClipboard()
 
-        self._raise_chat(chat)
-        box = self._input_box(chat)
-        if box:  # 입력칸을 눌러 커서를 둔다 (가려져 있으면 누르지 않음)
-            self._click(box, chat)
-        self._guard(chat)
-        self._key(win32con.VK_CONTROL, ord("V"))
-        time.sleep(2.0)
         # 붙여넣으면 카톡의 '파일 전송' 확인 창이 뜬다 → 그 창(카톡 것)에서만 Enter
-        _, _, win32gui = self._w()
-        import win32process
-        fg = win32gui.GetForegroundWindow()
-        if not fg or win32process.GetWindowThreadProcessId(fg)[1] != win32process.GetWindowThreadProcessId(chat)[1]:
-            raise RuntimeError("파일 전송 확인 창이 카카오톡 창이 아니어서 Enter 를 누르지 않았습니다")
-        self._key(win32con.VK_RETURN)  # '전송' 확인 창
-        time.sleep(2.0 + 1.0 * len(paths))  # 업로드 시간
-
-        win32clipboard.OpenClipboard()
-        try:
-            win32clipboard.EmptyClipboard()
-        finally:
-            win32clipboard.CloseClipboard()
+        self._paste_and_confirm(chat, wait_upload=2.0 + 1.0 * len(paths))
 
     def close_chat(self, chat) -> None:
         win32api, win32con, _ = self._w()
@@ -585,13 +610,37 @@ class KakaoPCSender:
         note = " ⚠️ 전송 확인 필요(카톡 창에서 확인)" if getattr(self.driver, "unverified", False) else ""
         if m.attachments:
             try:
-                self.driver.send_files(chat, m.attachments)
-                note += f" (+첨부 {len(m.attachments)}개)"
+                note += self._send_attachments(chat, m)
             except Exception as exc:
                 # 글은 이미 갔으므로 '성공'으로 남겨 중복 발송을 막고, 첨부 실패는 경고로 알린다
                 note += f" ⚠️ 첨부 실패: {exc}"
         self._close(chat)
         return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송{note}")
+
+    def _send_attachments(self, chat, m: OutgoingMessage) -> str:
+        """사진은 세로로 이어 붙여 '그림'으로(사이트 '전체 복사'와 같음), 나머지 파일은 파일로 보낸다."""
+        from .photo_merge import is_image, merge_photos
+
+        photos = [a for a in m.attachments if is_image(a)]
+        others = [a for a in m.attachments if a not in photos]
+        parts = []
+        if photos and hasattr(self.driver, "send_image"):
+            try:
+                merged = merge_photos(photos, Path(photos[0]).parent / "_merged", stem="입고사진")
+            except ImportError:  # Pillow 가 없으면 파일로라도 보낸다
+                merged = []
+            if merged:
+                for path in merged:
+                    self.driver.send_image(chat, str(path))
+                parts.append(f"사진 {len(photos)}장")
+            else:
+                others = photos + others
+        else:
+            others = photos + others
+        if others:
+            self.driver.send_files(chat, others)
+            parts.append(f"첨부 {len(others)}개")
+        return f" (+{', '.join(parts)})" if parts else ""
 
     def _close(self, chat) -> None:
         try:

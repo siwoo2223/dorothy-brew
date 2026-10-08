@@ -185,3 +185,76 @@ def test_site_setting_zero_disables_idle_wait(tmp_path):
     kakao = FakeKakao({"방A"})
     agent = make_agent(api, kakao, tmp_path, idle_seconds=lambda: user.idle, input_tick=lambda: user.tick, need_idle=60)
     assert agent.tick() == 1 and kakao.sent
+
+
+# ───────────── 사진: 사이트 '전체 복사'처럼 이어 붙여 그림으로 보내기 ─────────────
+def _jpg(path, color, size=(300, 200)):
+    from PIL import Image
+
+    Image.new("RGB", size, color).save(path, "JPEG")
+    return str(path)
+
+
+def test_merge_photos_stacks_vertically_in_groups(tmp_path):
+    from PIL import Image
+
+    from receivables.photo_merge import PER_IMAGE, is_image, merge_photos
+
+    photos = [_jpg(tmp_path / f"{i}.jpg", "red", (300, 200)) for i in range(PER_IMAGE + 1)]
+    out = merge_photos(photos, tmp_path / "m")
+    assert len(out) == 2 and all(is_image(p) for p in out)
+    assert Image.open(out[0]).size == (300, 200 * PER_IMAGE + 14 * (PER_IMAGE - 1))
+    html = tmp_path / "x.jpg"
+    html.write_text("<html>로그인</html>")
+    assert not is_image(html)
+
+
+def test_photos_go_as_one_merged_image_and_other_files_as_files(tmp_path):
+    class ImageKakao(FakeKakao):
+        images = []
+
+        def send_image(self, chat, path):
+            self.images.append((chat, Path(path).name))
+
+    kakao = ImageKakao({"방A"})
+    pdf = tmp_path / "명세서.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    from receivables.sender import OutgoingMessage
+
+    m = OutgoingMessage("1", "방A", "글", {}, chat_name="방A",
+                        attachments=[_jpg(tmp_path / "a.jpg", "red"), _jpg(tmp_path / "b.jpg", "blue"), str(pdf)])
+    r = KakaoPCSender(kakao, sleep=lambda s: None, should_stop=lambda: False).send([m])[0]
+    assert r.ok and "사진 2장" in r.detail and "첨부 1개" in r.detail
+    assert kakao.images == [("방A", "입고사진_1.jpg")]
+    assert kakao.files == [("방A", ["명세서.pdf"])]
+
+
+def test_drive_photo_falls_back_when_thumbnail_gives_web_page(tmp_path):
+    from receivables.site_agent import SiteAPI
+
+    jpg = Path(_jpg(tmp_path / "real.jpg", "green")).read_bytes()
+
+    class Resp:
+        def __init__(self, status, content):
+            self.status_code, self.content, self.text = status, content, ""
+
+    class Session:
+        def __init__(self, ok_host):
+            self.ok_host, self.urls = ok_host, []
+
+        def get(self, url, timeout=None):
+            self.urls.append(url)
+            return Resp(200, jpg if self.ok_host and self.ok_host in url else b"<html>login</html>")
+
+    s = Session("lh3.googleusercontent.com")
+    api = SiteAPI("https://kf.example", "k", session=s)
+    p = api.download({"name": "a.jpg", "url": "https://drive.google.com/thumbnail?id=ABC_1-x&sz=w2000"}, tmp_path / "d")
+    assert p.read_bytes() == jpg and s.urls[1] == "https://lh3.googleusercontent.com/d/ABC_1-x=w2000"
+
+    api = SiteAPI("https://kf.example", "k", session=Session(None))
+    try:
+        api.download({"name": "b.jpg", "url": "https://drive.google.com/thumbnail?id=ZZZ&sz=w2000"}, tmp_path / "d")
+        raise AssertionError("실패해야 함")
+    except SiteError as exc:
+        assert "웹페이지" in str(exc)
+    assert not (tmp_path / "d" / "b.jpg").exists()
