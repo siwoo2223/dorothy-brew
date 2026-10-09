@@ -290,3 +290,17 @@ def test_same_title_ignores_dash_and_space_differences():
     assert same_title("KF - 양승태", "KF - 양승태")
     assert not same_title("KF - 유니2", "KF - 유니")
     assert not same_title("671 KF - 짱구분식", "KF - 짱구분식")
+
+
+def test_same_title_ignores_spaces_around_dash():
+    from receivables.kakao_pc import same_title
+
+    assert same_title("KF-유진애견샵", "KF - 유진애견샵")
+    assert not same_title("KF-유진애견샵2", "KF - 유진애견샵")
+
+
+def test_search_queries_try_core_name():
+    from receivables.kakao_pc import search_queries
+
+    assert search_queries("KF - 유진애견샵") == ["KF - 유진애견샵", "유진애견샵", "KF-유진애견샵"]
+    assert search_queries("유니") == ["유니"]

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import random
+import re
 import unicodedata
 import struct
 import sys
@@ -45,13 +46,25 @@ class KakaoDriver(Protocol):
 
 def same_title(a: str, b: str) -> bool:
     """카톡 창 제목과 방 이름이 같은지. 한글 조합 방식·대시 모양(–, —, －)·띄어쓰기 차이는 같은 것으로 본다.
-    (글자 자체가 다르면 다른 방 - 엉뚱한 방에 보내지 않기 위해 그 이상은 느슨하게 보지 않는다)"""
+    2026-10-09 - 사이트에는 'KF - 유진애견샵', 실제 방은 'KF-유진애견샵'(띄어쓰기 없음)이라 못 보낸 일이 있어
+    띄어쓰기는 아예 무시한다. (글자 자체가 다르면 다른 방 - 엉뚱한 방에 보내지 않기 위해 그 이상은 느슨하게 보지 않는다)"""
     def norm(s: str) -> str:
         s = unicodedata.normalize("NFC", s or "")
         for d in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uff0d":
             s = s.replace(d, "-")
-        return " ".join(s.split())
+        return "".join(s.split())
     return norm(a) == norm(b)
+
+
+def search_queries(name: str) -> list[str]:
+    """카톡 검색창에 넣어 볼 검색어들. 먼저 방 이름 그대로, 못 찾으면 'KF -' 같은 앞머리를 뺀 핵심 이름으로.
+    카톡 검색은 띄어쓰기까지 맞아야 걸리므로 'KF - 유진애견샵' 으로는 'KF-유진애견샵' 방이 안 나온다."""
+    core = re.sub(r"^\s*KF\s*[-\u2010-\u2015\u2212\uff0d]\s*", "", unicodedata.normalize("NFC", name or ""), flags=re.I).strip()
+    out = [name]
+    for q in (core, name.replace(" ", "")):
+        if q and q not in out:
+            out.append(q)
+    return out
 
 
 class Win32KakaoDriver:
@@ -327,41 +340,63 @@ class Win32KakaoDriver:
         box, used = self._search_box(tab)
         main = win32gui.FindWindow(None, MAIN_TITLE)
         _keep_on_top(main, True)  # 검색 결과를 읽고 누르는 동안 가려지지 않게
+        chat, tried = 0, []
         try:
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
-            time.sleep(self.wait)
-            self._log(f"검색어 '{name}' 입력({used})")
-            results = self._search_list(main, used)
-            if self.find_mode == "keyboard":
-                chat, tried = self._open_by_keyboard(name, results, main, before)
-            else:
-                # 2026-10-09 - 글자 인식이 이름을 잘못 읽어('양승태'→'야승대', '유니'→'(20') 있는 방을 못 찾는 일이
-                # 있었다. 글자 인식으로 못 찾으면 검색 결과를 위에서부터 차례로 열어 창 제목으로 확인한다
-                # (검색어로 걸러진 결과라 대개 첫 줄이 맞는 방이고, 아니면 바로 닫는다).
-                try:
-                    chat, tried = self._open_by_ocr(name, results, before)
-                except ChatNotFound as exc:
-                    chat, tried = 0, []
-                    self._log(f"글자 인식으로 못 찾음({exc}) → 차례로 열어 확인")
-                if not chat:
-                    if tried:  # 글자 인식으로 연 방이 있었다면 검색 목록이 그대로인지 다시 입력해 둔다
-                        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
-                        time.sleep(0.3)
-                        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
-                        time.sleep(self.wait)
-                        results = self._search_list(main, used)
-                    chat, more = self._open_by_keyboard(name, results, main, before)
-                    tried += [t for t in more if t not in tried]
+            for query in search_queries(name):
+                chat, more = self._search_and_open(name, query, box, used, main, before)
+                tried += [t for t in more if t not in tried]
+                if chat:
+                    break
         finally:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
             _keep_on_top(main, False)
 
         if not chat:
             raise ChatNotFound(
-                f"검색 결과에 '{name}' 방이 없습니다(비슷한 방 {', '.join(repr(x) for x in tried)} 은 이름이 달라 닫음)"
+                f"검색 결과에 '{name}' 방이 없습니다"
+                + (f"(비슷한 방 {', '.join(repr(x) for x in tried)} 은 이름이 달라 닫음)" if tried
+                   else f"(검색어 {', '.join(repr(q) for q in search_queries(name))} 로 찾아봤지만 같은 이름의 방이 없음)")
             )
         self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
         return chat
+
+    def _search_and_open(self, name: str, query: str, box: int, used: str, main: int, before: dict[int, str]) -> tuple[int, list[str]]:
+        """검색창에 query 를 넣고 결과에서 창 제목이 name 과 같은 방을 연다. 반환: (창 또는 0, 열어 봤던 다른 방들)"""
+        win32api, win32con, _ = self._w()
+        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+        time.sleep(0.2)
+        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
+        time.sleep(self.wait)
+        self._log(f"검색어 '{query}' 입력({used})")
+        results = self._search_list(main, used)
+        if self.find_mode == "keyboard":
+            try:
+                return self._open_by_keyboard(name, results, main, before)
+            except ChatNotFound as exc:
+                self._log(f"못 찾음({exc})")
+                return 0, []
+        # 2026-10-09 - 글자 인식이 이름을 잘못 읽어('양승태'→'야승대', '유니'→'(20') 있는 방을 못 찾는 일이
+        # 있었다. 글자 인식으로 못 찾으면 검색 결과를 위에서부터 차례로 열어 창 제목으로 확인한다
+        # (검색어로 걸러진 결과라 대개 첫 줄이 맞는 방이고, 아니면 바로 닫는다).
+        try:
+            chat, tried = self._open_by_ocr(name, results, before)
+        except ChatNotFound as exc:
+            chat, tried = 0, []
+            self._log(f"글자 인식으로 못 찾음({exc}) → 차례로 열어 확인")
+        if chat:
+            return chat, tried
+        if tried:  # 글자 인식으로 연 방이 있었다면 검색 목록을 다시 띄운다
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+            time.sleep(0.3)
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
+            time.sleep(self.wait)
+            results = self._search_list(main, used)
+        try:
+            chat, more = self._open_by_keyboard(name, results, main, before)
+        except ChatNotFound as exc:
+            self._log(f"못 찾음({exc})")
+            chat, more = 0, []
+        return chat, tried + [t for t in more if t not in tried]
 
     def _post_enter(self, hwnd) -> None:
         """Enter 키 메시지를 정식 키 정보(스캔코드 0x1C)와 함께 보낸다."""
