@@ -43,6 +43,17 @@ class KakaoDriver(Protocol):
     def close_chat(self, chat: object) -> None: ...
 
 
+def same_title(a: str, b: str) -> bool:
+    """카톡 창 제목과 방 이름이 같은지. 한글 조합 방식·대시 모양(–, —, －)·띄어쓰기 차이는 같은 것으로 본다.
+    (글자 자체가 다르면 다른 방 - 엉뚱한 방에 보내지 않기 위해 그 이상은 느슨하게 보지 않는다)"""
+    def norm(s: str) -> str:
+        s = unicodedata.normalize("NFC", s or "")
+        for d in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uff0d":
+            s = s.replace(d, "-")
+        return " ".join(s.split())
+    return norm(a) == norm(b)
+
+
 class Win32KakaoDriver:
     """pywin32 로 PC 카카오톡 창에 직접 메시지를 보내는 드라이버 (Windows 전용)."""
 
@@ -184,9 +195,16 @@ class Win32KakaoDriver:
         main = win32gui.FindWindow(None, MAIN_TITLE)
         for _ in range(int(seconds / 0.2)):
             time.sleep(0.2)
-            chat = win32gui.FindWindow(None, name)  # 창 제목이 정확히 같은 채팅방만
-            if chat and chat != main:
+            chat = self._find_chat(name, main)  # 창 제목이 같은 채팅방만
+            if chat:
                 return chat
+        return 0
+
+    def _find_chat(self, name: str, main: int = 0) -> int:
+        """이미 떠 있는 카톡 창 중 제목이 방 이름과 같은 것."""
+        for h, title in self._kakao_windows().items():
+            if h != main and title != MAIN_TITLE and same_title(title, name):
+                return h
         return 0
 
     def _close_wrong(self, before: dict[int, str], name: str) -> str:
@@ -194,7 +212,7 @@ class Win32KakaoDriver:
         win32api, win32con, _ = self._w()
         wrong = ""
         for h, title in self._kakao_windows().items():
-            if h not in before and title not in (MAIN_TITLE, name):
+            if h not in before and title != MAIN_TITLE and not same_title(title, name):
                 wrong = wrong or title
                 win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
         return wrong
@@ -273,7 +291,7 @@ class Win32KakaoDriver:
                 break
             title = win32gui.GetWindowText(new[0]).strip()
             self._log(f"{i + 1}번째 줄 열림: '{title}'")
-            if title == name:
+            if same_title(title, name):
                 return new[0], tried
             for h in new:
                 win32api.PostMessage(h, win32con.WM_CLOSE, 0, 0)
@@ -301,8 +319,8 @@ class Win32KakaoDriver:
         self.trace = []
         tab = tab or self.search_tab
         before = self._kakao_windows()
-        already = win32gui.FindWindow(None, name)
-        if already and already != win32gui.FindWindow(None, MAIN_TITLE):
+        already = self._find_chat(name, win32gui.FindWindow(None, MAIN_TITLE))
+        if already:
             self._log(f"이미 열려 있는 채팅방 사용: '{name}'")
             return already
 
@@ -317,7 +335,23 @@ class Win32KakaoDriver:
             if self.find_mode == "keyboard":
                 chat, tried = self._open_by_keyboard(name, results, main, before)
             else:
-                chat, tried = self._open_by_ocr(name, results, before)
+                # 2026-10-09 - 글자 인식이 이름을 잘못 읽어('양승태'→'야승대', '유니'→'(20') 있는 방을 못 찾는 일이
+                # 있었다. 글자 인식으로 못 찾으면 검색 결과를 위에서부터 차례로 열어 창 제목으로 확인한다
+                # (검색어로 걸러진 결과라 대개 첫 줄이 맞는 방이고, 아니면 바로 닫는다).
+                try:
+                    chat, tried = self._open_by_ocr(name, results, before)
+                except ChatNotFound as exc:
+                    chat, tried = 0, []
+                    self._log(f"글자 인식으로 못 찾음({exc}) → 차례로 열어 확인")
+                if not chat:
+                    if tried:  # 글자 인식으로 연 방이 있었다면 검색 목록이 그대로인지 다시 입력해 둔다
+                        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+                        time.sleep(0.3)
+                        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, name)
+                        time.sleep(self.wait)
+                        results = self._search_list(main, used)
+                    chat, more = self._open_by_keyboard(name, results, main, before)
+                    tried += [t for t in more if t not in tried]
         finally:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
             _keep_on_top(main, False)

@@ -280,3 +280,13 @@ def test_drive_photo_falls_back_when_thumbnail_gives_web_page(tmp_path):
     except SiteError as exc:
         assert "웹페이지" in str(exc)
     assert not (tmp_path / "d" / "b.jpg").exists()
+
+
+def test_same_title_ignores_dash_and_space_differences():
+    from receivables.kakao_pc import same_title
+
+    assert same_title("KF – 짱구분식", "KF - 짱구분식")
+    assert same_title("KF  -  유니 ", "KF - 유니")
+    assert same_title("KF - 양승태", "KF - 양승태")
+    assert not same_title("KF - 유니2", "KF - 유니")
+    assert not same_title("671 KF - 짱구분식", "KF - 짱구분식")
