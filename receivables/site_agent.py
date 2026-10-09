@@ -186,6 +186,8 @@ class Agent:
         self.input_tick = input_tick
         self.need_idle = need_idle  # 사이트 설정(idle_seconds)이 오면 그 값으로 바뀐다. 0 이면 끔
         self.own_tick = 0           # 도우미가 마지막으로 키보드·마우스를 쓴 시각(이보다 뒤 입력 = 사람)
+        self.auto_update = True
+        self.update_requested = False
         self.waiting_logged = False
 
     def user_busy(self) -> bool:
@@ -212,6 +214,9 @@ class Agent:
         busy = self.user_busy()
         data = self.api.pull(info, busy=busy)
         settings = data.get("settings") or {}
+        # 자동 업데이트: 사이트 설정(auto_update) / 「지금 업데이트」 요청 - agent.py 가 묶음 사이에 처리한다
+        self.auto_update = str(settings.get("auto_update", "1")) != "0"
+        self.update_requested = self.update_requested or bool(data.get("update_request"))
         if str(settings.get("idle_seconds", "")).strip().isdigit():
             self.need_idle = float(settings["idle_seconds"])
             busy = self.user_busy()

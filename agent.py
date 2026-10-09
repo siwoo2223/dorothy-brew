@@ -18,10 +18,11 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from receivables import control, envfile, user_activity  # noqa: E402
+from receivables import control, envfile, self_update, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
-VERSION = "2026-10-08"
+VERSION = "2026-10-09"
+UPDATE_CHECK_SECONDS = 3600  # 새 버전 확인 간격
 POLL_SECONDS = 20
 LOG_FILE = ROOT / "logs" / "agent.log"
 STARTUP_NAME = "KF카톡발송도우미.bat"
@@ -129,14 +130,29 @@ def main(argv: list[str]) -> int:
     log(f"사이트 {url} 에 연결됐습니다. {POLL_SECONDS}초마다 보낼 메시지를 확인합니다. (끄려면 이 창을 닫으세요)")
     log("PC 를 쓰는 중에는 기다렸다가, 마우스·키보드를 잠시(기본 60초) 안 쓰면 보냅니다. 보내는 중에 손을 대면 바로 멈춥니다.")
     errors = 0
+    next_update_check = time.time() + 120  # 켠 직후 2분 뒤 한 번, 그 뒤로 1시간마다
     while True:
         try:
             control.clear_stop()
-            n = agent.tick(f"{platform.node()} · 도우미 {VERSION}")
+            ver = self_update.current_version(ROOT)[:7] or "?"
+            n = agent.tick(f"{platform.node()} · 도우미 {VERSION} ({ver})")
             errors = 0
             if n:
                 log("이번 묶음을 끝냈습니다.")
                 continue  # 남은 것이 있을 수 있으니 바로 다시 확인
+            # 보내는 일이 없을 때만 업데이트한다
+            if agent.update_requested or (agent.auto_update and time.time() >= next_update_check):
+                requested, agent.update_requested = agent.update_requested, False
+                next_update_check = time.time() + UPDATE_CHECK_SECONDS
+                try:
+                    if requested:
+                        log("관리자 페이지에서 업데이트를 요청했습니다. 새 버전을 확인합니다...")
+                    if self_update.update(ROOT, log):
+                        return self_update.RESTART_CODE  # 발송도우미.bat 이 바로 다시 켠다
+                    if requested:
+                        log("이미 최신 버전입니다.")
+                except Exception as exc:  # 업데이트 실패해도 발송은 계속
+                    log(f"업데이트 확인 실패(다음에 다시 시도): {exc}")
         except SiteError as exc:
             errors += 1
             if errors in (1, 5) or errors % 30 == 0:
