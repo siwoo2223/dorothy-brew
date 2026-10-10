@@ -92,6 +92,12 @@ class SiteAPI:
         if results:
             self._post({"action": "report", "results": results})
 
+    def lalamove_list(self) -> list[dict]:
+        return list(self._post({"action": "lalamove_list"}).get("items") or [])
+
+    def lalamove_done(self, shipment_id: int, link: str) -> bool:
+        return bool(self._post({"action": "lalamove_done", "id": shipment_id, "link": link}).get("changed"))
+
     def send_names(self, tab: str, exact: bool, names: list[str], error: str = "") -> None:
         self._post({"action": "names", "tab": tab, "exact": exact, "names": names, "error": error})
 
@@ -188,6 +194,7 @@ class Agent:
         self.own_tick = 0           # 도우미가 마지막으로 키보드·마우스를 쓴 시각(이보다 뒤 입력 = 사람)
         self.auto_update = True
         self.update_requested = False
+        self.lalamove_check = True
         self.waiting_logged = False
 
     def user_busy(self) -> bool:
@@ -216,6 +223,7 @@ class Agent:
         settings = data.get("settings") or {}
         # 자동 업데이트: 사이트 설정(auto_update) / 「지금 업데이트」 요청 - agent.py 가 묶음 사이에 처리한다
         self.auto_update = str(settings.get("auto_update", "1")) != "0"
+        self.lalamove_check = str(settings.get("lalamove_check", "1")) != "0"
         self.update_requested = self.update_requested or bool(data.get("update_request"))
         if str(settings.get("idle_seconds", "")).strip().isdigit():
             self.need_idle = float(settings["idle_seconds"])
@@ -279,6 +287,20 @@ class Agent:
             if i < len(messages) - 1:
                 self._wait(random.uniform(gap_min, gap_max))
         return len(messages)
+
+    def check_lalamove(self, reader) -> int:
+        """2026-10-10 - 라라무브 링크 화면이 'Completed' 인 송장을 사이트에 알려 배송완료로 바꾼다. 반환: 바꾼 수.
+        reader(links) -> {link: 'completed'|'ongoing'|'cancelled'|'unknown'} (receivables.lalamove.read_pages)"""
+        items = self.api.lalamove_list()
+        if not items:
+            return 0
+        states = reader([it["link"] for it in items])
+        done = 0
+        for it in items:
+            if states.get(it["link"]) == "completed" and self.api.lalamove_done(int(it["id"]), it["link"]):
+                done += 1
+                self.log(f"🛵 라라무브 배송 완료 확인: {it.get('tracking_no', '')} → 배송완료 (상태 안내로 고객에게 알림)")
+        return done
 
     def _send(self, sender, m: SiteMessage) -> SendResult:
         label = f"{'[테스트] ' if m.test else ''}{m.customer} → {m.room}"

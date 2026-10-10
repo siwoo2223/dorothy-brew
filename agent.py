@@ -18,11 +18,12 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from receivables import control, envfile, self_update, user_activity  # noqa: E402
+from receivables import control, envfile, lalamove, self_update, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
 VERSION = "2026-10-09"
 UPDATE_CHECK_SECONDS = 3600  # 새 버전 확인 간격
+LALAMOVE_CHECK_SECONDS = 900  # 라라무브 배송 완료 확인 간격(15분)
 POLL_SECONDS = 20
 LOG_FILE = ROOT / "logs" / "agent.log"
 STARTUP_NAME = "KF카톡발송도우미.bat"
@@ -131,6 +132,8 @@ def main(argv: list[str]) -> int:
     log("PC 를 쓰는 중에는 기다렸다가, 마우스·키보드를 잠시(기본 60초) 안 쓰면 보냅니다. 보내는 중에 손을 대면 바로 멈춥니다.")
     errors = 0
     next_update_check = time.time() + 120  # 켠 직후 2분 뒤 한 번, 그 뒤로 1시간마다
+    next_lalamove_check = time.time() + 60
+    lalamove_warned = False
     while True:
         try:
             control.clear_stop()
@@ -140,6 +143,17 @@ def main(argv: list[str]) -> int:
             if n:
                 log("이번 묶음을 끝냈습니다.")
                 continue  # 남은 것이 있을 수 있으니 바로 다시 확인
+            # 라라무브 배송 완료 확인(보내는 일이 없을 때, 15분마다)
+            if agent.lalamove_check and time.time() >= next_lalamove_check:
+                next_lalamove_check = time.time() + LALAMOVE_CHECK_SECONDS
+                try:
+                    agent.check_lalamove(lambda links: lalamove.read_pages(links, log))
+                except ImportError:
+                    if not lalamove_warned:
+                        log("라라무브 확인에 필요한 프로그램(playwright)이 아직 없습니다. 다음 업데이트 때 설치됩니다.")
+                        lalamove_warned = True
+                except Exception as exc:
+                    log(f"라라무브 확인 실패(다음에 다시 시도): {exc}")
             # 보내는 일이 없을 때만 업데이트한다
             if agent.update_requested or (agent.auto_update and time.time() >= next_update_check):
                 requested, agent.update_requested = agent.update_requested, False
