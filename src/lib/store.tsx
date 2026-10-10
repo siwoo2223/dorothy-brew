@@ -4,6 +4,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { Platform } from 'react-native';
 
 import { cancelReminder, scheduleReminder } from './notifications';
+import type { ModelChoice } from './assistant';
 import type { ChatTurn, Memory, Profile, Task } from './types';
 
 const KEYS = {
@@ -14,6 +15,7 @@ const KEYS = {
   briefingHour: 'dorothy.briefingHour',
   voiceOnOpen: 'dorothy.voiceOnOpen',
   workspaceId: 'dorothy.workspaceId',
+  model: 'dorothy.model',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
@@ -31,6 +33,8 @@ export type AppState = {
   apiKey: string;
   /** Needed only for organization-level API keys that aren't scoped to a workspace. */
   workspaceId: string;
+  /** Which Claude model answers: cheap Haiku by default, Opus for harder questions. */
+  model: ModelChoice;
   /** Hour (0-23) of the daily briefing notification, or null when off. */
   briefingHour: number | null;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
@@ -46,6 +50,7 @@ const initialState: AppState = {
   chat: [],
   apiKey: '',
   workspaceId: '',
+  model: 'haiku',
   briefingHour: null,
   voiceOnOpen: 'off',
 };
@@ -66,7 +71,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -75,6 +80,7 @@ function useStoreValue() {
         secret.get(API_KEY),
         AsyncStorage.getItem(KEYS.voiceOnOpen),
         AsyncStorage.getItem(KEYS.workspaceId),
+        AsyncStorage.getItem(KEYS.model),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -85,6 +91,7 @@ function useStoreValue() {
         voiceOnOpen: voiceOnOpen ? JSON.parse(voiceOnOpen) : 'off',
         apiKey: apiKey ?? '',
         workspaceId: workspaceId ? JSON.parse(workspaceId) : '',
+        model: model ? JSON.parse(model) : 'haiku',
       };
       setState(ref.current);
       setLoaded(true);
@@ -109,6 +116,7 @@ function useStoreValue() {
       setProfile: (profile: Profile) => update('profile', profile),
       setApiKey: (key: string) => update('apiKey', key.trim()),
       setWorkspaceId: (id: string) => update('workspaceId', id.trim()),
+      setModel: (model: ModelChoice) => update('model', model),
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
 

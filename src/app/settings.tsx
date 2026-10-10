@@ -48,6 +48,8 @@ export default function Settings() {
         <WorkspaceField />
       </Card>
 
+      <ModelCard />
+
       <VoiceCard />
 
       <GoogleCard />
@@ -85,6 +87,37 @@ export default function Settings() {
         />
       </Card>
     </ScrollView>
+  );
+}
+
+const MODEL_OPTIONS = [
+  { value: 'haiku', label: 'Haiku (추천)', note: '빠르고 아주 저렴해요. 일상 대화·할 일·기억에 충분해요.' },
+  { value: 'opus', label: 'Opus', note: '가장 똑똑하지만 약 40배 비싸요. 복잡한 고민이나 긴 글이 필요할 때만.' },
+] as const;
+
+function ModelCard() {
+  const t = useTheme();
+  const { state, actions } = useStore();
+  const current = MODEL_OPTIONS.find((o) => o.value === state.model) ?? MODEL_OPTIONS[0];
+  return (
+    <Card>
+      <Title>도로시의 두뇌 (모델)</Title>
+      <View style={styles.hours}>
+        {MODEL_OPTIONS.map((o) => {
+          const active = state.model === o.value;
+          return (
+            <Pressable
+              key={o.value}
+              onPress={() => actions.setModel(o.value)}
+              style={[styles.hour, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : 'transparent' }]}
+            >
+              <Text style={{ color: active ? t.accentText : t.text }}>{o.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Body muted>{current.note}</Body>
+    </Card>
   );
 }
 
