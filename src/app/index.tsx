@@ -7,6 +7,7 @@ import { briefing, describeError } from '../lib/assistant';
 import { CalendarEvent, connectedEmail, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { voiceInputAvailable } from '../lib/voice';
 
 function greeting(hour: number) {
   if (hour < 5) return '늦은 밤이에요';
@@ -114,7 +115,16 @@ export default function Today() {
         <Button label={brief ? '다시 브리핑 받기' : '브리핑 받기'} onPress={runBriefing} disabled={loading || !state.apiKey} />
       </Card>
 
-      <Button label="도로시에게 말 걸기 💬" variant="ghost" onPress={() => router.navigate('/chat')} />
+      <View style={styles.talkRow}>
+        <View style={{ flex: 1 }}>
+          <Button label="💬 글로 말 걸기" variant="ghost" onPress={() => router.navigate('/chat')} />
+        </View>
+        {voiceInputAvailable() && (
+          <View style={{ flex: 1 }}>
+            <Button label="🎙️ 말로 하기" onPress={() => router.navigate({ pathname: '/chat', params: { voice: '1' } })} disabled={!state.apiKey} />
+          </View>
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -135,4 +145,5 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', gap: 10 },
   stat: { flex: 1, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14, alignItems: 'center' },
   statValue: { fontSize: 24, fontWeight: '800' },
+  talkRow: { flexDirection: 'row', gap: 10 },
 });

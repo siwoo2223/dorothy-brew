@@ -32,6 +32,16 @@
         {
           "color": "#6C5CE7"
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "도로시에게 음성으로 말하려면 마이크가 필요해요.",
+          "speechRecognitionPermission": "말씀하신 내용을 글자로 바꾸려면 음성 인식이 필요해요.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
       ]
     ]
   }

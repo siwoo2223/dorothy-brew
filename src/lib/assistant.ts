@@ -265,14 +265,23 @@ export function describeError(error: unknown): string {
  * finishes, and returns her reply. Within the turn the message list is append-only, so thinking
  * blocks stay valid; only the final text is persisted between turns.
  */
-export async function chat(userText: string, state: AppState, actions: StoreActions): Promise<string> {
+export async function chat(userText: string, state: AppState, actions: StoreActions, opts: { spoken?: boolean } = {}): Promise<string> {
   const client = createClient(state.apiKey);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     ...history.map((t) => ({ role: t.role, content: t.text })),
-    { role: 'user', content: userText },
+    {
+      role: 'user',
+      content: opts.spoken
+        ? [
+            { type: 'text', text: userText },
+            // Only on the live turn; history keeps the plain text.
+            { type: 'text', text: '(음성으로 말한 메시지. 답은 소리 내어 읽히니 2~4문장 구어체로, 목록·표·이모지·링크 없이 답해 줘. 음성 인식 오타가 있을 수 있으니 뜻을 헤아려 줘.)' },
+          ]
+        : userText,
+    },
   ];
   const googleEmail = await google.connectedEmail();
   const tools = googleEmail ? [...TOOLS, ...GOOGLE_TOOLS] : TOOLS;

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -6,8 +7,9 @@ import { Input } from '../components/ui';
 import { chat, describeError } from '../lib/assistant';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
 
-const SUGGESTIONS = ['내일 아침 8시에 운동 알려줘', '나에 대해 뭘 알고 있어?', '오늘 서울 날씨 어때?', '이번 주에 놓친 거 있어?'];
+const SUGGESTIONS = ['내일 아침 8시에 운동 알려줘', '나에 대해 뭘 알고 있어?', '오늘 마닐라 날씨 어때?', '이번 주에 놓친 거 있어?'];
 
 export default function Chat() {
   const t = useTheme();
@@ -16,9 +18,39 @@ export default function Chat() {
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // Hands-free mode: Dorothy reads every reply aloud and starts listening again when she finishes.
+  const [voiceMode, setVoiceModeState] = useState(false);
+  const voiceModeRef = useRef(false);
+  const setVoiceMode = (on: boolean) => {
+    voiceModeRef.current = on;
+    setVoiceModeState(on);
+  };
   const list = useRef<FlatList>(null);
+  const router = useRouter();
+  const params = useLocalSearchParams<{ voice?: string }>();
+  const canListen = voiceInputAvailable();
 
-  const send = async (text: string) => {
+  // send is declared below and needs `voice`, so the recognizer reaches it through a ref.
+  const sendRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
+  const voice = useVoiceInput((text) => sendRef.current(text, true));
+  const listening = voice.state === 'listening';
+
+  // Opened from the home screen's mic button: start listening right away, once.
+  useFocusEffect(
+    useCallback(() => {
+      if (params.voice === '1' && canListen) {
+        router.setParams({ voice: undefined });
+        voice.start();
+      }
+      return () => {
+        stopSpeaking();
+        voice.cancel();
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [params.voice]),
+  );
+
+  const send = async (text: string, spoken = false) => {
     const message = text.trim();
     if (!message || busy) return;
     if (!state.apiKey) {
@@ -31,14 +63,23 @@ export default function Chat() {
     const snapshot = getState();
     actions.appendChat({ role: 'user', text: message });
     try {
-      const reply = await chat(message, snapshot, actions);
+      const reply = await chat(message, snapshot, actions, { spoken: spoken || voiceModeRef.current });
       actions.appendChat({ role: 'assistant', text: reply });
+      if (spoken || voiceModeRef.current) {
+        speak(reply, () => {
+          if (voiceModeRef.current) voice.start();
+        });
+      }
     } catch (e) {
       actions.appendChat({ role: 'assistant', text: `⚠️ ${describeError(e)}` });
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    sendRef.current = send;
+  });
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerHeight}>
@@ -78,12 +119,50 @@ export default function Chat() {
         }}
         ListFooterComponent={busy ? <ActivityIndicator style={{ alignSelf: 'flex-start', margin: 8 }} /> : null}
       />
+      {(voice.error || canListen) && (
+        <View style={[styles.voiceBar, { borderTopColor: t.border }]}>
+          {voice.error ? (
+            <Text style={{ color: t.danger, fontSize: 12, flex: 1 }}>{voice.error}</Text>
+          ) : (
+            <Text style={{ color: t.subtext, fontSize: 12, flex: 1 }}>
+              {listening ? '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요' : voiceMode ? '음성 대화 중 — 도로시가 답을 읽어 주고 다시 들어요' : '🎙️ 버튼을 누르고 말해 보세요'}
+            </Text>
+          )}
+          {canListen && (
+            <Pressable
+              onPress={() => {
+                const next = !voiceMode;
+                setVoiceMode(next);
+                if (next && !listening && !busy) voice.start();
+                if (!next) {
+                  stopSpeaking();
+                  voice.cancel();
+                }
+              }}
+              style={[styles.modePill, { borderColor: voiceMode ? t.accent : t.border, backgroundColor: voiceMode ? t.accent : 'transparent' }]}
+            >
+              <Text style={{ color: voiceMode ? t.accentText : t.text, fontSize: 12 }}>🔊 음성 대화</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
+        {canListen && (
+          <Pressable
+            onPress={listening ? voice.stop : voice.start}
+            disabled={busy}
+            accessibilityLabel={listening ? '말하기 끝내기' : '음성으로 말하기'}
+            style={[styles.mic, { backgroundColor: listening ? t.danger : t.card, borderColor: listening ? t.danger : t.border, opacity: busy ? 0.4 : 1 }]}
+          >
+            <Text style={{ fontSize: 18 }}>{listening ? '⏹' : '🎙️'}</Text>
+          </Pressable>
+        )}
         <Input
           style={{ flex: 1, maxHeight: 120 }}
-          value={draft}
+          value={listening ? voice.transcript : draft}
           onChangeText={setDraft}
-          placeholder="도로시에게 말하기…"
+          placeholder={listening ? '듣고 있어요…' : '도로시에게 말하기…'}
+          editable={!listening}
           multiline
           onSubmitEditing={() => send(draft)}
         />
@@ -111,5 +190,8 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '85%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   composer: { flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end' },
   send: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13 },
+  mic: { borderRadius: 12, borderWidth: 1, width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  voiceBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  modePill: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   clear: { position: 'absolute', top: 6, right: 12 },
 });
