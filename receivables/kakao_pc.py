@@ -72,7 +72,7 @@ def search_queries(name: str) -> list[str]:
 
 
 # 친구 탭 검색 결과의 머리말 줄('친구 1', '즐겨찾기' 등) - 사람 이름 줄이 아니다
-FRIEND_HEADER = re.compile(r"^(친구|즐겨찾기|내\s*프로필|채널|추천\s*친구|업데이트한\s*프로필|생일인\s*친구)\s*\d*$")
+FRIEND_HEADER = re.compile(r"^\W*(친\s*구|즐겨\s*찾기|내\s*프로필|채널|추천\s*친구|업데이트한\s*(프로필|친구)|생일인\s*친구)[\s\W\d]*$")
 
 
 def find_line(lines, want: str, exact: bool = False, below: float | None = None):
@@ -750,6 +750,9 @@ class Win32KakaoDriver:
                 # 메인 창의 친구 목록 자체를 걸러서 보여 준다 → 메인 창에서 검색칸 아래 글자를 읽어 그 이름 줄을 찾는다.
                 box_bottom = self._box_bottom(box)
                 titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
+            # 머리말('친구 1' 등)은 사람 줄이 아니다 - 처음부터 뺀다
+            titles = [x for x in titles if not FRIEND_HEADER.match(x.text.strip())]
+            self._log("친구 검색 결과 읽은 글자: " + " | ".join(x.text for x in titles[:6]))
             idx = pick_search_result(friend, [x.text for x in titles])
             if idx is None:
                 # 2026-10-10 - 'kflogistics' 는 검색 결과가 한 줄인데 이름 글자를 못 읽고 상태 메시지
@@ -765,9 +768,13 @@ class Win32KakaoDriver:
             # → 창으로 못 잡으면 누른 곳 주변 화면을 읽어 '프로필 전송' 글자를 찾는다. 이름 칸·줄 가운데 두 곳을 시도.
             from .kakao_names import ocr_rect
             ml, mt, mr, mb = win32gui.GetWindowRect(main)
+            # 2026-10-10 녹화 - '친구 1' 머리말 줄을 눌렀고, 메뉴를 닫으려고 누른 Esc 에 카톡 창이 숨어 두 번째 오른쪽
+            # 클릭이 바탕화면에 떨어졌다 → Esc 는 누르지 않고(뜬 메뉴 창만 닫음), 누르기 전에 카톡 창을 다시 앞으로.
             item, menu, seen = None, 0, []
-            for x in (row.x + min(row.w, 40) / 2, (ml + mr) / 2):
+            for x in (row.x + min(row.w, 80) / 2, row.x + row.w / 2):
+                win32gui.ShowWindow(main, win32con.SW_SHOWNORMAL)
                 _focus(main)
+                _keep_on_top(main, True)
                 before = self._kakao_windows()
                 self._click_at(x, row.y + row.h / 2, right=True)
                 menu = self._new_window(before, 2.0)
@@ -779,7 +786,8 @@ class Win32KakaoDriver:
                 item = find_line(lines, "프로필 전송")
                 if item:
                     break
-                self._key(win32con.VK_ESCAPE)  # 엉뚱한 메뉴가 떴으면 닫기
+                if menu and win32gui.IsWindow(menu):
+                    win32api.PostMessage(menu, win32con.WM_CLOSE, 0, 0)
                 time.sleep(0.4)
             if not item:
                 raise RuntimeError(f"오른쪽 클릭 메뉴에서 '프로필 전송'을 찾지 못했습니다(누른 줄: '{row.text}', 읽은 글자: {', '.join(seen[:8])})")
@@ -932,11 +940,14 @@ class Win32KakaoDriver:
             win32api.PostMessage(dialog, win32con.WM_CLOSE, 0, 0)
             raise RuntimeError("파일 선택 창의 '파일 이름' 칸을 찾지 못했습니다")
         open_btn = win32gui.GetDlgItem(dialog, 1)  # '열기' 버튼(IDOK)
-        # ② 폴더로 이동: 파일 이름 칸에 폴더 경로를 넣고 열기
-        win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, str(folder))
-        time.sleep(0.3)
-        win32api.SendMessage(open_btn, win32con.BM_CLICK, 0, 0)
-        time.sleep(1.2)
+        # ② 폴더로 이동: 2026-10-10 요청 - "주소를 검색하는 거 파일 이름에 주소를 넣고 있어": 위쪽 주소 칸(Alt+D)에
+        # 폴더 경로를 넣고 Enter. 주소 칸으로 못 옮겼을 때만 예전처럼 파일 이름 칸으로 이동한다.
+        if not self._dialog_goto(dialog, folder):
+            self._log("주소 칸으로 폴더를 옮기지 못해 파일 이름 칸으로 이동")
+            win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, str(folder))
+            time.sleep(0.3)
+            win32api.SendMessage(open_btn, win32con.BM_CLICK, 0, 0)
+            time.sleep(1.2)
         # ③ 사진 전부 선택: "01.jpg" "02.jpg" … 를 넣고 열기
         edit = self._dialog_filename_edit(dialog) or edit
         win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, " ".join(f'"{n}"' for n in names))
@@ -962,6 +973,43 @@ class Win32KakaoDriver:
                 self._key(win32con.VK_RETURN)
             time.sleep(1.0)
         time.sleep(3.0 + 0.7 * len(names))  # 올라가는 시간(닫을 때도 다 올라갈 때까지 기다림)
+
+    def _dialog_address(self, dialog: int) -> str:
+        """파일 선택 창 위쪽 주소 줄의 글자('주소: C:\…')."""
+        _, _, win32gui = self._w()
+        found = []
+
+        def visit(h, _):
+            if win32gui.GetClassName(h) == "ToolbarWindow32":
+                t = win32gui.GetWindowText(h)
+                if t.startswith(("주소", "Address")):
+                    found.append(t)
+            return True
+
+        try:
+            win32gui.EnumChildWindows(dialog, visit, None)
+        except Exception:
+            pass
+        return found[0] if found else ""
+
+    def _dialog_goto(self, dialog: int, folder) -> bool:
+        """파일 선택 창의 주소 칸(Alt+D)에 폴더 경로를 넣고 Enter. 옮겨졌으면 True."""
+        from .kakao_names import _focus
+
+        _, win32con, win32gui = self._w()
+        _focus(dialog)
+        if win32gui.GetForegroundWindow() != dialog:
+            return False
+        self._key(win32con.VK_MENU, ord("D"))
+        time.sleep(0.4)
+        self._paste_text(str(folder))
+        self._key(win32con.VK_RETURN)
+        time.sleep(1.2)
+        addr = self._dialog_address(dialog)
+        ok = Path(str(folder)).name.lower() in addr.lower()
+        if ok:
+            self._log("파일 선택 창 주소 칸에서 사진 폴더로 이동")
+        return ok
 
     def _file_dialog(self, before: dict[int, str], seconds: float) -> int:
         """새로 뜬 윈도우 파일 선택 창(#32770)."""
