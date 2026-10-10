@@ -3,8 +3,28 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as google from './google';
 import type { AppState, StoreActions } from './store';
 
-const MODEL = 'claude-opus-5-5';
-const BETAS: Anthropic.AnthropicBeta[] = ['server-side-fallback-2026-07-01'];
+export type ModelChoice = 'haiku' | 'opus';
+
+/**
+ * Haiku is the everyday default: roughly 40x cheaper than Opus and good enough for a personal assistant.
+ * Opus supports server-side refusal fallbacks and the newer web search tool; Haiku 5.5 has no
+ * fallback (sending `fallbacks` with a model list is a 400) and uses the basic web search tool.
+ */
+const MODELS = {
+  haiku: { id: 'claude-haiku-5-5', fallback: false, webSearch: 'web_search_20250305' },
+  opus: { id: 'claude-opus-5-5', fallback: true, webSearch: 'web_search_20260209' },
+} as const;
+
+function modelParams(choice: ModelChoice) {
+  const m = MODELS[choice] ?? MODELS.haiku;
+  return m.fallback
+    ? { model: m.id, betas: ['server-side-fallback-2026-07-01'] as Anthropic.AnthropicBeta[], fallbacks: 'default' as const }
+    : { model: m.id };
+}
+
+function webSearchTool(choice: ModelChoice, maxUses: number): Anthropic.Beta.BetaToolUnion {
+  return { type: (MODELS[choice] ?? MODELS.haiku).webSearch, name: 'web_search', max_uses: maxUses };
+}
 const HISTORY_TURNS = 40;
 const MAX_TOOL_ROUNDS = 8;
 
@@ -77,7 +97,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       additionalProperties: false,
     },
   },
-  { type: 'web_search_20260209', name: 'web_search', max_uses: 5 },
 ];
 
 const ISO_DESC = '현지 시간대 오프셋을 포함한 ISO 8601 시각(예: 2026-10-10T08:00:00+09:00)';
@@ -239,9 +258,14 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
   }
 }
 
-function createClient(apiKey: string) {
+function createClient({ apiKey, workspaceId }: Pick<AppState, 'apiKey' | 'workspaceId'>) {
   // The key lives only on this device (SecureStore). Fine for a personal app; put a backend in front before sharing it.
-  return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  return new Anthropic({
+    apiKey,
+    dangerouslyAllowBrowser: true,
+    // Organization-level keys must name the workspace to bill on every request.
+    defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined,
+  });
 }
 
 function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
@@ -254,6 +278,12 @@ function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
 
 export function describeError(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) return 'API 키가 올바르지 않아요. 설정에서 키를 확인해 주세요.';
+  if (error instanceof Anthropic.BadRequestError && /credit balance/i.test(error.message)) {
+    return 'Claude API 크레딧이 부족해요. platform.claude.com → Billing(Plans & Billing)에서 크레딧을 충전하면 바로 다시 대화할 수 있어요.';
+  }
+  if (error instanceof Anthropic.BadRequestError && /workspace/i.test(error.message)) {
+    return '이 API 키는 워크스페이스에 연결되어 있지 않아요. Claude 콘솔에서 워크스페이스를 골라 새 키를 만들거나, 설정의 "워크스페이스 ID" 칸에 워크스페이스 ID(wrkspc_로 시작)를 넣어 주세요.';
+  }
   if (error instanceof Anthropic.RateLimitError) return '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.';
   if (error instanceof Anthropic.APIConnectionError) return '네트워크에 연결할 수 없어요.';
   if (error instanceof Anthropic.APIError) return `오류가 발생했어요 (${error.status}): ${error.message}`;
@@ -266,7 +296,7 @@ export function describeError(error: unknown): string {
  * blocks stay valid; only the final text is persisted between turns.
  */
 export async function chat(userText: string, state: AppState, actions: StoreActions, opts: { spoken?: boolean } = {}): Promise<string> {
-  const client = createClient(state.apiKey);
+  const client = createClient(state);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
 
@@ -284,7 +314,7 @@ export async function chat(userText: string, state: AppState, actions: StoreActi
     },
   ];
   const googleEmail = await google.connectedEmail();
-  const tools = googleEmail ? [...TOOLS, ...GOOGLE_TOOLS] : TOOLS;
+  const tools = [...TOOLS, webSearchTool(state.model, 5), ...(googleEmail ? GOOGLE_TOOLS : [])];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
     { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
     { type: 'text', text: buildContext(state, googleEmail) },
@@ -293,10 +323,8 @@ export async function chat(userText: string, state: AppState, actions: StoreActi
   const replies: string[] = [];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await client.beta.messages.create({
-      model: MODEL,
+      ...modelParams(state.model),
       max_tokens: 16000,
-      betas: BETAS,
-      fallbacks: 'default',
       output_config: { effort: 'medium' },
       system,
       tools,
@@ -331,7 +359,7 @@ export async function chat(userText: string, state: AppState, actions: StoreActi
 
 /** A short morning briefing built from tasks and memories, with live info (weather, news) when useful. */
 export async function briefing(state: AppState): Promise<string> {
-  const client = createClient(state.apiKey);
+  const client = createClient(state);
   const googleEmail = await google.connectedEmail();
   let googleData = '';
   if (googleEmail) {
@@ -365,13 +393,11 @@ export async function briefing(state: AppState): Promise<string> {
   const parts: string[] = [];
   for (let round = 0; round < 4; round++) {
     const response = await client.beta.messages.create({
-      model: MODEL,
+      ...modelParams(state.model),
       max_tokens: 8000,
-      betas: BETAS,
-      fallbacks: 'default',
       output_config: { effort: 'low' },
       system,
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+      tools: [webSearchTool(state.model, 3)],
       messages,
     });
     if (response.stop_reason === 'refusal') return '브리핑을 만들지 못했어요.';
