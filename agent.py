@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from receivables import control, envfile, lalamove, self_update, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
-VERSION = "2026-10-10c"
+VERSION = "2026-10-10d"
 UPDATE_CHECK_SECONDS = 3600  # 새 버전 확인 간격
 LALAMOVE_CHECK_SECONDS = 900  # 라라무브 배송 완료 확인 간격(15분)
 POLL_SECONDS = 20
@@ -108,19 +108,38 @@ def main(argv: list[str]) -> int:
         install_startup()
         return 0
     url, token = setup()
-    try:
-        api = SiteAPI(url, token)
-        api.pull(f"{platform.node()} · 도우미 {VERSION} · 시작")
-    except (ValueError, SiteError) as exc:
-        log(f"연결 실패: {exc}")
-        if "연결 키" in str(exc):
-            envfile.set_values(ROOT / ".env", {"KF_AGENT_TOKEN": ""})
-            print("다음에 실행하면 연결 키를 다시 물어봅니다.")
-        elif "getaddrinfo" in str(exc) or "NameResolution" in str(exc) or "찾지 못했습니다" in str(exc):
-            envfile.set_values(ROOT / ".env", {"KF_SITE_URL": ""})
-            print("사이트 주소가 잘못된 것 같습니다. 다음에 실행하면 사이트 주소를 다시 물어봅니다.")
-        ask("Enter 를 누르면 닫힙니다.")
-        return 1
+    # 2026-10-10 - "컴퓨터가 껐다 켜질 때 계속 (처음 설정이) 나오는데": PC 를 켠 직후엔 인터넷이 아직 안 붙어
+    # 첫 연결이 '주소를 찾지 못함'(getaddrinfo)으로 실패하고, 그걸 '사이트 주소가 틀림'으로 보고 주소를 지웠다.
+    # → 인터넷 연결 실패는 지우지 않고 기다렸다가 다시 시도한다. 한 번이라도 연결된 적이 있으면 주소·키를 지우지 않는다.
+    connected_before = os.getenv("KF_CONNECTED", "") == "1"
+    waited = 0
+    while True:
+        try:
+            api = SiteAPI(url, token)
+            api.pull(f"{platform.node()} · 도우미 {VERSION} · 시작")
+            break
+        except (ValueError, SiteError) as exc:
+            msg = str(exc)
+            if msg.startswith("사이트에 연결하지 못했습니다") and waited < 1800:
+                if waited == 0:
+                    log("인터넷이 아직 연결되지 않은 것 같습니다. 연결될 때까지 30초마다 다시 시도합니다...")
+                time.sleep(30)
+                waited += 30
+                continue
+            log(f"연결 실패: {exc}")
+            if connected_before:
+                log("전에는 연결됐던 설정이라 그대로 두고 잠시 뒤 다시 시도합니다.")
+                return 1  # 발송도우미.bat 이 30초 뒤 다시 켠다
+            if "연결 키" in msg:
+                envfile.set_values(ROOT / ".env", {"KF_AGENT_TOKEN": ""})
+                print("다음에 실행하면 연결 키를 다시 물어봅니다.")
+            elif "기능을 찾지 못했습니다" in msg:
+                envfile.set_values(ROOT / ".env", {"KF_SITE_URL": ""})
+                print("사이트 주소가 잘못된 것 같습니다. 다음에 실행하면 사이트 주소를 다시 물어봅니다.")
+            ask("Enter 를 누르면 닫힙니다.")
+            return 1
+    if not connected_before:
+        envfile.set_values(ROOT / ".env", {"KF_CONNECTED": "1"})
 
     if sys.platform != "win32":
         log("이 도우미는 카카오톡이 설치된 Windows PC 에서만 보낼 수 있습니다.")
