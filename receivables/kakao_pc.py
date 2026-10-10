@@ -31,6 +31,10 @@ CLASS_CHILD = "EVA_ChildWindow"
 CLASS_PANEL = "EVA_Window"
 CLASS_SEARCH = "Edit"
 CLASS_INPUT = "RichEdit50W"
+# 새 카톡 화면: 검색칸이 따로 창(Edit)이 아니라 화면을 눌러 입력하는 칸일 때의 표시
+VIRTUAL_BOX = -1
+# 2026-10-10 - 카톡 메인 창을 이 크기로 맞춘 뒤 검색 버튼을 찾는다(진단에 찍힌 지금 크기)
+KAKAO_MAIN_SIZE = (510, 642)
 
 
 class ChatNotFound(Exception):
@@ -186,50 +190,151 @@ class Win32KakaoDriver:
             time.sleep(0.5)
             box = visible(tab) or self._open_search(main, tab, visible) or visible(other)
             if box:
-                return box, (tab if box == self._panel_box(main, tab) else other)
+                return box, (tab if box in (VIRTUAL_BOX, self._panel_box(main, tab)) else other)
         raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창이 열려 있고 잠금 화면이 아닌지 확인한 뒤 "
                            "'채팅' 탭을 한 번 눌러 두세요. [진단: " + self._diagnose(main) + "]")
 
     def _open_search(self, main: int, tab: str, visible) -> int:
-        """목록 위 🔍(검색) 아이콘을 눌러 숨은 검색칸을 연다. 단축키 Ctrl+F → 안 되면 아이콘 위치 클릭.
-        아이콘은 '채팅 ▾' 제목 줄 오른쪽 끝 세 아이콘(🔍, 오픈채팅, 새 채팅) 중 맨 왼쪽."""
-        from .kakao_names import _focus, _press, ocr_all_lines
+        """새 카톡 화면의 목록 검색칸을 연다.
+
+        2026-10-10 요청 - "사이즈 먼저 확정하고 검색 버튼을 찾아야 할 것 같아 / 빨간 박스에서 마우스가 왔다갔다":
+        창 크기에 따라 🔍 위치가 달라져 정해진 거리로 누르면 빗나갔고, 새 검색칸은 예전 입력칸(Edit)이 아니라
+        열려도 '못 열었다'고 보고 계속 눌렀다. →
+          1) 카톡 창 크기를 정해진 크기로 맞춘다
+          2) 이미 검색칸('채팅방, 참여자 검색')이 보이면 그 칸을 쓴다(화면 글자로 확인)
+          3) 아니면 Ctrl+F, 그래도 아니면 제목 줄 오른쪽 아이콘 셋(🔍·오픈채팅·새 채팅)을 화면 그림에서 찾아 🔍 를 누른다
+        반환: 예전 입력칸 창 번호, 또는 VIRTUAL_BOX(화면의 검색칸을 눌러 붙여넣기로 입력)."""
+        from .kakao_names import _focus, _press
 
         _, win32con, win32gui = self._w()
+        self._fix_size(main)
+        box = visible(tab) or self._find_search_field(main, tab)
+        if box:
+            return box
         _focus(main)
         if win32gui.GetForegroundWindow() == main:
             _press(win32con.VK_CONTROL, ord("F"))
-            time.sleep(0.6)
-            box = visible(tab)
+            time.sleep(0.8)
+            box = visible(tab) or self._find_search_field(main, tab)
             if box:
                 self._log("검색칸을 열었습니다(Ctrl+F)")
                 return box
-        try:
-            import ctypes
-            scale = ctypes.windll.user32.GetDpiForWindow(main) / 96.0
-        except Exception:
-            scale = 1.0
-        left, top, right, _b = win32gui.GetWindowRect(main)
-        # 제목('채팅'/'친구') 글자 줄 높이에 맞춰 누른다. 못 읽으면 창 위에서 약 57px.
-        y = top + 57 * scale
-        try:
-            head = find_line(ocr_all_lines(main), "채팅" if tab == "chats" else "친구", exact=False)
-            if head and head.y - top < 120 * scale:
-                y = head.y + head.h / 2
-        except Exception:
-            pass
-        for dx in (111, 104, 118, 126):  # 오른쪽 끝에서 🔍 까지(오픈채팅 아이콘은 약 72 - 그보다 멀리만 누른다)
+        icon = self._find_search_icon(main, tab)
+        if icon:
             before = self._kakao_windows()
             _focus(main)
-            self._click_at(right - dx * scale, y)
-            time.sleep(0.6)
+            self._click_at(*icon)
+            time.sleep(0.8)
             for h in set(self._kakao_windows()) - set(before):  # 다른 창이 뜨면 닫는다
                 win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
-            box = visible(tab)
+            box = visible(tab) or self._find_search_field(main, tab)
             if box:
                 self._log("목록 위 🔍 아이콘을 눌러 검색칸을 열었습니다")
                 return box
         return 0
+
+    def _fix_size(self, main: int) -> None:
+        """카톡 메인 창을 정해진 크기로(위치는 그대로). 최대화돼 있으면 먼저 원래 크기로."""
+        _, win32con, win32gui = self._w()
+        try:
+            if win32gui.IsZoomed(main):
+                win32gui.ShowWindow(main, win32con.SW_RESTORE)
+                time.sleep(0.4)
+            left, top, right, bottom = win32gui.GetWindowRect(main)
+            w, h = KAKAO_MAIN_SIZE
+            if abs((right - left) - w) > 8 or abs((bottom - top) - h) > 8:
+                win32gui.SetWindowPos(main, 0, left, top, w, h, win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                time.sleep(0.6)
+                self._log(f"카톡 창 크기를 {w}x{h} 로 맞춤(전: {right - left}x{bottom - top})")
+        except Exception as exc:
+            self._log(f"카톡 창 크기를 맞추지 못함: {exc}")
+
+    def _find_search_field(self, main: int, tab: str) -> int:
+        """화면에 새 검색칸('채팅방, 참여자 검색' 등)이 보이면 그 위치를 기억하고 VIRTUAL_BOX, 아니면 0."""
+        from .kakao_names import ocr_all_lines
+
+        _, _, win32gui = self._w()
+        try:
+            lines = ocr_all_lines(main)
+        except Exception:
+            return 0
+        _l, top, _r, bottom = win32gui.GetWindowRect(main)
+        upper = top + (bottom - top) * 0.35
+        hit = None
+        for ln in lines:
+            t = re.sub(r"\s+", "", ln.text)
+            if ln.y > upper or "검색" not in t or t == "통합검색":
+                continue
+            if any(k in t for k in ("참여자", "채팅방", "이름", "친구", "검색")):
+                hit = ln
+                break
+        if not hit:
+            return 0
+        self._search_pt = (hit.x + min(hit.w, 60) / 2, hit.y + hit.h / 2)
+        self._search_bottom = hit.y + hit.h + 8
+        self._log(f"화면의 검색칸 사용('{hit.text}')")
+        return VIRTUAL_BOX
+
+    def _find_search_icon(self, main: int, tab: str):
+        """제목 줄 오른쪽의 아이콘 셋(🔍, 오픈채팅, 새 채팅)을 화면 그림에서 찾아 🔍 가운데 좌표를 돌려준다."""
+        from PIL import ImageGrab
+
+        from .kakao_names import _dpi_aware, ocr_all_lines
+
+        _, _, win32gui = self._w()
+        _dpi_aware()
+        left, top, right, bottom = win32gui.GetWindowRect(main)
+        try:
+            scale = __import__("ctypes").windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        cy, title_right = top + 57 * scale, left + (right - left) * 0.4
+        try:
+            head = find_line(ocr_all_lines(main), "채팅" if tab == "chats" else "친구")
+            if head and head.y - top < 140 * scale:
+                cy, title_right = head.y + head.h / 2, head.x + head.w + 20 * scale
+        except Exception:
+            pass
+        band = int(12 * scale)
+        img = ImageGrab.grab(bbox=(int(title_right), int(cy - band), right, int(cy + band)), all_screens=True).convert("L")
+        w, h = img.size
+        px = img.load()
+        dark = [any(px[x, y] < 110 for y in range(h)) for x in range(w)]
+        clusters, run = [], None  # 어두운 세로줄 묶음 = 아이콘
+        gap = int(5 * scale)
+        for x, d in enumerate(dark):
+            if d:
+                if run and x - run[1] <= gap:
+                    run[1] = x
+                else:
+                    run = [x, x]
+                    clusters.append(run)
+        clusters = [c for c in clusters if c[1] - c[0] >= 4 * scale]
+        if len(clusters) < 3:
+            self._log(f"🔍 아이콘을 화면에서 찾지 못함(아이콘 {len(clusters)}개)")
+            return None
+        c = clusters[-3]  # 오른쪽에서 셋째 = 🔍
+        return int(title_right) + (c[0] + c[1]) / 2, cy
+
+    def _set_search(self, box: int, text: str) -> None:
+        """검색칸에 글자 넣기(빈 글자면 지우기). 예전 입력칸은 바로 넣고, 새 화면 검색칸은 눌러서 붙여넣는다."""
+        win32api, win32con, _ = self._w()
+        if box != VIRTUAL_BOX:
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, text)
+            return
+        from .kakao_names import _focus
+
+        _focus(self._main())
+        self._click_at(*self._search_pt)
+        time.sleep(0.2)
+        self._key(win32con.VK_CONTROL, ord("A"))
+        self._key(win32con.VK_DELETE)
+        if text:
+            self._paste_text(text)
+
+    def _box_bottom(self, box: int) -> float:
+        _, _, win32gui = self._w()
+        return self._search_bottom if box == VIRTUAL_BOX else win32gui.GetWindowRect(box)[3]
 
     def _diagnose(self, main: int) -> str:
         """검색칸을 못 찾았을 때 원인을 알 수 있게 메인 창 상태를 짧게 적는다."""
@@ -534,23 +639,23 @@ class Win32KakaoDriver:
                 if chat:
                     break
         finally:
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
+            self._set_search(box, "")  # 검색어 지우기
             _keep_on_top(main, False)
         return chat, tried
 
     def _search_and_open(self, name: str, query: str, box: int, used: str, main: int, before: dict[int, str]) -> tuple[int, list[str]]:
         """검색창에 query 를 넣고 결과에서 창 제목이 name 과 같은 방을 연다. 반환: (창 또는 0, 열어 봤던 다른 방들)"""
         win32api, win32con, win32gui = self._w()
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+        self._set_search(box, "")
         time.sleep(0.2)
-        win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
+        self._set_search(box, query)
         time.sleep(self.wait)
         self._log(f"검색어 '{query}' 입력({used})")
         results = self._search_list(main, used)
         if not results:
             # 2026-10-10 - 새 카톡 화면은 검색 결과를 따로 목록 창에 띄우지 않을 수 있다 → 메인 창의 검색칸 아래를 읽는다
             results = main
-            self._results_below = win32gui.GetWindowRect(box)[3] + 2
+            self._results_below = self._box_bottom(box) + 2
             self._log("검색 결과 목록 창이 없어 메인 창에서 검색칸 아래 글자를 읽습니다")
         else:
             self._results_below = None
@@ -571,9 +676,9 @@ class Win32KakaoDriver:
         if chat:
             return chat, tried
         if tried:  # 글자 인식으로 연 방이 있었다면 검색 목록을 다시 띄운다
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
+            self._set_search(box, "")
             time.sleep(0.3)
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
+            self._set_search(box, query)
             time.sleep(self.wait)
             results = self._search_list(main, used) or main
         try:
@@ -633,7 +738,7 @@ class Win32KakaoDriver:
             box = visible_box("friends") or self._open_search(main, "friends", visible_box)
             if not box:
                 raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다 [진단: " + self._diagnose(main) + "]")
-            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, friend)
+            self._set_search(box, friend)
             time.sleep(self.wait)
             results = self._search_list(main, "friends")
             if results:
@@ -641,7 +746,7 @@ class Win32KakaoDriver:
             else:
                 # 2026-10-10 - "kflogistics 검색 결과가 보이지 않습니다": 친구 탭은 검색 결과를 따로 목록 창에 띄우지 않고
                 # 메인 창의 친구 목록 자체를 걸러서 보여 준다 → 메인 창에서 검색칸 아래 글자를 읽어 그 이름 줄을 찾는다.
-                _bl, _bt, _br, box_bottom = win32gui.GetWindowRect(box)
+                box_bottom = self._box_bottom(box)
                 titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
             idx = pick_search_result(friend, [x.text for x in titles])
             if idx is None:
