@@ -259,6 +259,9 @@ function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
 
 export function describeError(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) return 'API 키가 올바르지 않아요. 설정에서 키를 확인해 주세요.';
+  if (error instanceof Anthropic.BadRequestError && /credit balance/i.test(error.message)) {
+    return 'Claude API 크레딧이 부족해요. platform.claude.com → Billing(Plans & Billing)에서 크레딧을 충전하면 바로 다시 대화할 수 있어요.';
+  }
   if (error instanceof Anthropic.BadRequestError && /workspace/i.test(error.message)) {
     return '이 API 키는 워크스페이스에 연결되어 있지 않아요. Claude 콘솔에서 워크스페이스를 골라 새 키를 만들거나, 설정의 "워크스페이스 ID" 칸에 워크스페이스 ID(wrkspc_로 시작)를 넣어 주세요.';
   }
