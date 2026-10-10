@@ -318,6 +318,9 @@ class FakeKakaoProfile(FakeKakao):
     def send_image(self, chat, path):
         self.order.append("image")
 
+    def send_files(self, chat, files):
+        self.order.append(f"album{len(files)}")
+
     def send_profile(self, friend, room):
         self.order.append("profile")
         self.profiles.append((friend, room))
@@ -338,7 +341,7 @@ def test_ad_sends_photo_then_text_then_profiles(tmp_path):
     kakao = FakeKakaoProfile({"필리핀 세부 자유여행 시즌2"})
     agent = make_agent(api, kakao, tmp_path)
     agent.tick()
-    assert kakao.order == ["image", "text", "profile", "profile"]
+    assert kakao.order == ["album1", "text", "profile", "profile"]  # 광고 사진은 묶음(앨범)으로
     assert kakao.profiles == [("kflogistics", "필리핀 세부 자유여행 시즌2"), ("양수경 대리님", "필리핀 세부 자유여행 시즌2")]
     assert api.status() == {1: "sent"}
 

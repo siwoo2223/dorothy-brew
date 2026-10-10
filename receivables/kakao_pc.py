@@ -925,10 +925,16 @@ class KakaoPCSender:
         photos = [a for a in m.attachments if is_image(a)]
         others = [a for a in m.attachments if a not in photos]
         parts = []
+        if photos and not m.merge_photos:
+            # 2026-10-10 요청 - 광고 사진은 카톡 '사진 묶음'(바둑판 앨범)으로: 여러 장을 한 번에 붙여넣으면 카톡이 묶어서 보낸다.
+            # (이어 붙인 세로 그림이 아니라) 카톡 한 번에 최대 30장이라 30장씩 나눈다.
+            for i in range(0, len(photos), 30):
+                self.driver.send_files(chat, photos[i:i + 30])
+            parts.append(f"사진 {len(photos)}장 묶음")
+            photos = []
         if photos and hasattr(self.driver, "send_image"):
             try:
-                merged = (merge_photos(photos, Path(photos[0]).parent / "_merged", stem="입고사진") if m.merge_photos
-                          else [Path(p) for p in photos])  # 광고 사진은 한 장씩 그대로
+                merged = merge_photos(photos, Path(photos[0]).parent / "_merged", stem="입고사진")
             except ImportError:  # Pillow 가 없으면 파일로라도 보낸다
                 merged = []
             if merged:
