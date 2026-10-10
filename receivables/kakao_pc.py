@@ -509,12 +509,16 @@ class Win32KakaoDriver:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, friend)
             time.sleep(self.wait)
             results = self._search_list(main, "friends")
-            if not results:
-                raise RuntimeError(f"친구 목록에서 '{friend}' 검색 결과가 보이지 않습니다")
-            titles = _ocr_screen(results)()
+            if results:
+                titles = _ocr_screen(results)()
+            else:
+                # 2026-10-10 - "kflogistics 검색 결과가 보이지 않습니다": 친구 탭은 검색 결과를 따로 목록 창에 띄우지 않고
+                # 메인 창의 친구 목록 자체를 걸러서 보여 준다 → 메인 창에서 검색칸 아래 글자를 읽어 그 이름 줄을 찾는다.
+                _bl, _bt, _br, box_bottom = win32gui.GetWindowRect(box)
+                titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
             idx = pick_search_result(friend, [x.text for x in titles])
             if idx is None:
-                raise RuntimeError(f"친구 목록에 '{friend}' 이(가) 없습니다(읽은 이름: {', '.join(x.text for x in titles[:5])})")
+                raise RuntimeError(f"친구 목록에 '{friend}' 이(가) 없습니다(읽은 글자: {', '.join(x.text for x in titles[:6])})")
             row = titles[idx]
             before = self._kakao_windows()
             self._click_at(row.x + min(row.w, 40) / 2, row.y + row.h / 2, right=True)
@@ -753,13 +757,34 @@ class Win32KakaoDriver:
         if box:  # 입력칸을 눌러 커서를 둔다 (가려져 있으면 누르지 않음)
             self._click(box, chat)
         self._guard(chat)
+        before = self._kakao_windows()
         self._key(win32con.VK_CONTROL, ord("V"))
         time.sleep(2.0)
-        import win32process
-        fg = win32gui.GetForegroundWindow()
-        if not fg or win32process.GetWindowThreadProcessId(fg)[1] != win32process.GetWindowThreadProcessId(chat)[1]:
-            raise RuntimeError("전송 확인 창이 카카오톡 창이 아니어서 Enter 를 누르지 않았습니다")
-        self._key(win32con.VK_RETURN)  # '전송' 확인 창
+        # 2026-10-10 - "사진도 한번에 안올라갔어": 여러 장을 붙여넣으면 카톡이 '전송' 확인 창을 띄우는데, Enter 만으로는
+        # 전송 버튼이 눌리지 않는 경우가 있었다 → 새로 뜬 확인 창에서 '전송' 글자를 찾아 직접 누른다(못 찾으면 Enter).
+        confirm = next((h for h in self._kakao_windows() if h not in before and h != chat), 0)
+        clicked = False
+        if confirm:
+            try:
+                from .kakao_names import ocr_all_lines
+
+                lines = ocr_all_lines(confirm)
+                button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
+                if button:
+                    self._click_at(button.x + button.w / 2, button.y + button.h / 2)
+                    clicked = True
+                    self._log(f"전송 확인 창의 '{button.text}' 버튼을 누름")
+            except Exception as exc:
+                self._log(f"전송 확인 창 글자 읽기 실패({exc}) → Enter")
+        if not clicked:
+            import win32process
+            fg = win32gui.GetForegroundWindow()
+            if not fg or win32process.GetWindowThreadProcessId(fg)[1] != win32process.GetWindowThreadProcessId(chat)[1]:
+                raise RuntimeError("전송 확인 창이 카카오톡 창이 아니어서 Enter 를 누르지 않았습니다")
+            self._key(win32con.VK_RETURN)  # '전송' 확인 창
+        time.sleep(1.0)
+        if confirm and win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm):
+            raise RuntimeError("전송 확인 창이 닫히지 않았습니다(전송 버튼이 눌리지 않음)")
         time.sleep(wait_upload)  # 업로드 시간
         win32clipboard.OpenClipboard()
         try:
