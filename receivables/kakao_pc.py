@@ -499,11 +499,10 @@ class Win32KakaoDriver:
         _keep_on_top(main, True)
         dialog = 0
         try:
+            # 2026-10-10 - 프로필 실패 로그의 '읽은 글자: 전체, 즐겨찾기 안읽음, 기나글로벌…' = 채팅 탭 화면이었다.
+            # 친구 탭 검색칸은 채팅 탭에서도 크기가 있어 '보인다'고 잘못 판단했다 → 항상 친구 탭으로 바꾸고 화면 글자로 확인한다.
+            self._ensure_friends_tab(main)
             box = self._panel_box(main, "friends")
-            l, t, r, b = win32gui.GetWindowRect(box) if box else (0, 0, 0, 0)
-            if not box or r - l <= 0:
-                self._switch_tab(main, "friends")
-                box = self._panel_box(main, "friends")
             if not box:
                 raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다")
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, friend)
@@ -575,9 +574,41 @@ class Win32KakaoDriver:
                 b = self._panel_box(main, "friends")
                 if b:
                     win32api.SendMessage(b, win32con.WM_SETTEXT, 0, "")
+                self._switch_tab(main, "chats")  # 다음 발송을 위해 채팅 탭으로 되돌림
             except Exception:
                 pass
             _keep_on_top(main, False)
+
+    def _ensure_friends_tab(self, main: int) -> None:
+        """카톡 메인 창을 친구 탭으로. 단축키(Ctrl+1) → 화면에 채팅 탭 글자(안읽음 등)가 보이면 왼쪽 첫째 아이콘 클릭."""
+        from .kakao_names import _focus, _press, ocr_all_lines
+
+        win32api, win32con, win32gui = self._w()
+
+        def on_chats() -> bool:
+            texts = " ".join(ln.text for ln in ocr_all_lines(main))
+            return "안읽음" in texts or "안 읽음" in texts or ("채팅" in texts and "친구" not in texts)
+
+        _focus(main)
+        _press(win32con.VK_CONTROL, ord("1"))
+        time.sleep(0.8)
+        if not on_chats():
+            self._log("카톡 메인 창 '친구' 탭(단축키)")
+            return
+        try:
+            import ctypes
+            scale = ctypes.windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        left, top, _r, _b = win32gui.GetWindowRect(main)
+        for y in (62, 70, 55):  # 왼쪽 맨 위 사람 모양 아이콘
+            _focus(main)
+            self._click_at(left + 34 * scale, top + y * scale)
+            time.sleep(0.6)
+            if not on_chats():
+                self._log("카톡 메인 창 왼쪽 '친구' 아이콘을 누름")
+                return
+        raise RuntimeError("카톡 메인 창을 친구 탭으로 바꾸지 못했습니다(왼쪽 맨 위 사람 아이콘을 한 번 눌러 두세요)")
 
     def _paste_text(self, text: str) -> None:
         import win32clipboard
