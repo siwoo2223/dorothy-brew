@@ -1,0 +1,98 @@
+name: Android APK
+
+# Builds an installable APK without EAS or a local Android setup.
+# Download it from the "Releases" page (main branch) or the run's artifacts (other branches).
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      # Public OAuth client IDs (Settings → Secrets and variables → Actions → Variables).
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and lint
+        run: |
+          npx tsc --noEmit
+          npx expo lint
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # The same key must sign every build, or Android refuses the update (and Google sign-in breaks).
+      # Without the secret the APK is signed with a throwaway debug key and is not published.
+      - name: Prepare signing key
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret is not set; building with a debug key (not for daily use)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          SIGNING=()
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            SIGNING=(
+              -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.p12"
+              -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD"
+              -Pandroid.injected.signing.key.alias=dorothy
+              -Pandroid.injected.signing.key.password="$KEYSTORE_PASSWORD"
+            )
+          fi
+          ./gradlew assembleRelease --no-daemon "${SIGNING[@]}"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/dorothy.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dorothy-apk
+          path: ${{ runner.temp }}/dorothy.apk
+          retention-days: 14
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && steps.signing.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" "$RUNNER_TEMP/dorothy.apk#도로시.apk" \
+            --title "도로시 (빌드 ${{ github.run_number }})" \
+            --notes "휴대폰에서 이 페이지를 열고 dorothy.apk를 눌러 설치하세요. 커밋 ${GITHUB_SHA::7}" \
+            --latest
