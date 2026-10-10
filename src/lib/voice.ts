@@ -1,6 +1,7 @@
 import * as Speech from 'expo-speech';
 import type { ExpoSpeechRecognitionModule as RecognitionModule } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 const LANG = 'ko-KR';
 
@@ -12,6 +13,21 @@ try {
   recognizer = require('expo-speech-recognition').ExpoSpeechRecognitionModule;
 } catch {
   recognizer = null;
+}
+
+// Samsung phones often default to a recognizer that can't listen continuously and stops at once.
+// Prefer Google's recognizer when it is installed.
+const PREFERRED_SERVICES = ['com.google.android.googlequicksearchbox'];
+let servicePackage: string | undefined;
+function androidService(): string | undefined {
+  if (servicePackage !== undefined || Platform.OS !== 'android' || !recognizer) return servicePackage || undefined;
+  try {
+    const available = recognizer.getSpeechRecognitionServices();
+    servicePackage = PREFERRED_SERVICES.find((p) => available.includes(p)) ?? '';
+  } catch {
+    servicePackage = '';
+  }
+  return servicePackage || undefined;
 }
 
 export function voiceInputAvailable(): boolean {
@@ -75,7 +91,10 @@ export function extractWakeCommand(text: string): string | null {
  * Push-to-talk speech recognition. `onFinal` receives the finished sentence; `transcript`
  * shows what has been heard so far while the user is still talking.
  */
-export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => void) {
+/** How a listening session ended, so callers can tell a normal pause from a recognizer that keeps failing. */
+export type SessionEnd = { error?: string; durationMs: number; heardSpeech: boolean };
+
+export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: SessionEnd) => void) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
@@ -86,16 +105,23 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => voi
     onEndRef.current = onEnd;
   }, [onFinal, onEnd]);
 
+  const session = useRef({ startedAt: 0, error: undefined as string | undefined, heardSpeech: false });
+
   useEffect(() => {
     if (!recognizer) return;
     const subs = [
       recognizer.addListener('start', () => setState('listening')),
       recognizer.addListener('end', () => {
         setState((s) => (s === 'listening' ? 'idle' : s));
-        onEndRef.current?.();
+        const { startedAt, error, heardSpeech } = session.current;
+        onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
       }),
       recognizer.addListener('result', (event) => {
         const text = event.results[0]?.transcript ?? '';
+        if (text.trim()) {
+          session.current.heardSpeech = true;
+          setError('');
+        }
         setTranscript(text);
         if (event.isFinal && text.trim()) {
           setTranscript('');
@@ -103,8 +129,9 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => voi
         }
       }),
       recognizer.addListener('error', (event) => {
+        session.current.error = event.error;
         // Silence or a user cancel is not worth an error message.
-        if (event.error === 'no-speech' || event.error === 'aborted') {
+        if (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'speech-timeout') {
           setState('idle');
           return;
         }
@@ -116,18 +143,31 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => voi
   }, []);
 
   /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). */
-  const start = useCallback(async (opts: { continuous?: boolean } = {}) => {
+  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean } = {}) => {
     if (!recognizer) return;
     stopSpeaking();
-    setError('');
+    // In standby a failed restart is handled by the caller; don't flash an error for every retry.
+    if (!opts.quiet) setError('');
     setTranscript('');
+    session.current = { startedAt: Date.now(), error: undefined, heardSpeech: false };
     const permission = await recognizer.requestPermissionsAsync();
     if (!permission.granted) {
       setError('마이크와 음성 인식 권한을 허용해 주세요.');
       setState('error');
       return;
     }
-    recognizer.start({ lang: LANG, interimResults: true, continuous: !!opts.continuous, addsPunctuation: true });
+    recognizer.start({
+      lang: LANG,
+      interimResults: true,
+      continuous: !!opts.continuous,
+      addsPunctuation: true,
+      androidRecognitionServicePackage: androidService(),
+    });
+  }, []);
+
+  const showError = useCallback((message: string) => {
+    setError(message);
+    setState('error');
   }, []);
 
   const stop = useCallback(() => recognizer?.stop(), []);
@@ -136,5 +176,5 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => voi
     setTranscript('');
   }, []);
 
-  return { state, transcript, error, start, stop, cancel };
+  return { state, transcript, error, start, stop, cancel, showError };
 }

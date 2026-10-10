@@ -31,6 +31,11 @@ export default function Chat() {
   const [standby, setStandbyState] = useState(false);
   const phase = useRef<Phase>('off');
   const listeningFor = useRef<'wake' | 'command' | null>(null);
+  // Recognizers that can't keep a session open end (or error) right away. Count those in a row so
+  // standby backs off, drops continuous mode, and finally gives up instead of beeping on and off.
+  const failures = useRef(0);
+  const continuousOk = useRef(Platform.OS !== 'android' || Number(Platform.Version) >= 33);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // send is declared below and needs `voice`, so the recognizer reaches it through a ref.
   const sendRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
@@ -51,12 +56,33 @@ export default function Chat() {
       if (phase.current !== 'off') phase.current = 'busy';
       sendRef.current(text, true);
     },
-    () => {
+    (info) => {
       // The recognizer stops on silence or timeouts; in standby, quietly pick up listening again.
       const was = listeningFor.current;
       listeningFor.current = null;
       if (was === 'command' && phase.current === 'command') phase.current = 'wake';
-      if (phase.current === 'wake' && (was === 'wake' || was === 'command')) setTimeout(listenForWake, 300);
+      if (phase.current !== 'wake' || (was !== 'wake' && was !== 'command')) return;
+
+      const silence = info.error === undefined || info.error === 'no-speech' || info.error === 'speech-timeout';
+      const healthy = info.heardSpeech || (silence && info.durationMs > 3000);
+      failures.current = healthy ? 0 : failures.current + 1;
+
+      if (failures.current >= 3 && continuousOk.current) {
+        // This phone's recognizer doesn't keep continuous sessions open; use one-shot sessions instead.
+        continuousOk.current = false;
+        failures.current = 0;
+      } else if (failures.current >= 5) {
+        setStandby(false);
+        voice.showError(
+          info.error === 'not-allowed' || info.error === 'service-not-allowed'
+            ? '마이크와 음성 인식 권한을 허용해 주세요.'
+            : `이 휴대폰의 음성 인식이 계속 끊겨서 대기 모드를 껐어요${info.error ? ` (${info.error})` : ''}. Google 앱을 설치·업데이트하면 나아질 수 있어요. 🎙️ 버튼은 그대로 쓸 수 있어요.`,
+        );
+        return;
+      }
+      // Give the recognizer time to release the mic (avoids "busy"), longer after each failure.
+      const delay = Math.min(800 * 2 ** failures.current, 8000);
+      retryTimer.current = setTimeout(listenForWake, delay);
     },
   );
   const listening = voice.state === 'listening';
@@ -64,8 +90,8 @@ export default function Chat() {
   function listenForWake() {
     if (phase.current !== 'wake') return;
     listeningFor.current = 'wake';
-    // Continuous recognition (no beep, no gaps) needs Android 13+; older phones restart after each pause.
-    voice.start({ continuous: Platform.OS !== 'android' || Number(Platform.Version) >= 33 });
+    // Continuous recognition (no beep, no gaps) needs Android 13+ and a recognizer that supports it.
+    voice.start({ continuous: continuousOk.current, quiet: true });
   }
 
   function listenForCommand() {
@@ -76,9 +102,12 @@ export default function Chat() {
 
   const setStandby = (on: boolean) => {
     setStandbyState(on);
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = null;
     if (on) {
       activateKeepAwakeAsync('standby');
       phase.current = 'wake';
+      failures.current = 0;
       listenForWake();
     } else {
       deactivateKeepAwake('standby');
@@ -89,18 +118,27 @@ export default function Chat() {
     }
   };
 
-  // Opened with ?voice=1 (home mic button, "listen on open") or ?voice=standby: start right away.
+  // Leaving the chat tab stops listening and speaking.
   useFocusEffect(
     useCallback(() => {
-      if (params.voice && canListen) {
-        router.setParams({ voice: undefined });
-        if (params.voice === 'standby') setStandby(true);
-        else voice.start();
-      }
       return () => setStandby(false);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [params.voice]),
+    }, []),
   );
+
+  // Opened with ?voice=1 (home mic button, "listen on open") or ?voice=standby: start right away.
+  // Kept separate from the blur cleanup above so clearing the param doesn't switch standby back off.
+  useEffect(() => {
+    if (!params.voice || !canListen) return;
+    const requested = params.voice;
+    router.setParams({ voice: undefined });
+    if (requested === 'standby') {
+      if (phase.current === 'off') setStandby(true);
+    } else if (phase.current === 'off' && voice.state !== 'listening') {
+      voice.start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.voice]);
 
   const afterReply = () => {
     if (phase.current === 'off') return;

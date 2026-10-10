@@ -14,6 +14,7 @@ export function VoiceLauncher() {
   const navReady = !!useRootNavigationState()?.key;
   const mode = state.voiceOnOpen;
   const launchedOnce = useRef(false);
+  const backgroundAt = useRef(0);
 
   useEffect(() => {
     if (!loaded || !navReady || mode === 'off' || !voiceInputAvailable() || !state.apiKey) return;
@@ -23,7 +24,10 @@ export function VoiceLauncher() {
       go();
     }
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') go();
+      if (next === 'background') backgroundAt.current = Date.now();
+      // A permission popup or the recognizer briefly backgrounds the app; only react to a real reopen.
+      if (next === 'active' && backgroundAt.current && Date.now() - backgroundAt.current > 3000) go();
+      if (next === 'active') backgroundAt.current = 0;
     });
     return () => sub.remove();
   }, [loaded, navReady, mode, state.apiKey]);
