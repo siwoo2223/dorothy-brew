@@ -13,6 +13,7 @@ const KEYS = {
   chat: 'dorothy.chat',
   briefingHour: 'dorothy.briefingHour',
   voiceOnOpen: 'dorothy.voiceOnOpen',
+  workspaceId: 'dorothy.workspaceId',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
@@ -28,6 +29,8 @@ export type AppState = {
   profile: Profile;
   chat: ChatTurn[];
   apiKey: string;
+  /** Needed only for organization-level API keys that aren't scoped to a workspace. */
+  workspaceId: string;
   /** Hour (0-23) of the daily briefing notification, or null when off. */
   briefingHour: number | null;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
@@ -42,6 +45,7 @@ const initialState: AppState = {
   profile: { name: '', about: '' },
   chat: [],
   apiKey: '',
+  workspaceId: '',
   briefingHour: null,
   voiceOnOpen: 'off',
 };
@@ -62,7 +66,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -70,6 +74,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.briefingHour),
         secret.get(API_KEY),
         AsyncStorage.getItem(KEYS.voiceOnOpen),
+        AsyncStorage.getItem(KEYS.workspaceId),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -79,6 +84,7 @@ function useStoreValue() {
         briefingHour: hour ? Number(hour) : null,
         voiceOnOpen: voiceOnOpen ? JSON.parse(voiceOnOpen) : 'off',
         apiKey: apiKey ?? '',
+        workspaceId: workspaceId ? JSON.parse(workspaceId) : '',
       };
       setState(ref.current);
       setLoaded(true);
@@ -102,6 +108,7 @@ function useStoreValue() {
     const a = {
       setProfile: (profile: Profile) => update('profile', profile),
       setApiKey: (key: string) => update('apiKey', key.trim()),
+      setWorkspaceId: (id: string) => update('workspaceId', id.trim()),
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
 

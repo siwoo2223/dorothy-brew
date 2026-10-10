@@ -239,9 +239,14 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
   }
 }
 
-function createClient(apiKey: string) {
+function createClient({ apiKey, workspaceId }: Pick<AppState, 'apiKey' | 'workspaceId'>) {
   // The key lives only on this device (SecureStore). Fine for a personal app; put a backend in front before sharing it.
-  return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  return new Anthropic({
+    apiKey,
+    dangerouslyAllowBrowser: true,
+    // Organization-level keys must name the workspace to bill on every request.
+    defaultHeaders: workspaceId ? { 'anthropic-workspace-id': workspaceId } : undefined,
+  });
 }
 
 function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
@@ -254,6 +259,9 @@ function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
 
 export function describeError(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) return 'API 키가 올바르지 않아요. 설정에서 키를 확인해 주세요.';
+  if (error instanceof Anthropic.BadRequestError && /workspace/i.test(error.message)) {
+    return '이 API 키는 워크스페이스에 연결되어 있지 않아요. Claude 콘솔에서 워크스페이스를 골라 새 키를 만들거나, 설정의 "워크스페이스 ID" 칸에 워크스페이스 ID(wrkspc_로 시작)를 넣어 주세요.';
+  }
   if (error instanceof Anthropic.RateLimitError) return '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.';
   if (error instanceof Anthropic.APIConnectionError) return '네트워크에 연결할 수 없어요.';
   if (error instanceof Anthropic.APIError) return `오류가 발생했어요 (${error.status}): ${error.message}`;
@@ -266,7 +274,7 @@ export function describeError(error: unknown): string {
  * blocks stay valid; only the final text is persisted between turns.
  */
 export async function chat(userText: string, state: AppState, actions: StoreActions, opts: { spoken?: boolean } = {}): Promise<string> {
-  const client = createClient(state.apiKey);
+  const client = createClient(state);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
 
@@ -331,7 +339,7 @@ export async function chat(userText: string, state: AppState, actions: StoreActi
 
 /** A short morning briefing built from tasks and memories, with live info (weather, news) when useful. */
 export async function briefing(state: AppState): Promise<string> {
-  const client = createClient(state.apiKey);
+  const client = createClient(state);
   const googleEmail = await google.connectedEmail();
   let googleData = '';
   if (googleEmail) {

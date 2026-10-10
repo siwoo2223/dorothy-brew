@@ -45,6 +45,7 @@ export default function Settings() {
         <Input value={key} onChangeText={setKey} placeholder="sk-ant-…" autoCapitalize="none" autoCorrect={false} secureTextEntry />
         <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
         <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
+        <WorkspaceField />
       </Card>
 
       <VoiceCard />
@@ -84,6 +85,27 @@ export default function Settings() {
         />
       </Card>
     </ScrollView>
+  );
+}
+
+/** Only needed when the key isn't tied to a workspace (the API then asks for anthropic-workspace-id). */
+function WorkspaceField() {
+  const { state, actions } = useStore();
+  const [value, setValue] = useState(state.workspaceId);
+  return (
+    <>
+      <Body muted>워크스페이스 ID (선택) — &quot;not scoped to a workspace&quot; 오류가 날 때만 넣어요. 콘솔의 Settings → Workspaces에서 wrkspc_로 시작하는 ID를 복사하세요.</Body>
+      <Input value={value} onChangeText={setValue} placeholder="wrkspc_…" autoCapitalize="none" autoCorrect={false} />
+      <Button
+        label={state.workspaceId ? '워크스페이스 ID 변경' : '워크스페이스 ID 저장'}
+        variant="ghost"
+        disabled={value.trim() === state.workspaceId}
+        onPress={() => {
+          actions.setWorkspaceId(value);
+          Alert.alert('저장됨', value.trim() ? '이제 이 워크스페이스로 요청해요.' : '워크스페이스 ID를 지웠어요.');
+        }}
+      />
+    </>
   );
 }
 
