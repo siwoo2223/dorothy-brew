@@ -392,8 +392,6 @@ class Win32KakaoDriver:
 
         tab: "friends"(친구 이름으로 찾기) | "chats"(채팅방 이름으로 찾기). 없으면 기본값.
         """
-        from .kakao_names import _keep_on_top
-
         win32api, win32con, win32gui = self._w()
         self.trace = []
         tab = tab or self.search_tab
@@ -403,6 +401,31 @@ class Win32KakaoDriver:
             self._log(f"이미 열려 있는 채팅방 사용: '{name}'")
             return already
 
+        # 2026-10-10 - 광고의 프로필 전송 뒤 카톡 메인 창이 친구 탭에 남아, 채팅방 'MANILA OFFICE' 를 친구 목록에서
+        # 찾다가 '방이 없습니다' 가 났다(채팅 탭 검색칸은 친구 탭에서도 크기가 있어 '보인다'고 잘못 판단).
+        # → 채팅방으로 찾을 때는 화면 글자로 채팅 탭인지 확인하고, 그래도 못 찾으면 채팅 탭으로 다시 바꿔 한 번 더 찾는다.
+        if tab == "chats":
+            self._ensure_chats_tab(self._main())
+        chat, tried = self._find_and_open(name, tab, before)
+        if not chat and tab == "chats":
+            self._log("채팅방을 못 찾음 → 카톡 메인 창을 채팅 탭으로 다시 바꾸고 한 번 더 찾기")
+            self._ensure_chats_tab(self._main(), force_click=True)
+            chat, more = self._find_and_open(name, tab, before)
+            tried += [t for t in more if t not in tried]
+
+        if not chat:
+            raise ChatNotFound(
+                f"검색 결과에 '{name}' 방이 없습니다"
+                + (f"(비슷한 방 {', '.join(repr(x) for x in tried)} 은 이름이 달라 닫음)" if tried
+                   else f"(검색어 {', '.join(repr(q) for q in search_queries(name))} 로 찾아봤지만 같은 이름의 방이 없음)")
+            )
+        self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
+        return chat
+
+    def _find_and_open(self, name: str, tab: str, before: dict[int, str]) -> tuple[int, list[str]]:
+        from .kakao_names import _keep_on_top
+
+        win32api, win32con, win32gui = self._w()
         box, used = self._search_box(tab)
         main = win32gui.FindWindow(None, MAIN_TITLE)
         _keep_on_top(main, True)  # 검색 결과를 읽고 누르는 동안 가려지지 않게
@@ -416,15 +439,7 @@ class Win32KakaoDriver:
         finally:
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")  # 검색어 지우기
             _keep_on_top(main, False)
-
-        if not chat:
-            raise ChatNotFound(
-                f"검색 결과에 '{name}' 방이 없습니다"
-                + (f"(비슷한 방 {', '.join(repr(x) for x in tried)} 은 이름이 달라 닫음)" if tried
-                   else f"(검색어 {', '.join(repr(q) for q in search_queries(name))} 로 찾아봤지만 같은 이름의 방이 없음)")
-            )
-        self._log(f"채팅방 창 열림: '{win32gui.GetWindowText(chat)}'")
-        return chat
+        return chat, tried
 
     def _search_and_open(self, name: str, query: str, box: int, used: str, main: int, before: dict[int, str]) -> tuple[int, list[str]]:
         """검색창에 query 를 넣고 결과에서 창 제목이 name 과 같은 방을 연다. 반환: (창 또는 0, 열어 봤던 다른 방들)"""
@@ -574,7 +589,7 @@ class Win32KakaoDriver:
                 b = self._panel_box(main, "friends")
                 if b:
                     win32api.SendMessage(b, win32con.WM_SETTEXT, 0, "")
-                self._switch_tab(main, "chats")  # 다음 발송을 위해 채팅 탭으로 되돌림
+                self._ensure_chats_tab(main)  # 다음 발송을 위해 채팅 탭으로 되돌림(화면 글자로 확인)
             except Exception:
                 pass
             _keep_on_top(main, False)
@@ -712,6 +727,43 @@ class Win32KakaoDriver:
                 self._log("카톡 메인 창 왼쪽 '친구' 아이콘을 누름")
                 return
         raise RuntimeError("카톡 메인 창을 친구 탭으로 바꾸지 못했습니다(왼쪽 맨 위 사람 아이콘을 한 번 눌러 두세요)")
+
+    def _ensure_chats_tab(self, main: int, force_click: bool = False) -> None:
+        """카톡 메인 창을 채팅 탭으로. 단축키(Ctrl+2) → 화면 글자로 확인 → 아니면 왼쪽 둘째(말풍선) 아이콘 클릭.
+        못 바꿔도 오류는 내지 않는다(검색이 실패하면 그때 '방이 없습니다'로 알려짐)."""
+        from .kakao_names import _focus, _press, ocr_all_lines
+
+        win32api, win32con, win32gui = self._w()
+
+        def on_chats() -> bool:
+            try:
+                texts = " ".join(ln.text for ln in ocr_all_lines(main))
+            except Exception:
+                return True  # 화면을 못 읽으면 예전처럼 그냥 진행
+            if "안읽음" in texts or "안 읽음" in texts:
+                return True
+            return "채팅" in texts and "친구" not in texts
+
+        if not force_click:
+            _focus(main)
+            _press(win32con.VK_CONTROL, ord("2"))
+            time.sleep(0.8)
+            if on_chats():
+                return
+        try:
+            import ctypes
+            scale = ctypes.windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        left, top, _r, _b = win32gui.GetWindowRect(main)
+        for y in (122, 115, 130, 110):  # 왼쪽 위에서 둘째 말풍선 아이콘
+            _focus(main)
+            self._click_at(left + 34 * scale, top + y * scale)
+            time.sleep(0.6)
+            if on_chats():
+                self._log("카톡 메인 창 왼쪽 '채팅' 아이콘을 누름")
+                return
+        self._log("⚠ 카톡 메인 창을 채팅 탭으로 바꾸지 못함(왼쪽 둘째 말풍선 아이콘을 한 번 눌러 두세요)")
 
     def _paste_text(self, text: str) -> None:
         import win32clipboard
