@@ -171,7 +171,47 @@ class Win32KakaoDriver:
         box = visible(other)
         if box:
             return box, other
-        raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창에서 '채팅' 탭을 한 번 눌러 두고 다시 시도해 주세요.")
+        # 2026-10-10 - PC 를 다시 켠 뒤 '검색칸을 찾지 못했습니다': 카톡이 트레이에서 막 꺼내져 화면이 덜 그려졌을 수 있다
+        # → 창을 제대로 펼치고 기다렸다가 두 번 더 찾아본다.
+        from .kakao_names import _focus
+        win32api, win32con, _ = self._w()
+        for _try in range(2):
+            win32gui.ShowWindow(main, win32con.SW_SHOWNORMAL)
+            _focus(main)
+            time.sleep(2.0)
+            self._switch_tab(main, tab)
+            time.sleep(0.5)
+            box = visible(tab) or visible(other)
+            if box:
+                return box, (tab if box == self._panel_box(main, tab) else other)
+        raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창이 열려 있고 잠금 화면이 아닌지 확인한 뒤 "
+                           "'채팅' 탭을 한 번 눌러 두세요. [진단: " + self._diagnose(main) + "]")
+
+    def _diagnose(self, main: int) -> str:
+        """검색칸을 못 찾았을 때 원인을 알 수 있게 메인 창 상태를 짧게 적는다."""
+        _, _, win32gui = self._w()
+        parts = []
+        try:
+            l, t, r, b = win32gui.GetWindowRect(main)
+            parts.append(f"창 {r - l}x{b - t}{' 최소화' if win32gui.IsIconic(main) else ''}{'' if win32gui.IsWindowVisible(main) else ' 숨김'}")
+            edits = []
+
+            def visit(h, _):
+                if win32gui.GetClassName(h) == CLASS_SEARCH:
+                    el, et, er, eb = win32gui.GetWindowRect(h)
+                    edits.append(f"{er - el}x{eb - et}")
+                return True
+
+            win32gui.EnumChildWindows(main, visit, None)
+            parts.append("입력칸 " + (",".join(edits) or "없음"))
+        except Exception as exc:
+            parts.append(f"창 정보 오류 {exc}")
+        try:
+            from .kakao_names import ocr_all_lines
+            parts.append("화면 글자: " + ", ".join(ln.text for ln in ocr_all_lines(main)[:8]))
+        except Exception:
+            pass
+        return " / ".join(parts)
 
     def _switch_tab(self, main: int, tab: str) -> None:
         """카톡 메인 창 왼쪽의 친구/채팅 탭으로 바꾼다. 단축키(Ctrl+1 친구, Ctrl+2 채팅)를 먼저 쓰고,
