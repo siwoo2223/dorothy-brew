@@ -394,7 +394,14 @@ class Win32KakaoDriver:
 
         if not results:
             raise ChatNotFound(f"검색 결과에 '{name}' 방이 없습니다(검색 결과 목록이 보이지 않음)")
-        read = _ocr_screen(results)
+        below = getattr(self, "_results_below", None)
+        if below is None:
+            read = _ocr_screen(results)
+        else:  # 메인 창 전체를 읽고 검색칸 아래 줄만 쓴다
+            from .kakao_names import ocr_all_lines
+
+            def read():
+                return [ln for ln in ocr_all_lines(results) if ln.y > below]
         seen: list[str] = []
         previous = None
         chat, tried = 0, []
@@ -438,6 +445,8 @@ class Win32KakaoDriver:
             raise ChatNotFound(f"검색 결과에 '{name}' 방이 없습니다(검색 결과 목록이 보이지 않음)")
         pid = win32process.GetWindowThreadProcessId(main)[1]
         left, top, right, _bottom = win32gui.GetWindowRect(results)
+        if results == main and getattr(self, "_results_below", None):  # 결과 목록 창이 없으면 검색칸 바로 아래 첫 줄
+            top = int(self._results_below)
         win32api.SetCursorPos(((left + right) // 2, top + 30))  # 첫 줄을 한 번 눌러 선택만 한다
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
@@ -531,13 +540,20 @@ class Win32KakaoDriver:
 
     def _search_and_open(self, name: str, query: str, box: int, used: str, main: int, before: dict[int, str]) -> tuple[int, list[str]]:
         """검색창에 query 를 넣고 결과에서 창 제목이 name 과 같은 방을 연다. 반환: (창 또는 0, 열어 봤던 다른 방들)"""
-        win32api, win32con, _ = self._w()
+        win32api, win32con, win32gui = self._w()
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, "")
         time.sleep(0.2)
         win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
         time.sleep(self.wait)
         self._log(f"검색어 '{query}' 입력({used})")
         results = self._search_list(main, used)
+        if not results:
+            # 2026-10-10 - 새 카톡 화면은 검색 결과를 따로 목록 창에 띄우지 않을 수 있다 → 메인 창의 검색칸 아래를 읽는다
+            results = main
+            self._results_below = win32gui.GetWindowRect(box)[3] + 2
+            self._log("검색 결과 목록 창이 없어 메인 창에서 검색칸 아래 글자를 읽습니다")
+        else:
+            self._results_below = None
         if self.find_mode == "keyboard":
             try:
                 return self._open_by_keyboard(name, results, main, before)
@@ -559,7 +575,7 @@ class Win32KakaoDriver:
             time.sleep(0.3)
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, query)
             time.sleep(self.wait)
-            results = self._search_list(main, used)
+            results = self._search_list(main, used) or main
         try:
             chat, more = self._open_by_keyboard(name, results, main, before)
         except ChatNotFound as exc:
