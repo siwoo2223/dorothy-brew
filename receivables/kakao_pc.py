@@ -128,14 +128,63 @@ class Win32KakaoDriver:
         """검색칸과 실제로 쓴 탭. 고른 탭의 검색칸이 숨겨져(크기 0) 있으면 다른 탭 검색칸을 쓴다."""
         _, _, win32gui = self._w()
         main = self._main()
-        for t in (tab, "chats" if tab == "friends" else "friends"):
+
+        def visible(t: str) -> int:
             box = self._panel_box(main, t)
             if box:
                 left, top, right, bottom = win32gui.GetWindowRect(box)
                 self._log(f"검색칸({t}) 찾음: 크기 {right - left}x{bottom - top}")
                 if right - left > 0:
-                    return box, t
+                    return box
+            return 0
+
+        box = visible(tab)
+        if not box:
+            # 2026-10-10 요청 - "검색이 채팅으로 안되어있으면 채팅으로 바꾸어서 눌러서 진행": 카톡 메인 창이 다른 탭
+            # (친구·더보기 등)을 보고 있으면 그 탭의 검색칸이 숨겨져 있다 → 그 탭으로 바꾼 뒤 다시 찾는다.
+            self._switch_tab(main, tab)
+            box = visible(tab)
+        if box:
+            return box, tab
+        other = "chats" if tab == "friends" else "friends"
+        box = visible(other)
+        if box:
+            return box, other
         raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창에서 '채팅' 탭을 한 번 눌러 두고 다시 시도해 주세요.")
+
+    def _switch_tab(self, main: int, tab: str) -> None:
+        """카톡 메인 창 왼쪽의 친구/채팅 탭으로 바꾼다. 단축키(Ctrl+1 친구, Ctrl+2 채팅)를 먼저 쓰고,
+        그래도 안 바뀌면 왼쪽 아이콘(친구 = 위에서 첫째, 채팅 = 둘째)을 누른다."""
+        from .kakao_names import _focus, _press
+
+        win32api, win32con, win32gui = self._w()
+        _focus(main)
+        if win32gui.GetForegroundWindow() == main:
+            _press(win32con.VK_CONTROL, ord("2" if tab == "chats" else "1"))
+            time.sleep(0.6)
+            box = self._panel_box(main, tab)
+            if box:
+                left, _t, right, _b = win32gui.GetWindowRect(box)
+                if right - left > 0:
+                    self._log(f"카톡 메인 창을 '{'채팅' if tab == 'chats' else '친구'}' 탭으로 바꿈(단축키)")
+                    return
+        # 단축키가 안 먹으면 왼쪽 아이콘 클릭 (화면 배율에 맞춰 위치 계산)
+        try:
+            import ctypes
+            scale = ctypes.windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        left, top, _r, _b = win32gui.GetWindowRect(main)
+        x = left + int(34 * scale)
+        y = top + int((62 if tab == "friends" else 122) * scale)
+        _focus(main)
+        if win32gui.GetForegroundWindow() == main:
+            if win32gui.GetAncestor(win32gui.WindowFromPoint((x, y)), 2) == main:  # 2 = GA_ROOT, 다른 창에 가려지지 않았을 때만
+                win32api.SetCursorPos((x, y))
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.6)
+            self._log(f"카톡 메인 창 왼쪽 '{'채팅' if tab == 'chats' else '친구'}' 아이콘을 누름")
 
     def _kakao_windows(self) -> dict[int, str]:
         """카카오톡이 띄운 창들 {창: 제목}."""
