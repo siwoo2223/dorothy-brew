@@ -587,11 +587,19 @@ class Win32KakaoDriver:
             names = [ln for ln in lines if ln.y > top_y and find_line([ln], "확인", exact=True) is None
                      and find_line([ln], "취소", exact=True) is None
                      and find_line([ln], "전송", exact=True) is None and find_line([ln], "공유", exact=True) is None]
-            idx = pick_search_result(room, [ln.text for ln in names])
+            # 결과 줄은 'MANILA OFFICE 5' 처럼 방 이름 뒤에 인원수가 붙는다 → 숫자를 떼고 비교
+            idx = pick_search_result(room, [re.sub(r"\s+\d+$", "", ln.text.strip()) for ln in names])
             if idx is None:
                 raise RuntimeError(f"공유 대상 선택 창에서 '{room}' 방을 찾지 못했습니다(읽은 글자: {', '.join(x.text for x in names[:6])})")
             target = names[idx]
-            self._click_at(target.x + min(target.w, 80) / 2, target.y + target.h / 2)
+            # 2026-10-10 화면 - 방 줄 오른쪽 끝의 동그라미(선택 버튼)를 누른다. 그 뒤 '확인' 버튼이 노랗게 켜진다.
+            dl, dt, dr, db = win32gui.GetWindowRect(dialog)
+            try:
+                import ctypes
+                scale = ctypes.windll.user32.GetDpiForWindow(dialog) / 96.0
+            except Exception:
+                scale = 1.0
+            self._click_at(dr - 40 * scale, target.y + target.h / 2 + 4 * scale)
             time.sleep(0.4)
             lines = ocr_all_lines(dialog)
             ok = next((b for b in (find_line(lines, w, exact=True, below=target.y) for w in ("확인", "전송", "공유")) if b), None)
