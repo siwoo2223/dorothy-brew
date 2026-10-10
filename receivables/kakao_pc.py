@@ -750,6 +750,8 @@ class Win32KakaoDriver:
                 # 메인 창의 친구 목록 자체를 걸러서 보여 준다 → 메인 창에서 검색칸 아래 글자를 읽어 그 이름 줄을 찾는다.
                 box_bottom = self._box_bottom(box)
                 titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
+            # '친구 1' 머리말 위치(검색 결과 첫 줄은 바로 그 아래) - 이름 줄을 눌러야 할 자리의 기준
+            header = next((x for x in titles if re.match(r"^\W*친\s*구\s*\d", x.text.strip())), None)
             # 머리말('친구 1' 등)은 사람 줄이 아니다 - 처음부터 뺀다
             titles = [x for x in titles if not FRIEND_HEADER.match(x.text.strip())]
             # 2026-10-10 녹화 - 손팀장은 프로필 사진(글자가 든 표 그림)의 글자가 이름과 한 줄로 읽혀, 줄 왼쪽 위(사진·머리말
@@ -775,18 +777,34 @@ class Win32KakaoDriver:
             ml, mt, mr, mb = win32gui.GetWindowRect(main)
             # 2026-10-10 녹화 - '친구 1' 머리말 줄을 눌렀고, 메뉴를 닫으려고 누른 Esc 에 카톡 창이 숨어 두 번째 오른쪽
             # 클릭이 바탕화면에 떨어졌다 → Esc 는 누르지 않고(뜬 메뉴 창만 닫음), 누르기 전에 카톡 창을 다시 앞으로.
+            # 2026-10-10 요청 - "3번(손팀장)이 6번(양대리)처럼 진행되게": 양대리는 '친구 1' 머리말 바로 아래 줄의
+            # 이름 글자를 눌러 메뉴가 떴다. 손팀장도 같은 자리를 누르도록, 누를 곳을 이 순서로 정한다:
+            #  ① 이름 낱말('손팀장') 글자  ② '친구 1' 머리말 기준 바로 아래 줄의 이름 자리  ③ 읽은 줄
+            try:
+                sc = __import__("ctypes").windll.user32.GetDpiForWindow(main) / 96.0
+            except Exception:
+                sc = 1.0
+            points = []
+            if word:
+                points.append((word.x + word.w / 2, word.y + word.h / 2))
+            if header:
+                hx, hy = header.x, header.y + header.h / 2
+                points += [(hx + 75 * sc, hy + 34 * sc), (hx + 75 * sc, hy + 28 * sc), (hx + 110 * sc, hy + 40 * sc)]
+            points += [(row.x + min(row.w, 80) / 2, row.y + row.h / 2), (row.x + row.w / 2, row.y + row.h / 2)]
+            ml, mt, mr, mb = win32gui.GetWindowRect(main)
+            points = [(x, y) for x, y in points if ml < x < mr and mt < y < mb][:4]
             item, menu, seen = None, 0, []
-            for x in ((row.x + row.w / 2,) * 2 if word else (row.x + min(row.w, 80) / 2, row.x + row.w / 2)):
+            for x, y in points:
                 win32gui.ShowWindow(main, win32con.SW_SHOWNORMAL)
                 _focus(main)
                 _keep_on_top(main, True)
                 before = self._kakao_windows()
-                self._click_at(x, row.y + row.h / 2, right=True)
+                self._click_at(x, y, right=True)
                 menu = self._new_window(before, 2.0)
                 if menu:
                     lines = ocr_all_lines(menu)
                 else:
-                    lines = ocr_rect(x - 300, row.y - 450, x + 320, row.y + 480)
+                    lines = ocr_rect(x - 300, y - 450, x + 320, y + 480)
                 seen = [ln.text for ln in lines]
                 item = find_line(lines, "프로필 전송")
                 if item:
@@ -795,7 +813,7 @@ class Win32KakaoDriver:
                     win32api.PostMessage(menu, win32con.WM_CLOSE, 0, 0)
                 time.sleep(0.4)
             if not item:
-                raise RuntimeError(f"오른쪽 클릭 메뉴에서 '프로필 전송'을 찾지 못했습니다(누른 줄: '{row.text}', 읽은 글자: {', '.join(seen[:8])})")
+                raise RuntimeError(f"오른쪽 클릭 메뉴에서 '프로필 전송'을 찾지 못했습니다(누른 곳 {len(points)}군데, 줄: '{row.text}', 머리말: {'있음' if header else '없음'}, 읽은 글자: {', '.join(seen[:8])})")
             before = self._kakao_windows()
             self._click_at(item.x + item.w / 2, item.y + item.h / 2)
             dialog = self._new_window(before, 4.0)
