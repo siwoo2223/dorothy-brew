@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from receivables import control, envfile, lalamove, self_update, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
-VERSION = "2026-10-10k"
+VERSION = "2026-10-10l"
 UPDATE_CHECK_SECONDS = 3600  # 새 버전 확인 간격
 LALAMOVE_CHECK_SECONDS = 900  # 라라무브 배송 완료 확인 간격(15분)
 POLL_SECONDS = 20

@@ -1459,6 +1459,8 @@ class KakaoPCSender:
                 note += f" ⚠️ 첨부 실패: {exc}"
         self._close(chat)
         # 2026-10-10 광고 올리기: 직원 프로필 전송(친구 목록 → 프로필 전송 → 이 방)
+        if m.photos_first and not m.profiles:
+            note += " (보낼 프로필 없음 - 광고 올리기의 '이번에 보낼 프로필' 체크 확인)"
         for friend in m.profiles:
             if not hasattr(self.driver, "send_profile"):
                 note += f" ⚠️ 프로필 전송 미지원({friend})"
