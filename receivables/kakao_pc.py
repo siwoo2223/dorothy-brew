@@ -860,6 +860,30 @@ class Win32KakaoDriver:
                 pass
             _keep_on_top(main, False)
 
+    def prepare_profiles(self) -> None:
+        """프로필 전송 전 준비: 2026-10-10 요청 - "손팀장도 양대리 같은 프로세스로": 두 번째(양대리)는 첫 번째가 친구 탭과
+        친구 검색칸을 열어 둔 상태에서 시작해 잘 됐다. 첫 번째도 같은 상태에서 시작하도록 친구 탭 → 검색칸 열기를 먼저 해 둔다."""
+        _, _, win32gui = self._w()
+        time.sleep(1.5)  # 방 창이 다 닫힐 때까지
+        main = self._main()
+
+        def visible_box(t: str) -> int:
+            b = self._panel_box(main, t)
+            if b:
+                bl, _bt, br, _bb = win32gui.GetWindowRect(b)
+                if br - bl > 0:
+                    return b
+            return 0
+
+        try:
+            self._ensure_friends_tab(main)
+            box = visible_box("friends") or self._open_search(main, "friends", visible_box)
+            if box:
+                self._set_search(box, "")
+            self._log("프로필 전송 준비: 친구 탭 검색칸 열어 둠" if box else "프로필 전송 준비: 친구 검색칸을 미리 열지 못함")
+        except Exception as exc:
+            self._log(f"프로필 전송 준비 중 오류(계속 진행): {exc}")
+
     def _find_tab(self, dialog: int, lines, head):
         """공유 대상 선택 창의 '채팅' 탭 글자 위치(줄 → 낱말 순으로 찾기). 없으면 None."""
         from .kakao_names import ocr_all_lines
@@ -1464,6 +1488,8 @@ class KakaoPCSender:
         # 2026-10-10 - "양대리는 되는데 손팀장은 안 되는": 첫 번째 프로필은 방을 막 닫은 직후라 카톡 화면이 덜 바뀐
         # 상태에서 시작해 실패하기 쉽다 → 실패한 프로필은 나머지를 다 보낸 뒤 한 번 더 시도한다.
         failed: dict[str, Exception] = {}
+        if m.profiles and hasattr(self.driver, "prepare_profiles"):
+            self.driver.prepare_profiles()
         for attempt in (1, 2):
             for friend in (m.profiles if attempt == 1 else list(failed)):
                 if not hasattr(self.driver, "send_profile"):
