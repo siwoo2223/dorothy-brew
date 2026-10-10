@@ -752,8 +752,13 @@ class Win32KakaoDriver:
                 titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
             # 머리말('친구 1' 등)은 사람 줄이 아니다 - 처음부터 뺀다
             titles = [x for x in titles if not FRIEND_HEADER.match(x.text.strip())]
+            # 2026-10-10 녹화 - 손팀장은 프로필 사진(글자가 든 표 그림)의 글자가 이름과 한 줄로 읽혀, 줄 왼쪽 위(사진·머리말
+            # 근처)를 눌러 메뉴가 안 떴다(양대리는 이름 글자를 바로 눌러 됨). → 낱말 단위로 이름('손팀장')을 찾아 그 글자를 누른다.
+            word = self._find_name_word(main, friend, self._box_bottom(box) if results == 0 else None, results)
+            if word:
+                titles = [word] + titles
             self._log("친구 검색 결과 읽은 글자: " + " | ".join(x.text for x in titles[:6]))
-            idx = pick_search_result(friend, [x.text for x in titles])
+            idx = 0 if word else pick_search_result(friend, [x.text for x in titles])
             if idx is None:
                 # 2026-10-10 - 'kflogistics' 는 검색 결과가 한 줄인데 이름 글자를 못 읽고 상태 메시지
                 # ('평일8-5시 토요일 8-13시 상담가능')만 읽혔다. 검색으로 걸러진 목록이라 머리말('친구 1' 등)을 뺀
@@ -771,7 +776,7 @@ class Win32KakaoDriver:
             # 2026-10-10 녹화 - '친구 1' 머리말 줄을 눌렀고, 메뉴를 닫으려고 누른 Esc 에 카톡 창이 숨어 두 번째 오른쪽
             # 클릭이 바탕화면에 떨어졌다 → Esc 는 누르지 않고(뜬 메뉴 창만 닫음), 누르기 전에 카톡 창을 다시 앞으로.
             item, menu, seen = None, 0, []
-            for x in (row.x + min(row.w, 80) / 2, row.x + row.w / 2):
+            for x in ((row.x + row.w / 2,) * 2 if word else (row.x + min(row.w, 80) / 2, row.x + row.w / 2)):
                 win32gui.ShowWindow(main, win32con.SW_SHOWNORMAL)
                 _focus(main)
                 _keep_on_top(main, True)
@@ -859,6 +864,29 @@ class Win32KakaoDriver:
             except Exception:
                 pass
             _keep_on_top(main, False)
+
+    def _find_name_word(self, main: int, friend: str, below, results: int):
+        """검색 결과에서 친구 이름의 낱말(예: 'KF 손팀장' → '손팀장')을 찾아 그 위치를 줄처럼 돌려준다. 없으면 None."""
+        from .kakao_names import ocr_all_lines
+
+        def key(t: str) -> str:
+            return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", t or "")).lower()
+
+        tokens = sorted((key(t) for t in friend.split() if len(key(t)) >= 2), key=len, reverse=True)
+        if not tokens:
+            return None
+        try:
+            words = ocr_all_lines(results or main, words=True)
+        except Exception:
+            return None
+        if below is not None:
+            words = [w for w in words if w.y > below]
+        for tok in tokens:
+            for w in words:
+                if key(w.text) == tok or (len(tok) >= 3 and tok in key(w.text) and len(key(w.text)) <= len(tok) + 2):
+                    self._log(f"친구 이름 글자 '{w.text}' 위치를 눌러 오른쪽 클릭")
+                    return w
+        return None
 
     def prepare_profiles(self) -> None:
         """프로필 전송 전 준비: 2026-10-10 요청 - "손팀장도 양대리 같은 프로세스로": 두 번째(양대리)는 첫 번째가 친구 탭과
