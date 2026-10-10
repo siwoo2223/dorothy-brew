@@ -1461,15 +1461,24 @@ class KakaoPCSender:
         # 2026-10-10 광고 올리기: 직원 프로필 전송(친구 목록 → 프로필 전송 → 이 방)
         if m.photos_first and not m.profiles:
             note += " (보낼 프로필 없음 - 광고 올리기의 '이번에 보낼 프로필' 체크 확인)"
-        for friend in m.profiles:
-            if not hasattr(self.driver, "send_profile"):
-                note += f" ⚠️ 프로필 전송 미지원({friend})"
-                continue
-            try:
-                self.driver.send_profile(friend, name)
-                note += f" (+{friend} 프로필)"
-            except Exception as exc:
-                note += f" ⚠️ {friend} 프로필 실패: {exc}"
+        # 2026-10-10 - "양대리는 되는데 손팀장은 안 되는": 첫 번째 프로필은 방을 막 닫은 직후라 카톡 화면이 덜 바뀐
+        # 상태에서 시작해 실패하기 쉽다 → 실패한 프로필은 나머지를 다 보낸 뒤 한 번 더 시도한다.
+        failed: dict[str, Exception] = {}
+        for attempt in (1, 2):
+            for friend in (m.profiles if attempt == 1 else list(failed)):
+                if not hasattr(self.driver, "send_profile"):
+                    note += f" ⚠️ 프로필 전송 미지원({friend})"
+                    continue
+                try:
+                    self.driver.send_profile(friend, name)
+                    note += f" (+{friend} 프로필{' · 다시 시도' if attempt == 2 else ''})"
+                    failed.pop(friend, None)
+                except Exception as exc:
+                    failed[friend] = exc
+            if not failed:
+                break
+        for friend, exc in failed.items():
+            note += f" ⚠️ {friend} 프로필 실패: {exc}"
         return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송{note}")
 
     def _send_attachments(self, chat, m: OutgoingMessage) -> str:
