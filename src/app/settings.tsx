@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
+import { GoogleCard } from '../components/GoogleCard';
+import { ImportCard } from '../components/ImportCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -11,20 +13,7 @@ const HOURS = [6, 7, 8, 9];
 export default function Settings() {
   const t = useTheme();
   const { state, loaded, actions } = useStore();
-  const [name, setName] = useState('');
-  const [about, setAbout] = useState('');
   const [key, setKey] = useState('');
-
-  useEffect(() => {
-    if (!loaded) return;
-    setName(state.profile.name);
-    setAbout(state.profile.about);
-  }, [loaded]);
-
-  const saveProfile = () => {
-    actions.setProfile({ name: name.trim(), about: about.trim() });
-    Alert.alert('저장됨', '도로시가 이제 당신을 더 잘 알게 됐어요.');
-  };
 
   const saveKey = () => {
     actions.setApiKey(key);
@@ -44,18 +33,10 @@ export default function Settings() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Card>
-        <Title>나에 대해</Title>
-        <Input value={name} onChangeText={setName} placeholder="이름 또는 호칭" />
-        <Input
-          value={about}
-          onChangeText={setAbout}
-          placeholder="자유롭게 소개해 주세요. 하는 일, 사는 곳, 가족, 관심사, 요즘 목표 등"
-          multiline
-          style={{ minHeight: 110, textAlignVertical: 'top' }}
-        />
-        <Button label="저장" onPress={saveProfile} />
-      </Card>
+      {loaded && (
+        // Re-mount when the stored profile changes (e.g. after an import) so the form never saves stale text over it.
+        <ProfileCard key={`${state.profile.name}|${state.profile.about}`} />
+      )}
 
       <Card>
         <Title>Claude API 키</Title>
@@ -64,6 +45,10 @@ export default function Settings() {
         <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
         <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
       </Card>
+
+      <GoogleCard />
+
+      <ImportCard />
 
       <Card>
         <Title>아침 브리핑 알림</Title>
@@ -96,6 +81,32 @@ export default function Settings() {
         />
       </Card>
     </ScrollView>
+  );
+}
+
+function ProfileCard() {
+  const { state, actions } = useStore();
+  const [name, setName] = useState(state.profile.name);
+  const [about, setAbout] = useState(state.profile.about);
+
+  const save = () => {
+    actions.setProfile({ name: name.trim(), about: about.trim() });
+    Alert.alert('저장됨', '도로시가 이제 당신을 더 잘 알게 됐어요.');
+  };
+
+  return (
+    <Card>
+      <Title>나에 대해</Title>
+      <Input value={name} onChangeText={setName} placeholder="이름 또는 호칭" />
+      <Input
+        value={about}
+        onChangeText={setAbout}
+        placeholder="자유롭게 소개해 주세요. 하는 일, 사는 곳, 가족, 관심사, 요즘 목표 등"
+        multiline
+        style={{ minHeight: 110, textAlignVertical: 'top' }}
+      />
+      <Button label="저장" onPress={save} />
+    </Card>
   );
 }
 

@@ -23,10 +23,10 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "dorothy",
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-web-browser",
       [
         "expo-notifications",
         {

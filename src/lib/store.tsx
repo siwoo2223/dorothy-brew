@@ -15,6 +15,12 @@ const KEYS = {
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
+export type ImportBundle = {
+  profile?: { name?: string; about?: string };
+  memories?: { category?: string; content: string }[];
+  tasks?: { title: string; dueAt?: string; notes?: string }[];
+};
+
 export type AppState = {
   tasks: Task[];
   memories: Memory[];
@@ -47,7 +53,6 @@ function useStoreValue() {
   const [loaded, setLoaded] = useState(false);
   // The assistant's tool loop runs across several awaits; it reads the latest state through this ref.
   const ref = useRef(state);
-  ref.current = state;
 
   useEffect(() => {
     (async () => {
@@ -59,14 +64,15 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.briefingHour),
         secret.get(API_KEY),
       ]);
-      setState({
+      ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
         memories: memories ? JSON.parse(memories) : [],
         profile: profile ? JSON.parse(profile) : initialState.profile,
         chat: chat ? JSON.parse(chat) : [],
         briefingHour: hour ? Number(hour) : null,
         apiKey: apiKey ?? '',
-      });
+      };
+      setState(ref.current);
       setLoaded(true);
     })();
   }, []);
@@ -77,14 +83,15 @@ function useStoreValue() {
     if (key === 'apiKey') {
       secret.set(API_KEY, value as string);
     } else if (key === 'briefingHour') {
-      value === null ? AsyncStorage.removeItem(KEYS.briefingHour) : AsyncStorage.setItem(KEYS.briefingHour, String(value));
+      if (value === null) AsyncStorage.removeItem(KEYS.briefingHour);
+      else AsyncStorage.setItem(KEYS.briefingHour, String(value));
     } else {
       AsyncStorage.setItem(KEYS[key as Exclude<keyof AppState, 'apiKey'>], JSON.stringify(value));
     }
   }, []);
 
-  const actions = useMemo(
-    () => ({
+  const actions = useMemo(() => {
+    const a = {
       setProfile: (profile: Profile) => update('profile', profile),
       setApiKey: (key: string) => update('apiKey', key.trim()),
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
@@ -121,13 +128,40 @@ function useStoreValue() {
         return exists;
       },
 
+      /** Merges an exported/handwritten JSON bundle; skips memories and tasks that already exist. */
+      async importData(data: ImportBundle): Promise<{ memories: number; tasks: number }> {
+        if (data.profile) {
+          const cur = ref.current.profile;
+          update('profile', {
+            name: data.profile.name?.trim() || cur.name,
+            about: [cur.about, data.profile.about?.trim()].filter(Boolean).join('\n\n'),
+          });
+        }
+        const known = new Set(ref.current.memories.map((m) => m.content.trim()));
+        const newMemories = (data.memories ?? [])
+          .filter((m) => m.content?.trim() && !known.has(m.content.trim()))
+          .map((m) => ({ id: newId(), category: m.category?.trim() || '기타', content: m.content.trim(), createdAt: new Date().toISOString() }));
+        update('memories', [...ref.current.memories, ...newMemories]);
+
+        const taskKey = (t: { title: string; dueAt?: string }) => `${t.title.trim()}|${t.dueAt ? new Date(t.dueAt).getTime() : ''}`;
+        const knownTasks = new Set(ref.current.tasks.map(taskKey));
+        let added = 0;
+        for (const t of data.tasks ?? []) {
+          if (!t.title?.trim() || knownTasks.has(taskKey(t))) continue;
+          const dueAt = t.dueAt && !Number.isNaN(Date.parse(t.dueAt)) ? new Date(t.dueAt).toISOString() : undefined;
+          await a.addTask({ title: t.title.trim(), dueAt, notes: t.notes });
+          added++;
+        }
+        return { memories: newMemories.length, tasks: added };
+      },
+
       appendChat(turn: Omit<ChatTurn, 'id' | 'createdAt'>) {
         update('chat', [...ref.current.chat, { ...turn, id: newId(), createdAt: new Date().toISOString() }]);
       },
       clearChat: () => update('chat', []),
-    }),
-    [update],
-  );
+    };
+    return a;
+  }, [update]);
 
   return { state, loaded, actions, getState: () => ref.current };
 }

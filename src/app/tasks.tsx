@@ -55,7 +55,7 @@ export default function Tasks() {
           ))}
         </View>
         <Button label="추가" onPress={add} disabled={!title.trim()} />
-        <Body muted>자세한 시간은 도로시에게 말로 부탁해도 돼요. "금요일 오후 3시 치과 예약 알려줘"</Body>
+        <Body muted>자세한 시간은 도로시에게 말로 부탁해도 돼요. “금요일 오후 3시 치과 예약 알려줘”</Body>
       </Card>
 
       <Title>진행 중 ({open.length})</Title>

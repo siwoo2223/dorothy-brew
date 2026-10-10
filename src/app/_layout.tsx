@@ -7,9 +7,10 @@ import '../lib/notifications';
 import { StoreProvider } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
-const icon = (emoji: string) => ({ focused }: { focused: boolean }) => (
-  <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
-);
+const icon = (emoji: string) =>
+  function TabIcon({ focused }: { focused: boolean }) {
+    return <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>;
+  };
 
 export default function RootLayout() {
   const theme = useTheme();

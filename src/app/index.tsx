@@ -1,9 +1,10 @@
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Title } from '../components/ui';
 import { briefing, describeError } from '../lib/assistant';
+import { CalendarEvent, connectedEmail, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -20,6 +21,20 @@ export default function Today() {
   const { state, loaded, getState } = useStore();
   const [brief, setBrief] = useState('');
   const [loading, setLoading] = useState(false);
+  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        if (!(await connectedEmail())) return setEvents(null);
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+        setEvents(await listEvents(start, end).catch(() => null));
+      })();
+    }, []),
+  );
 
   if (!loaded) return <ActivityIndicator style={{ marginTop: 40 }} />;
 
@@ -62,6 +77,22 @@ export default function Today() {
         <Stat label="오늘" value={today.length} color={t.accent} />
         <Stat label="언젠가" value={undated.length} color={t.subtext} />
       </View>
+
+      {events && (
+        <Card>
+          <Title>📅 오늘 일정</Title>
+          {events.length === 0 && <Body muted>오늘은 캘린더 일정이 없어요.</Body>}
+          {events.map((e) => (
+            <Body key={e.id}>
+              <Text style={{ color: t.accent, fontWeight: '600' }}>
+                {e.allDay ? '종일' : new Date(e.start).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}
+              </Text>{' '}
+              {e.title}
+              {e.location ? <Text style={{ color: t.subtext }}> · {e.location}</Text> : null}
+            </Body>
+          ))}
+        </Card>
+      )}
 
       {[...overdue, ...today].length > 0 && (
         <Card>
