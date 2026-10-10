@@ -393,6 +393,42 @@ def _ocr_screen(hwnd: int):
     return read_titles
 
 
+def ocr_all_lines(hwnd: int) -> list[OcrLine]:
+    """창 전체를 OCR 해서 모든 글자 줄을 '화면 좌표'로 돌려준다(메뉴·대화상자의 버튼·탭 글자 찾기용)."""
+    import asyncio
+
+    import win32gui
+    from PIL import Image, ImageGrab, ImageOps
+    from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+    from winrt.windows.storage.streams import DataWriter
+
+    engine = _korean_ocr_engine()
+    _dpi_aware()
+    scale = 3
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    img = ImageOps.autocontrast(ImageOps.grayscale(img))
+    img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")
+
+    async def recognize():
+        writer = DataWriter()
+        writer.write_bytes(img.tobytes())
+        bitmap = SoftwareBitmap.create_copy_from_buffer(writer.detach_buffer(), BitmapPixelFormat.RGBA8, img.width, img.height)
+        return await engine.recognize_async(bitmap)
+
+    out = []
+    for line in asyncio.run(recognize()).lines:
+        rects = [w.bounding_rect for w in line.words]
+        if not rects:
+            continue
+        x0 = min(r.x for r in rects)
+        y0 = min(r.y for r in rects)
+        x1 = max(r.x + r.width for r in rects)
+        y1 = max(r.y + r.height for r in rects)
+        out.append(OcrLine(line.text, left + x0 / scale, top + y0 / scale, (x1 - x0) / scale, (y1 - y0) / scale))
+    return out
+
+
 def _ocr_reader(hwnd: int):
     read_titles = _ocr_screen(hwnd)
     return lambda: [t.text for t in read_titles()]

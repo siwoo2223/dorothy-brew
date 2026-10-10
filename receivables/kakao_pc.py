@@ -67,6 +67,23 @@ def search_queries(name: str) -> list[str]:
     return out
 
 
+def find_line(lines, want: str, exact: bool = False, below: float | None = None):
+    """OCR 줄들 중 글자가 want 와 같은(또는 want 를 포함하는) 줄. 띄어쓰기·기호는 무시. below 가 있으면 그 아래 줄만."""
+    def key(s: str) -> str:
+        return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", s or "")).lower()
+
+    k = key(want)
+    best = None
+    for ln in lines:
+        if below is not None and ln.y <= below:
+            continue
+        t = key(ln.text)
+        if t == k or (not exact and k and k in t):
+            if best is None or (t == k and key(best.text) != k):
+                best = ln
+    return best
+
+
 class Win32KakaoDriver:
     """pywin32 로 PC 카카오톡 창에 직접 메시지를 보내는 드라이버 (Windows 전용)."""
 
@@ -447,6 +464,130 @@ class Win32KakaoDriver:
             chat, more = 0, []
         return chat, tried + [t for t in more if t not in tried]
 
+    # ── 직원 프로필 전송 (광고 올리기) ──
+    def _click_at(self, x: float, y: float, right: bool = False) -> None:
+        win32api, win32con, _ = self._w()
+        win32api.SetCursorPos((int(x), int(y)))
+        down, up = ((win32con.MOUSEEVENTF_RIGHTDOWN, win32con.MOUSEEVENTF_RIGHTUP) if right
+                    else (win32con.MOUSEEVENTF_LEFTDOWN, win32con.MOUSEEVENTF_LEFTUP))
+        win32api.mouse_event(down, 0, 0, 0, 0)
+        time.sleep(0.05)
+        win32api.mouse_event(up, 0, 0, 0, 0)
+        time.sleep(0.4)
+
+    def _new_window(self, before: dict[int, str], seconds: float = 4.0) -> int:
+        """before 에 없던 카톡 창(메뉴·대화상자)이 뜨면 그 창."""
+        end = time.time() + seconds
+        while time.time() < end:
+            new = [h for h in self._kakao_windows() if h not in before]
+            if new:
+                time.sleep(0.4)
+                return new[-1]
+            time.sleep(0.2)
+        return 0
+
+    def send_profile(self, friend: str, room: str) -> None:
+        """친구 목록의 friend(직원)를 오른쪽 클릭 → '프로필 전송' → 공유 대상 선택에서 '채팅' 탭 → room 검색 → 선택 → 확인.
+
+        2026-10-10 요청 - "내프로필은 아니라 직원들 프로필을 올릴꺼야": 광고 올리기의 마지막 단계.
+        글자 인식(OCR)으로 메뉴·탭·버튼 글자를 찾아 누른다. 못 찾으면 대화상자를 닫고 오류를 낸다(이미 간 사진·문구는 그대로).
+        """
+        from .kakao_names import _keep_on_top, _ocr_screen, ocr_all_lines, pick_search_result
+
+        win32api, win32con, win32gui = self._w()
+        main = self._main()
+        _keep_on_top(main, True)
+        dialog = 0
+        try:
+            box = self._panel_box(main, "friends")
+            l, t, r, b = win32gui.GetWindowRect(box) if box else (0, 0, 0, 0)
+            if not box or r - l <= 0:
+                self._switch_tab(main, "friends")
+                box = self._panel_box(main, "friends")
+            if not box:
+                raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다")
+            win32api.SendMessage(box, win32con.WM_SETTEXT, 0, friend)
+            time.sleep(self.wait)
+            results = self._search_list(main, "friends")
+            if not results:
+                raise RuntimeError(f"친구 목록에서 '{friend}' 검색 결과가 보이지 않습니다")
+            titles = _ocr_screen(results)()
+            idx = pick_search_result(friend, [x.text for x in titles])
+            if idx is None:
+                raise RuntimeError(f"친구 목록에 '{friend}' 이(가) 없습니다(읽은 이름: {', '.join(x.text for x in titles[:5])})")
+            row = titles[idx]
+            before = self._kakao_windows()
+            self._click_at(row.x + min(row.w, 40) / 2, row.y + row.h / 2, right=True)
+            menu = self._new_window(before, 3.0)
+            if not menu:
+                raise RuntimeError("오른쪽 클릭 메뉴가 뜨지 않았습니다")
+            item = find_line(ocr_all_lines(menu), "프로필 전송")
+            if not item:
+                win32api.PostMessage(menu, win32con.WM_KEYDOWN, win32con.VK_ESCAPE, 0)
+                raise RuntimeError("메뉴에서 '프로필 전송'을 찾지 못했습니다")
+            before = self._kakao_windows()
+            self._click_at(item.x + item.w / 2, item.y + item.h / 2)
+            dialog = self._new_window(before, 4.0)
+            if not dialog:
+                raise RuntimeError("'공유 대상 선택' 창이 뜨지 않았습니다")
+            _keep_on_top(dialog, True)
+            lines = ocr_all_lines(dialog)
+            head = find_line(lines, "공유 대상 선택")
+            tab = find_line(lines, "채팅", exact=True, below=head.y if head else None)
+            if not tab:
+                raise RuntimeError("공유 대상 선택 창에서 '채팅' 탭을 찾지 못했습니다")
+            self._click_at(tab.x + tab.w / 2, tab.y + tab.h / 2)
+            # 검색칸: 창 안의 입력칸(Edit)에 방 이름을 넣는다. 못 찾으면 '채팅' 탭 바로 아래를 눌러 붙여넣기.
+            edit = win32gui.FindWindowEx(dialog, None, CLASS_SEARCH, None)
+            if edit:
+                win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, room)
+            else:
+                dl, dt, dr, db = win32gui.GetWindowRect(dialog)
+                self._click_at((dl + dr) / 2, tab.y + tab.h + (db - dt) * 0.07)
+                self._paste_text(room)
+            time.sleep(self.wait)
+            lines = ocr_all_lines(dialog)
+            tab = find_line(lines, "채팅", exact=True, below=head.y if head else None) or tab
+            names = [ln for ln in lines if ln.y > tab.y + tab.h * 2 and find_line([ln], "확인", exact=True) is None
+                     and find_line([ln], "취소", exact=True) is None]
+            idx = pick_search_result(room, [ln.text for ln in names])
+            if idx is None:
+                raise RuntimeError(f"공유 대상 '채팅'에서 '{room}' 방을 찾지 못했습니다")
+            target = names[idx]
+            self._click_at(target.x + min(target.w, 80) / 2, target.y + target.h / 2)
+            ok = find_line(ocr_all_lines(dialog), "확인", exact=True)
+            if not ok:
+                raise RuntimeError("'확인' 버튼을 찾지 못했습니다")
+            self._click_at(ok.x + ok.w / 2, ok.y + ok.h / 2)
+            time.sleep(1.0)
+            if win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog):
+                raise RuntimeError("'확인'을 눌렀지만 공유 대상 선택 창이 닫히지 않았습니다(방 선택이 안 됐을 수 있음)")
+            dialog = 0
+            self._log(f"'{friend}' 프로필을 '{room}' 에 전송")
+        finally:
+            if dialog and win32gui.IsWindow(dialog):
+                win32api.PostMessage(dialog, win32con.WM_CLOSE, 0, 0)
+            try:
+                b = self._panel_box(main, "friends")
+                if b:
+                    win32api.SendMessage(b, win32con.WM_SETTEXT, 0, "")
+            except Exception:
+                pass
+            _keep_on_top(main, False)
+
+    def _paste_text(self, text: str) -> None:
+        import win32clipboard
+
+        win32api, win32con, _ = self._w()
+        win32clipboard.OpenClipboard()
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
+        finally:
+            win32clipboard.CloseClipboard()
+        self._key(win32con.VK_CONTROL, ord("V"))
+        time.sleep(0.3)
+
     def _post_enter(self, hwnd) -> None:
         """Enter 키 메시지를 정식 키 정보(스캔코드 0x1C)와 함께 보낸다."""
         win32api, win32con, _ = self._w()
@@ -742,20 +883,39 @@ class KakaoPCSender:
         except Exception as exc:  # 카카오톡 창 문제 등
             return SendResult(m.key, m.to, False, f"채팅방 열기 실패: {exc}")
         where = "채팅방 " if m.search_tab == "chats" else ""
+        note = ""
+        if m.photos_first and m.attachments:  # 광고: 사진 먼저
+            try:
+                note += self._send_attachments(chat, m)
+            except Exception as exc:
+                self._close(chat)
+                return SendResult(m.key, m.to, False, f"사진 올리기 실패: {exc}")
         try:
             if m.text.strip():
                 self.driver.send_text(chat, m.text)
         except Exception as exc:
             self._close(chat)
+            if m.photos_first and m.attachments:  # 사진은 이미 갔으므로 다시 보내면 겹친다
+                return SendResult(m.key, m.to, True, f"{where}'{name}'에 사진만 전송{note} ⚠️ 문구 실패: {exc}")
             return SendResult(m.key, m.to, False, f"메시지 입력 실패: {exc}")
-        note = " ⚠️ 전송 확인 필요(카톡 창에서 확인)" if getattr(self.driver, "unverified", False) else ""
-        if m.attachments:
+        note += " ⚠️ 전송 확인 필요(카톡 창에서 확인)" if getattr(self.driver, "unverified", False) else ""
+        if m.attachments and not m.photos_first:
             try:
                 note += self._send_attachments(chat, m)
             except Exception as exc:
                 # 글은 이미 갔으므로 '성공'으로 남겨 중복 발송을 막고, 첨부 실패는 경고로 알린다
                 note += f" ⚠️ 첨부 실패: {exc}"
         self._close(chat)
+        # 2026-10-10 광고 올리기: 직원 프로필 전송(친구 목록 → 프로필 전송 → 이 방)
+        for friend in m.profiles:
+            if not hasattr(self.driver, "send_profile"):
+                note += f" ⚠️ 프로필 전송 미지원({friend})"
+                continue
+            try:
+                self.driver.send_profile(friend, name)
+                note += f" (+{friend} 프로필)"
+            except Exception as exc:
+                note += f" ⚠️ {friend} 프로필 실패: {exc}"
         return SendResult(m.key, m.to, True, f"{where}'{name}'에게 전송{note}")
 
     def _send_attachments(self, chat, m: OutgoingMessage) -> str:
@@ -767,7 +927,8 @@ class KakaoPCSender:
         parts = []
         if photos and hasattr(self.driver, "send_image"):
             try:
-                merged = merge_photos(photos, Path(photos[0]).parent / "_merged", stem="입고사진")
+                merged = (merge_photos(photos, Path(photos[0]).parent / "_merged", stem="입고사진") if m.merge_photos
+                          else [Path(p) for p in photos])  # 광고 사진은 한 장씩 그대로
             except ImportError:  # Pillow 가 없으면 파일로라도 보낸다
                 merged = []
             if merged:

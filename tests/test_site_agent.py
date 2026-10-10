@@ -304,3 +304,51 @@ def test_search_queries_try_core_name():
 
     assert search_queries("KF - 유진애견샵") == ["KF - 유진애견샵", "유진애견샵", "KF-유진애견샵"]
     assert search_queries("유니") == ["유니"]
+
+
+class FakeKakaoProfile(FakeKakao):
+    def __init__(self, rooms):
+        super().__init__(rooms)
+        self.order, self.profiles = [], []
+
+    def send_text(self, chat, text):
+        self.order.append("text")
+        super().send_text(chat, text)
+
+    def send_image(self, chat, path):
+        self.order.append("image")
+
+    def send_profile(self, friend, room):
+        self.order.append("profile")
+        self.profiles.append((friend, room))
+
+
+def test_ad_sends_photo_then_text_then_profiles(tmp_path):
+    from PIL import Image
+
+    class API(FakeAPI):
+        def download(self, att, folder):
+            folder.mkdir(parents=True, exist_ok=True)
+            p = folder / att["name"]
+            Image.new("RGB", (20, 20), "red").save(p, "JPEG")
+            return p
+
+    api = API([{**msg(1, "필리핀 세부 자유여행 시즌2", "광고 문구", atts=[{"name": "ad.jpg", "url": "/a.jpg"}]),
+                "kind": "ad", "profiles": ["kflogistics", "양수경 대리님"]}])
+    kakao = FakeKakaoProfile({"필리핀 세부 자유여행 시즌2"})
+    agent = make_agent(api, kakao, tmp_path)
+    agent.tick()
+    assert kakao.order == ["image", "text", "profile", "profile"]
+    assert kakao.profiles == [("kflogistics", "필리핀 세부 자유여행 시즌2"), ("양수경 대리님", "필리핀 세부 자유여행 시즌2")]
+    assert api.status() == {1: "sent"}
+
+
+def test_find_line_matches_ocr_text():
+    from receivables.kakao_names import OcrLine
+    from receivables.kakao_pc import find_line
+
+    lines = [OcrLine("공유 대상 선택", 10, 10, 100, 12), OcrLine("친구", 10, 40, 20, 12), OcrLine("채팅", 50, 40, 20, 12),
+             OcrLine("채팅하기", 10, 80, 40, 12), OcrLine("확인", 200, 600, 20, 12)]
+    assert find_line(lines, "채팅", exact=True, below=10).x == 50
+    assert find_line(lines, "프로필 전송") is None
+    assert find_line(lines, "공유대상선택").y == 10

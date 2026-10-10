@@ -23,6 +23,10 @@ class OutgoingMessage:
     chat_name: str = ""  # PC 카카오톡에서 찾을 친구/채팅방 이름
     search_tab: str = ""  # PC 카카오톡: "friends"(친구) | "chats"(채팅방) | ""(기본 설정)
     attachments: list[str] = field(default_factory=list)  # PC 카카오톡: 함께 보낼 사진·파일 경로
+    # 2026-10-10 광고 올리기: 사진 → 문구 → 직원 프로필 전송 순서, 사진은 이어 붙이지 않고 한 장씩
+    photos_first: bool = False
+    merge_photos: bool = True
+    profiles: list[str] = field(default_factory=list)  # 프로필을 전송할 친구 목록 이름(직원)
 
 
 @dataclass

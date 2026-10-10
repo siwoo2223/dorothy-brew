@@ -37,12 +37,15 @@ class SiteMessage:
     text: str
     attachments: list[dict]
     test: bool = False
+    kind: str = ""
+    profiles: list[str] | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "SiteMessage":
         return cls(int(d["id"]), str(d.get("customer", "")), str(d.get("room", "")),
                    "friends" if d.get("tab") == "friends" else "chats", str(d.get("text", "")),
-                   list(d.get("attachments") or []), bool(d.get("test")))
+                   list(d.get("attachments") or []), bool(d.get("test")), str(d.get("kind") or ""),
+                   [str(p) for p in (d.get("profiles") or []) if str(p).strip()])
 
 
 class SiteAPI:
@@ -310,8 +313,10 @@ class Agent:
             self.log(f"  ❌ {label}: 첨부 받기 실패 - {exc}")
             self.reporter.add(m.id, "failed", f"첨부(사진·파일)를 받지 못함: {exc}")
             return SendResult(str(m.id), m.room, False, str(exc))
+        ad = m.kind == "ad"  # 광고: 사진 → 문구 → 직원 프로필, 사진은 한 장씩
         out = OutgoingMessage(key=str(m.id), to=m.room, text=m.text, variables={}, chat_name=m.room,
-                              search_tab=m.tab, attachments=files)
+                              search_tab=m.tab, attachments=files, photos_first=ad, merge_photos=not ad,
+                              profiles=list(m.profiles or []))
         try:
             result = sender.send([out])[0]
         except Exception as exc:  # 예상 못 한 오류도 그 건만 실패로 남기고 계속
