@@ -161,6 +161,9 @@ class Win32KakaoDriver:
 
         box = visible(tab)
         if not box:
+            # 2026-10-10 진단 '입력칸 0x0': 새 카톡 화면은 목록 위 🔍 아이콘을 눌러야 검색칸이 나온다 → 먼저 열어 본다.
+            box = self._open_search(main, tab, visible)
+        if not box:
             # 2026-10-10 요청 - "검색이 채팅으로 안되어있으면 채팅으로 바꾸어서 눌러서 진행": 카톡 메인 창이 다른 탭
             # (친구·더보기 등)을 보고 있으면 그 탭의 검색칸이 숨겨져 있다 → 그 탭으로 바꾼 뒤 다시 찾는다.
             self._switch_tab(main, tab)
@@ -181,11 +184,52 @@ class Win32KakaoDriver:
             time.sleep(2.0)
             self._switch_tab(main, tab)
             time.sleep(0.5)
-            box = visible(tab) or visible(other)
+            box = visible(tab) or self._open_search(main, tab, visible) or visible(other)
             if box:
                 return box, (tab if box == self._panel_box(main, tab) else other)
         raise RuntimeError("카카오톡 검색칸을 찾지 못했습니다. 카카오톡 메인 창이 열려 있고 잠금 화면이 아닌지 확인한 뒤 "
                            "'채팅' 탭을 한 번 눌러 두세요. [진단: " + self._diagnose(main) + "]")
+
+    def _open_search(self, main: int, tab: str, visible) -> int:
+        """목록 위 🔍(검색) 아이콘을 눌러 숨은 검색칸을 연다. 단축키 Ctrl+F → 안 되면 아이콘 위치 클릭.
+        아이콘은 '채팅 ▾' 제목 줄 오른쪽 끝 세 아이콘(🔍, 오픈채팅, 새 채팅) 중 맨 왼쪽."""
+        from .kakao_names import _focus, _press, ocr_all_lines
+
+        _, win32con, win32gui = self._w()
+        _focus(main)
+        if win32gui.GetForegroundWindow() == main:
+            _press(win32con.VK_CONTROL, ord("F"))
+            time.sleep(0.6)
+            box = visible(tab)
+            if box:
+                self._log("검색칸을 열었습니다(Ctrl+F)")
+                return box
+        try:
+            import ctypes
+            scale = ctypes.windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        left, top, right, _b = win32gui.GetWindowRect(main)
+        # 제목('채팅'/'친구') 글자 줄 높이에 맞춰 누른다. 못 읽으면 창 위에서 약 57px.
+        y = top + 57 * scale
+        try:
+            head = find_line(ocr_all_lines(main), "채팅" if tab == "chats" else "친구", exact=False)
+            if head and head.y - top < 120 * scale:
+                y = head.y + head.h / 2
+        except Exception:
+            pass
+        for dx in (111, 104, 118, 126):  # 오른쪽 끝에서 🔍 까지(오픈채팅 아이콘은 약 72 - 그보다 멀리만 누른다)
+            before = self._kakao_windows()
+            _focus(main)
+            self._click_at(right - dx * scale, y)
+            time.sleep(0.6)
+            for h in set(self._kakao_windows()) - set(before):  # 다른 창이 뜨면 닫는다
+                win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+            box = visible(tab)
+            if box:
+                self._log("목록 위 🔍 아이콘을 눌러 검색칸을 열었습니다")
+                return box
+        return 0
 
     def _diagnose(self, main: int) -> str:
         """검색칸을 못 찾았을 때 원인을 알 수 있게 메인 창 상태를 짧게 적는다."""
@@ -561,9 +605,18 @@ class Win32KakaoDriver:
             # 2026-10-10 - 프로필 실패 로그의 '읽은 글자: 전체, 즐겨찾기 안읽음, 기나글로벌…' = 채팅 탭 화면이었다.
             # 친구 탭 검색칸은 채팅 탭에서도 크기가 있어 '보인다'고 잘못 판단했다 → 항상 친구 탭으로 바꾸고 화면 글자로 확인한다.
             self._ensure_friends_tab(main)
-            box = self._panel_box(main, "friends")
+            def visible_box(t: str) -> int:
+                b = self._panel_box(main, t)
+                if b:
+                    bl, _bt, br, _bb = win32gui.GetWindowRect(b)
+                    if br - bl > 0:
+                        return b
+                return 0
+
+            # 새 카톡 화면은 🔍 아이콘을 눌러야 검색칸이 나온다
+            box = visible_box("friends") or self._open_search(main, "friends", visible_box)
             if not box:
-                raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다")
+                raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다 [진단: " + self._diagnose(main) + "]")
             win32api.SendMessage(box, win32con.WM_SETTEXT, 0, friend)
             time.sleep(self.wait)
             results = self._search_list(main, "friends")
