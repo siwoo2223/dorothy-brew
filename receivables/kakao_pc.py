@@ -579,6 +579,109 @@ class Win32KakaoDriver:
                 pass
             _keep_on_top(main, False)
 
+    def send_photo_album(self, chat, files: list[str]) -> None:
+        """사진 여러 장을 카톡 '사진 묶음'으로: 채팅방 왼쪽 아래 📄(파일) 버튼 → 파일 선택 창에서 그 폴더로 이동 →
+        사진 전부 선택 → 열기 → (카톡 확인 창이 뜨면) 전송.
+
+        2026-10-10 요청 - "탐색기에서 복사해서 하는 방식은 안되고, 왼쪽 아래 파일 버튼 눌러서 위치로 가서 1~15번 사진을 눌러줘야".
+        사진은 짧은 이름(01.jpg …)으로 한 폴더에 모아 순서대로 선택한다.
+        """
+        import shutil
+        import tempfile
+
+        win32api, win32con, win32gui = self._w()
+        folder = Path(tempfile.mkdtemp(prefix="kf_album_"))
+        names = []
+        for i, f in enumerate(files, start=1):
+            name = f"{i:02d}{Path(f).suffix.lower() or '.jpg'}"
+            shutil.copyfile(f, folder / name)
+            names.append(name)
+
+        self._raise_chat(chat)
+        before = self._kakao_windows()
+        dialog = 0
+        # ① 채팅방 왼쪽 아래 세 번째 아이콘(📄 파일)을 누른다. 안 뜨면 단축키(Ctrl+T)
+        try:
+            import ctypes
+            scale = ctypes.windll.user32.GetDpiForWindow(chat) / 96.0
+        except Exception:
+            scale = 1.0
+        left, _t, _r, bottom = win32gui.GetWindowRect(chat)
+        for dx, dy in ((100, 28), (96, 32), (104, 24)):
+            self._raise_chat(chat)
+            self._click_at(left + dx * scale, bottom - dy * scale)
+            dialog = self._file_dialog(before, 3.0)
+            if dialog:
+                break
+        if not dialog:
+            self._raise_chat(chat)
+            self._key(win32con.VK_CONTROL, ord("T"))
+            dialog = self._file_dialog(before, 3.0)
+        if not dialog:
+            raise RuntimeError("파일 선택 창이 뜨지 않았습니다(채팅방 왼쪽 아래 📄 버튼)")
+        edit = self._dialog_filename_edit(dialog)
+        if not edit:
+            win32api.PostMessage(dialog, win32con.WM_CLOSE, 0, 0)
+            raise RuntimeError("파일 선택 창의 '파일 이름' 칸을 찾지 못했습니다")
+        open_btn = win32gui.GetDlgItem(dialog, 1)  # '열기' 버튼(IDOK)
+        # ② 폴더로 이동: 파일 이름 칸에 폴더 경로를 넣고 열기
+        win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, str(folder))
+        time.sleep(0.3)
+        win32api.SendMessage(open_btn, win32con.BM_CLICK, 0, 0)
+        time.sleep(1.2)
+        # ③ 사진 전부 선택: "01.jpg" "02.jpg" … 를 넣고 열기
+        edit = self._dialog_filename_edit(dialog) or edit
+        win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, " ".join(f'"{n}"' for n in names))
+        time.sleep(0.3)
+        before = self._kakao_windows()
+        win32api.SendMessage(win32gui.GetDlgItem(dialog, 1), win32con.BM_CLICK, 0, 0)
+        time.sleep(1.5)
+        if win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog):
+            win32api.PostMessage(dialog, win32con.WM_CLOSE, 0, 0)
+            raise RuntimeError("파일 선택 창에서 사진을 열지 못했습니다")
+        self._log(f"파일 선택 창에서 사진 {len(names)}장 선택")
+        # ④ 카톡이 '전송' 확인 창을 띄우면 '전송' 버튼을 누른다(안 뜨면 바로 올라가는 것)
+        confirm = next((h for h in self._kakao_windows() if h not in before and h != chat), 0)
+        if confirm:
+            from .kakao_names import ocr_all_lines
+
+            lines = ocr_all_lines(confirm)
+            button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
+            if button:
+                self._click_at(button.x + button.w / 2, button.y + button.h / 2)
+                self._log(f"사진 전송 확인 창의 '{button.text}' 누름")
+            else:
+                self._key(win32con.VK_RETURN)
+            time.sleep(1.0)
+        time.sleep(3.0 + 0.7 * len(names))  # 올라가는 시간(닫을 때도 다 올라갈 때까지 기다림)
+
+    def _file_dialog(self, before: dict[int, str], seconds: float) -> int:
+        """새로 뜬 윈도우 파일 선택 창(#32770)."""
+        _, _, win32gui = self._w()
+        end = time.time() + seconds
+        while time.time() < end:
+            for h in self._kakao_windows():
+                if h not in before and win32gui.GetClassName(h) == "#32770":
+                    time.sleep(0.5)
+                    return h
+            time.sleep(0.2)
+        return 0
+
+    def _dialog_filename_edit(self, dialog: int) -> int:
+        """파일 선택 창의 '파일 이름' 입력칸(ComboBoxEx32 > ComboBox > Edit)."""
+        _, _, win32gui = self._w()
+        found: list[int] = []
+
+        def visit(h, _):
+            if win32gui.GetClassName(h) == "Edit" and win32gui.IsWindowVisible(h):
+                parent = win32gui.GetParent(h)
+                if win32gui.GetClassName(parent) == "ComboBox" and win32gui.GetClassName(win32gui.GetParent(parent)) == "ComboBoxEx32":
+                    found.append(h)
+            return True
+
+        win32gui.EnumChildWindows(dialog, visit, None)
+        return found[0] if found else 0
+
     def _ensure_friends_tab(self, main: int) -> None:
         """카톡 메인 창을 친구 탭으로. 단축키(Ctrl+1) → 화면에 채팅 탭 글자(안읽음 등)가 보이면 왼쪽 첫째 아이콘 클릭."""
         from .kakao_names import _focus, _press, ocr_all_lines
@@ -984,8 +1087,10 @@ class KakaoPCSender:
         if photos and not m.merge_photos:
             # 2026-10-10 요청 - 광고 사진은 카톡 '사진 묶음'(바둑판 앨범)으로: 여러 장을 한 번에 붙여넣으면 카톡이 묶어서 보낸다.
             # (이어 붙인 세로 그림이 아니라) 카톡 한 번에 최대 30장이라 30장씩 나눈다.
+            # 2026-10-10 - 붙여넣기로는 묶음이 안 가서, 채팅방 📄 버튼 → 파일 선택 창에서 한 번에 고르는 방식
+            send = getattr(self.driver, "send_photo_album", None) or self.driver.send_files
             for i in range(0, len(photos), 30):
-                self.driver.send_files(chat, photos[i:i + 30])
+                send(chat, photos[i:i + 30])
             parts.append(f"사진 {len(photos)}장 묶음")
             photos = []
         if photos and hasattr(self.driver, "send_image"):
