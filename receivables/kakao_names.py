@@ -396,9 +396,17 @@ def _ocr_screen(hwnd: int):
 def ocr_all_lines(hwnd: int, words: bool = False) -> list[OcrLine]:
     """창 전체를 OCR 해서 모든 글자 줄을 '화면 좌표'로 돌려준다(메뉴·대화상자의 버튼·탭 글자 찾기용).
     words=True 면 줄 대신 낱말마다 돌려준다('친구 채팅' 처럼 탭 글자가 한 줄로 붙어 읽힐 때)."""
+    import win32gui
+
+    _dpi_aware()
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    return ocr_rect(left, top, right, bottom, words=words)
+
+
+def ocr_rect(left: int, top: int, right: int, bottom: int, words: bool = False) -> list[OcrLine]:
+    """화면의 한 구역을 OCR (창을 따로 찾을 수 없는 메뉴 등)."""
     import asyncio
 
-    import win32gui
     from PIL import Image, ImageGrab, ImageOps
     from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
     from winrt.windows.storage.streams import DataWriter
@@ -406,7 +414,7 @@ def ocr_all_lines(hwnd: int, words: bool = False) -> list[OcrLine]:
     engine = _korean_ocr_engine()
     _dpi_aware()
     scale = 3
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    left, top, right, bottom = int(left), int(top), int(right), int(bottom)
     img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
     img = ImageOps.autocontrast(ImageOps.grayscale(img))
     img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")

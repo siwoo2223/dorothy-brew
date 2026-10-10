@@ -718,7 +718,7 @@ class Win32KakaoDriver:
         2026-10-10 요청 - "내프로필은 아니라 직원들 프로필을 올릴꺼야": 광고 올리기의 마지막 단계.
         글자 인식(OCR)으로 메뉴·탭·버튼 글자를 찾아 누른다. 못 찾으면 대화상자를 닫고 오류를 낸다(이미 간 사진·문구는 그대로).
         """
-        from .kakao_names import _keep_on_top, _ocr_screen, ocr_all_lines, pick_search_result
+        from .kakao_names import _focus, _keep_on_top, _ocr_screen, ocr_all_lines, pick_search_result
 
         win32api, win32con, win32gui = self._w()
         main = self._main()
@@ -761,15 +761,28 @@ class Win32KakaoDriver:
                 idx = titles.index(rows[0])
                 self._log(f"'{friend}' 이름 글자는 못 읽었지만 검색 결과 첫 줄('{rows[0].text}')을 사용")
             row = titles[idx]
-            before = self._kakao_windows()
-            self._click_at(row.x + min(row.w, 40) / 2, row.y + row.h / 2, right=True)
-            menu = self._new_window(before, 3.0)
-            if not menu:
-                raise RuntimeError("오른쪽 클릭 메뉴가 뜨지 않았습니다")
-            item = find_line(ocr_all_lines(menu), "프로필 전송")
+            # 2026-10-10 - 새 카톡 화면에서 "오른쪽 클릭 메뉴가 뜨지 않았습니다": 메뉴가 따로 창으로 안 잡힐 수 있다
+            # → 창으로 못 잡으면 누른 곳 주변 화면을 읽어 '프로필 전송' 글자를 찾는다. 이름 칸·줄 가운데 두 곳을 시도.
+            from .kakao_names import ocr_rect
+            ml, mt, mr, mb = win32gui.GetWindowRect(main)
+            item, menu, seen = None, 0, []
+            for x in (row.x + min(row.w, 40) / 2, (ml + mr) / 2):
+                _focus(main)
+                before = self._kakao_windows()
+                self._click_at(x, row.y + row.h / 2, right=True)
+                menu = self._new_window(before, 2.0)
+                if menu:
+                    lines = ocr_all_lines(menu)
+                else:
+                    lines = ocr_rect(x - 300, row.y - 450, x + 320, row.y + 480)
+                seen = [ln.text for ln in lines]
+                item = find_line(lines, "프로필 전송")
+                if item:
+                    break
+                self._key(win32con.VK_ESCAPE)  # 엉뚱한 메뉴가 떴으면 닫기
+                time.sleep(0.4)
             if not item:
-                win32api.PostMessage(menu, win32con.WM_KEYDOWN, win32con.VK_ESCAPE, 0)
-                raise RuntimeError("메뉴에서 '프로필 전송'을 찾지 못했습니다")
+                raise RuntimeError(f"오른쪽 클릭 메뉴에서 '프로필 전송'을 찾지 못했습니다(누른 줄: '{row.text}', 읽은 글자: {', '.join(seen[:8])})")
             before = self._kakao_windows()
             self._click_at(item.x + item.w / 2, item.y + item.h / 2)
             dialog = self._new_window(before, 4.0)
