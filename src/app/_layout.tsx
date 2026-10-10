@@ -4,6 +4,7 @@ import { Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../lib/notifications';
+import { VoiceLauncher } from '../components/VoiceLauncher';
 import { StoreProvider } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -18,6 +19,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <StoreProvider>
         <StatusBar style="auto" />
+        <VoiceLauncher />
         <Tabs
           screenOptions={{
             headerStyle: { backgroundColor: theme.bg },

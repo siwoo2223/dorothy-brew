@@ -23,12 +23,38 @@
 - **🔊 음성 대화** 모드를 켜면 도로시가 답을 읽은 뒤 다시 들어서, 손을 쓰지 않고 계속 대화할 수 있습니다.
 - 음성으로 물으면 도로시는 목록 대신 짧은 구어체로 답합니다. 음성 인식은 휴대폰 기본 음성 인식(한국어)을 씁니다.
 
+**빅스비처럼 부르기**
+- **👂 대기 모드**: 화면이 켜진 동안 "도로시야"라고 부르면 바로 대답합니다. "도로시야, 내일 일정 알려줘"처럼 한 번에 말해도 되고, 대답 뒤에는 이름 없이 한 번 더 이어서 말할 수 있어요.
+- **열면 바로 듣기**: 설정 → 음성 호출에서 고르면, 앱을 어떤 방법으로 열든 바로 듣기(또는 대기 모드)로 시작합니다. 갤럭시 측면 버튼 두 번 누르기, "하이 빅스비, 도로시 열어 줘", 기본 디지털 어시스턴트 제스처로 열 수 있어요.
+
 예시:
 - "나 다음 달부터 판교로 출근해. 커피는 디카페인만 마셔" → 기억 2개 저장
 - "금요일 오후 3시 치과 예약 알려줘" → 할 일 등록 + 알림 예약
 - "이번 주에 놓친 거 있어?" → 기한 지난 일, 다가오는 기념일 등을 짚어 줌
 
-## 실행 방법
+## 휴대폰에 설치하기 (갤럭시 / 안드로이드)
+
+GitHub가 앱을 대신 빌드해 줍니다. 컴퓨터에 개발 도구를 설치할 필요가 없어요.
+
+**처음 한 번: 서명 키 등록**
+1. GitHub 저장소 → **Settings → Secrets and variables → Actions → New repository secret**
+2. `ANDROID_KEYSTORE_BASE64`: 따로 받은 `keystore-base64.txt`의 내용 전체
+3. `ANDROID_KEYSTORE_PASSWORD`: 따로 받은 `keystore-password.txt`의 내용
+4. (Google 연결을 쓸 때) **Variables** 탭에 `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` 추가
+
+서명 키는 앱의 신분증입니다. 매번 같은 키로 서명해야 업데이트가 덮어쓰기로 설치되고 데이터가 지워지지 않아요. 키 파일은 잃어버리지 않게 따로 보관하세요.
+
+**빌드 받기**
+- `main` 브랜치에 코드가 올라가면 자동으로 빌드되어 저장소의 **Releases**에 `dorothy.apk`가 올라옵니다(15~20분). 수동으로는 **Actions → Android APK → Run workflow**.
+- 휴대폰 브라우저로 Releases 페이지를 열고 `dorothy.apk`를 눌러 내려받습니다.
+- 설치할 때 "출처를 알 수 없는 앱" 허용을 물으면 허용합니다. Play 프로텍트 경고가 나오면 "무시하고 설치"를 누릅니다(직접 만든 앱이라 Play 스토어에 없어서 그래요).
+- 새 버전도 같은 방법으로 설치하면 기존 데이터가 그대로 유지된 채 업데이트됩니다.
+
+> 저장소가 공개(public) 상태라 Releases의 APK도 누구나 받을 수 있습니다. APK 안에는 API 키나 개인 데이터가 없지만(모두 앱 안에서 입력), 원하면 저장소를 비공개로 바꿔도 빌드는 그대로 동작합니다.
+
+**Google 로그인용 SHA-1**: Android OAuth 클라이언트를 만들 때 서명 키의 SHA-1 지문을 넣습니다. 이 값도 따로 전달했어요.
+
+## 실행 방법 (개발용)
 
 ```bash
 npm install
@@ -79,7 +105,9 @@ src/
   lib/store.tsx     기억·할 일·대화 저장 (AsyncStorage, API 키는 SecureStore)
   lib/notifications.ts  할 일 알림, 아침 브리핑 알림
   lib/google.ts     Google 로그인(PKCE), 캘린더·Gmail API
-  lib/voice.ts      음성 인식(expo-speech-recognition), 음성 읽기(expo-speech)
+  lib/voice.ts      음성 인식(expo-speech-recognition), 음성 읽기(expo-speech), 호출어 인식
+plugins/withAssistIntent.js  안드로이드 기본 디지털 어시스턴트로 지정할 수 있게 등록
+.github/workflows/android-apk.yml  GitHub Actions로 APK 빌드·배포
 ```
 
 ## 개인정보
@@ -90,6 +118,6 @@ src/
 
 ## 다음에 붙이면 좋을 것
 
-- "헤이 도로시" 호출어로 깨우기
+- 화면이 꺼져 있어도 "도로시야"로 깨우기 (상시 백그라운드 호출어 엔진 필요)
 - 위치 기반 알림 ("마트 근처에 가면 우유 사라고 알려줘")
 - 여러 기기 동기화를 위한 백엔드

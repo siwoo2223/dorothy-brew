@@ -4,6 +4,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
+import { VoiceCard } from '../components/VoiceCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -45,6 +46,8 @@ export default function Settings() {
         <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
         <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
       </Card>
+
+      <VoiceCard />
 
       <GoogleCard />
 

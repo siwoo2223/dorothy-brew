@@ -58,24 +58,42 @@ export function stopSpeaking() {
 
 type VoiceState = 'idle' | 'listening' | 'error';
 
+// Recognizers spell the name several ways ("도로시야", "도로 시", "돌아시").
+const WAKE_WORD = /(도\s?로\s?시|돌\s?로\s?시|돌아시|도로씨)(야|아|여)?[\s,.!?~]*/;
+
+/**
+ * Returns the request that follows the wake word ("도로시야 내일 일정 알려줘" → "내일 일정 알려줘"),
+ * an empty string when only the name was said, or null when the wake word wasn't heard.
+ */
+export function extractWakeCommand(text: string): string | null {
+  const match = WAKE_WORD.exec(text);
+  if (!match) return null;
+  return text.slice(match.index + match[0].length).trim();
+}
+
 /**
  * Push-to-talk speech recognition. `onFinal` receives the finished sentence; `transcript`
  * shows what has been heard so far while the user is still talking.
  */
-export function useVoiceInput(onFinal: (text: string) => void) {
+export function useVoiceInput(onFinal: (text: string) => void, onEnd?: () => void) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
   const onFinalRef = useRef(onFinal);
+  const onEndRef = useRef(onEnd);
   useEffect(() => {
     onFinalRef.current = onFinal;
-  }, [onFinal]);
+    onEndRef.current = onEnd;
+  }, [onFinal, onEnd]);
 
   useEffect(() => {
     if (!recognizer) return;
     const subs = [
       recognizer.addListener('start', () => setState('listening')),
-      recognizer.addListener('end', () => setState((s) => (s === 'listening' ? 'idle' : s))),
+      recognizer.addListener('end', () => {
+        setState((s) => (s === 'listening' ? 'idle' : s));
+        onEndRef.current?.();
+      }),
       recognizer.addListener('result', (event) => {
         const text = event.results[0]?.transcript ?? '';
         setTranscript(text);
@@ -97,7 +115,8 @@ export function useVoiceInput(onFinal: (text: string) => void) {
     return () => subs.forEach((s) => s.remove());
   }, []);
 
-  const start = useCallback(async () => {
+  /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). */
+  const start = useCallback(async (opts: { continuous?: boolean } = {}) => {
     if (!recognizer) return;
     stopSpeaking();
     setError('');
@@ -108,7 +127,7 @@ export function useVoiceInput(onFinal: (text: string) => void) {
       setState('error');
       return;
     }
-    recognizer.start({ lang: LANG, interimResults: true, continuous: false, addsPunctuation: true });
+    recognizer.start({ lang: LANG, interimResults: true, continuous: !!opts.continuous, addsPunctuation: true });
   }, []);
 
   const stop = useCallback(() => recognizer?.stop(), []);

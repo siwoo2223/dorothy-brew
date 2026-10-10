@@ -12,6 +12,7 @@ const KEYS = {
   profile: 'dorothy.profile',
   chat: 'dorothy.chat',
   briefingHour: 'dorothy.briefingHour',
+  voiceOnOpen: 'dorothy.voiceOnOpen',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
@@ -29,7 +30,11 @@ export type AppState = {
   apiKey: string;
   /** Hour (0-23) of the daily briefing notification, or null when off. */
   briefingHour: number | null;
+  /** What happens when the app is opened: nothing, listen once, or enter standby. */
+  voiceOnOpen: VoiceOnOpen;
 };
+
+export type VoiceOnOpen = 'off' | 'listen' | 'standby';
 
 const initialState: AppState = {
   tasks: [],
@@ -38,6 +43,7 @@ const initialState: AppState = {
   chat: [],
   apiKey: '',
   briefingHour: null,
+  voiceOnOpen: 'off',
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -56,13 +62,14 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
         AsyncStorage.getItem(KEYS.chat),
         AsyncStorage.getItem(KEYS.briefingHour),
         secret.get(API_KEY),
+        AsyncStorage.getItem(KEYS.voiceOnOpen),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -70,6 +77,7 @@ function useStoreValue() {
         profile: profile ? JSON.parse(profile) : initialState.profile,
         chat: chat ? JSON.parse(chat) : [],
         briefingHour: hour ? Number(hour) : null,
+        voiceOnOpen: voiceOnOpen ? JSON.parse(voiceOnOpen) : 'off',
         apiKey: apiKey ?? '',
       };
       setState(ref.current);
@@ -95,6 +103,7 @@ function useStoreValue() {
       setProfile: (profile: Profile) => update('profile', profile),
       setApiKey: (key: string) => update('apiKey', key.trim()),
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
+      setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
