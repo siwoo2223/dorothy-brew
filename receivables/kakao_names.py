@@ -393,8 +393,9 @@ def _ocr_screen(hwnd: int):
     return read_titles
 
 
-def ocr_all_lines(hwnd: int) -> list[OcrLine]:
-    """창 전체를 OCR 해서 모든 글자 줄을 '화면 좌표'로 돌려준다(메뉴·대화상자의 버튼·탭 글자 찾기용)."""
+def ocr_all_lines(hwnd: int, words: bool = False) -> list[OcrLine]:
+    """창 전체를 OCR 해서 모든 글자 줄을 '화면 좌표'로 돌려준다(메뉴·대화상자의 버튼·탭 글자 찾기용).
+    words=True 면 줄 대신 낱말마다 돌려준다('친구 채팅' 처럼 탭 글자가 한 줄로 붙어 읽힐 때)."""
     import asyncio
 
     import win32gui
@@ -418,6 +419,11 @@ def ocr_all_lines(hwnd: int) -> list[OcrLine]:
 
     out = []
     for line in asyncio.run(recognize()).lines:
+        if words:
+            for w in line.words:
+                r = w.bounding_rect
+                out.append(OcrLine(w.text, left + r.x / scale, top + r.y / scale, r.width / scale, r.height / scale))
+            continue
         rects = [w.bounding_rect for w in line.words]
         if not rects:
             continue

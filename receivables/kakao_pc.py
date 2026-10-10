@@ -67,6 +67,10 @@ def search_queries(name: str) -> list[str]:
     return out
 
 
+# 친구 탭 검색 결과의 머리말 줄('친구 1', '즐겨찾기' 등) - 사람 이름 줄이 아니다
+FRIEND_HEADER = re.compile(r"^(친구|즐겨찾기|내\s*프로필|채널|추천\s*친구|업데이트한\s*프로필|생일인\s*친구)\s*\d*$")
+
+
 def find_line(lines, want: str, exact: bool = False, below: float | None = None):
     """OCR 줄들 중 글자가 want 와 같은(또는 want 를 포함하는) 줄. 띄어쓰기·기호는 무시. below 가 있으면 그 아래 줄만."""
     def key(s: str) -> str:
@@ -532,7 +536,14 @@ class Win32KakaoDriver:
                 titles = [ln for ln in ocr_all_lines(main) if ln.y > box_bottom + 2]
             idx = pick_search_result(friend, [x.text for x in titles])
             if idx is None:
-                raise RuntimeError(f"친구 목록에 '{friend}' 이(가) 없습니다(읽은 글자: {', '.join(x.text for x in titles[:6])})")
+                # 2026-10-10 - 'kflogistics' 는 검색 결과가 한 줄인데 이름 글자를 못 읽고 상태 메시지
+                # ('평일8-5시 토요일 8-13시 상담가능')만 읽혔다. 검색으로 걸러진 목록이라 머리말('친구 1' 등)을 뺀
+                # 첫 줄이 그 친구다 → 그 줄을 쓴다.
+                rows = [x for x in titles if not FRIEND_HEADER.match(x.text.strip())]
+                if not rows:
+                    raise RuntimeError(f"친구 목록에 '{friend}' 이(가) 없습니다(읽은 글자: {', '.join(x.text for x in titles[:6])})")
+                idx = titles.index(rows[0])
+                self._log(f"'{friend}' 이름 글자는 못 읽었지만 검색 결과 첫 줄('{rows[0].text}')을 사용")
             row = titles[idx]
             before = self._kakao_windows()
             self._click_at(row.x + min(row.w, 40) / 2, row.y + row.h / 2, right=True)
@@ -549,33 +560,43 @@ class Win32KakaoDriver:
             if not dialog:
                 raise RuntimeError("'공유 대상 선택' 창이 뜨지 않았습니다")
             _keep_on_top(dialog, True)
+            time.sleep(0.5)  # 창 안 글자가 다 그려질 시간
             lines = ocr_all_lines(dialog)
-            head = find_line(lines, "공유 대상 선택")
-            tab = find_line(lines, "채팅", exact=True, below=head.y if head else None)
-            if not tab:
-                raise RuntimeError("공유 대상 선택 창에서 '채팅' 탭을 찾지 못했습니다")
-            self._click_at(tab.x + tab.w / 2, tab.y + tab.h / 2)
-            # 검색칸: 창 안의 입력칸(Edit)에 방 이름을 넣는다. 못 찾으면 '채팅' 탭 바로 아래를 눌러 붙여넣기.
-            edit = win32gui.FindWindowEx(dialog, None, CLASS_SEARCH, None)
+            head = find_line(lines, "공유 대상 선택") or find_line(lines, "대화상대 선택")
+            # 2026-10-10 - "'채팅' 탭을 찾지 못했습니다": 탭 글자가 '친구 채팅' 처럼 한 줄로 붙어 읽히면 줄 단위로는
+            # 못 찾는다 → 낱말 단위로도 찾는다. 그래도 없으면(탭 없는 창) 탭을 누르지 않고 바로 검색한다.
+            tab = self._find_tab(dialog, lines, head)
+            if tab:
+                self._click_at(tab.x + tab.w / 2, tab.y + tab.h / 2)
+                time.sleep(0.5)
+            else:
+                self._log(f"공유 대상 선택 창에 '채팅' 탭이 안 보임 → 바로 검색(읽은 글자: {', '.join(x.text for x in lines[:8])})")
+            dl, dt, dr, db = win32gui.GetWindowRect(dialog)
+            top_y = (tab.y + tab.h) if tab else ((head.y + head.h) if head else dt + (db - dt) * 0.1)
+            # 검색칸: 창 안의 입력칸(Edit)에 방 이름을 넣는다. 못 찾으면 탭(또는 제목) 바로 아래를 눌러 붙여넣기.
+            edit = self._find_child(dialog, CLASS_SEARCH)
             if edit:
                 win32api.SendMessage(edit, win32con.WM_SETTEXT, 0, room)
+                top_y = max(top_y, win32gui.GetWindowRect(edit)[3])
             else:
-                dl, dt, dr, db = win32gui.GetWindowRect(dialog)
-                self._click_at((dl + dr) / 2, tab.y + tab.h + (db - dt) * 0.07)
+                self._click_at((dl + dr) / 2, top_y + (db - dt) * 0.07)
                 self._paste_text(room)
+                top_y += (db - dt) * 0.1
             time.sleep(self.wait)
             lines = ocr_all_lines(dialog)
-            tab = find_line(lines, "채팅", exact=True, below=head.y if head else None) or tab
-            names = [ln for ln in lines if ln.y > tab.y + tab.h * 2 and find_line([ln], "확인", exact=True) is None
-                     and find_line([ln], "취소", exact=True) is None]
+            names = [ln for ln in lines if ln.y > top_y and find_line([ln], "확인", exact=True) is None
+                     and find_line([ln], "취소", exact=True) is None
+                     and find_line([ln], "전송", exact=True) is None and find_line([ln], "공유", exact=True) is None]
             idx = pick_search_result(room, [ln.text for ln in names])
             if idx is None:
-                raise RuntimeError(f"공유 대상 '채팅'에서 '{room}' 방을 찾지 못했습니다")
+                raise RuntimeError(f"공유 대상 선택 창에서 '{room}' 방을 찾지 못했습니다(읽은 글자: {', '.join(x.text for x in names[:6])})")
             target = names[idx]
             self._click_at(target.x + min(target.w, 80) / 2, target.y + target.h / 2)
-            ok = find_line(ocr_all_lines(dialog), "확인", exact=True)
+            time.sleep(0.4)
+            lines = ocr_all_lines(dialog)
+            ok = next((b for b in (find_line(lines, w, exact=True, below=target.y) for w in ("확인", "전송", "공유")) if b), None)
             if not ok:
-                raise RuntimeError("'확인' 버튼을 찾지 못했습니다")
+                raise RuntimeError(f"'확인' 버튼을 찾지 못했습니다(읽은 글자: {', '.join(x.text for x in lines[-6:])})")
             self._click_at(ok.x + ok.w / 2, ok.y + ok.h / 2)
             time.sleep(1.0)
             if win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog):
@@ -593,6 +614,41 @@ class Win32KakaoDriver:
             except Exception:
                 pass
             _keep_on_top(main, False)
+
+    def _find_tab(self, dialog: int, lines, head):
+        """공유 대상 선택 창의 '채팅' 탭 글자 위치(줄 → 낱말 순으로 찾기). 없으면 None."""
+        from .kakao_names import ocr_all_lines
+
+        below = head.y if head else None
+        for want in ("채팅", "채팅방"):
+            tab = find_line(lines, want, exact=True, below=below)
+            if tab:
+                return tab
+        try:
+            words = ocr_all_lines(dialog, words=True)
+        except Exception:
+            return None
+        for want in ("채팅", "채팅방"):
+            tab = find_line(words, want, exact=True, below=below)
+            if tab:
+                return tab
+        return None
+
+    def _find_child(self, parent: int, cls: str) -> int:
+        """parent 안(몇 겹 안쪽 포함)에서 보이는 cls 창 하나."""
+        _, _, win32gui = self._w()
+        found = []
+
+        def visit(h, _):
+            if not found and win32gui.GetClassName(h) == cls and win32gui.IsWindowVisible(h):
+                found.append(h)
+            return True
+
+        try:
+            win32gui.EnumChildWindows(parent, visit, None)
+        except Exception:
+            pass
+        return found[0] if found else 0
 
     def send_photo_album(self, chat, files: list[str]) -> None:
         """사진 여러 장을 카톡 '사진 묶음'으로: 채팅방 왼쪽 아래 📄(파일) 버튼 → 파일 선택 창에서 그 폴더로 이동 →
