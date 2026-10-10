@@ -310,10 +310,12 @@ class Win32KakaoDriver:
                     run = [x, x]
                     clusters.append(run)
         clusters = [c for c in clusters if c[1] - c[0] >= 4 * scale]
-        if len(clusters) < 3:
+        # 채팅 탭: 🔍·오픈채팅·새 채팅(오른쪽에서 셋째가 🔍), 친구 탭: 🔍·친구 추가(오른쪽에서 둘째가 🔍)
+        need = 3 if tab == "chats" else 2
+        if len(clusters) < need:
             self._log(f"🔍 아이콘을 화면에서 찾지 못함(아이콘 {len(clusters)}개)")
             return None
-        c = clusters[-3]  # 오른쪽에서 셋째 = 🔍
+        c = clusters[-need]
         return int(title_right) + (c[0] + c[1]) / 2, cy
 
     def _set_search(self, box: int, text: str) -> None:
