@@ -43,7 +43,13 @@
           ]
         }
       ],
-      "./plugins/withAssistIntent"
+      "./plugins/withAssistIntent",
+      [
+        "llama.rn",
+        {
+          "enableOpenCLAndHexagon": true
+        }
+      ]
     ]
   }
 }

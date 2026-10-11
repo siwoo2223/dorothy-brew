@@ -1,9 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 import * as google from './google';
+import { localComplete, LocalMessage } from './localBrain';
 import type { AppState, StoreActions } from './store';
 
-export type ModelChoice = 'haiku' | 'opus';
+/** 'local' runs an open model on the phone (free, private, offline); the others call Claude. */
+export type ModelChoice = 'local' | 'haiku' | 'opus';
+type ClaudeChoice = Exclude<ModelChoice, 'local'>;
+
+const LOCAL_PERSONA = `당신은 "도로시", 한 사람만을 위한 개인 비서입니다. 지금은 사용자의 휴대폰 안에서 직접 동작하고 있어서 대화 내용이 밖으로 나가지 않습니다.
+- 반드시 자연스러운 한국어로, 따뜻하고 간결하게 2~5문장 안에서 답합니다.
+- 아래 "기억 목록"과 "할 일"은 사용자에 대한 사실입니다. 관련 있을 때만 활용하고, 모르는 것은 지어내지 말고 모른다고 말합니다.
+- 지금 모드에서는 인터넷 검색, 캘린더·메일 확인, 할 일·기억 자동 저장을 직접 할 수 없습니다. 그런 일이 필요하면 "설정에서 두뇌를 Claude로 바꾸면 할 수 있어요"라고 짧게 안내합니다.`;
 
 /**
  * Haiku is the everyday default: roughly 40x cheaper than Opus and good enough for a personal assistant.
@@ -16,14 +24,28 @@ const MODELS = {
 } as const;
 
 function modelParams(choice: ModelChoice) {
-  const m = MODELS[choice] ?? MODELS.haiku;
+  const m = MODELS[choice as ClaudeChoice] ?? MODELS.haiku;
   return m.fallback
     ? { model: m.id, betas: ['server-side-fallback-2026-07-01'] as Anthropic.AnthropicBeta[], fallbacks: 'default' as const }
     : { model: m.id };
 }
 
 function webSearchTool(choice: ModelChoice, maxUses: number): Anthropic.Beta.BetaToolUnion {
-  return { type: (MODELS[choice] ?? MODELS.haiku).webSearch, name: 'web_search', max_uses: maxUses };
+  return { type: (MODELS[choice as ClaudeChoice] ?? MODELS.haiku).webSearch, name: 'web_search', max_uses: maxUses };
+}
+
+const LOCAL_HISTORY_TURNS = 8;
+
+/** A turn handled entirely on the phone: no tools, a short history, the same memories and tasks. */
+async function localChat(userText: string, state: AppState, opts: { spoken?: boolean; onToken?: (t: string) => void }) {
+  const history = state.chat.slice(-LOCAL_HISTORY_TURNS);
+  while (history.length && history[0].role !== 'user') history.shift();
+  const messages: LocalMessage[] = [
+    { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+    ...history.map((t) => ({ role: t.role, content: t.text })),
+    { role: 'user', content: opts.spoken ? `${userText}\n(음성 대화예요. 목록 없이 짧은 구어체로 답해 주세요.)` : userText },
+  ];
+  return (await localComplete(messages, opts.onToken)) || '(응답이 비어 있어요. 다시 말씀해 주세요.)';
 }
 const HISTORY_TURNS = 40;
 const MAX_TOOL_ROUNDS = 8;
@@ -295,7 +317,13 @@ export function describeError(error: unknown): string {
  * finishes, and returns her reply. Within the turn the message list is append-only, so thinking
  * blocks stay valid; only the final text is persisted between turns.
  */
-export async function chat(userText: string, state: AppState, actions: StoreActions, opts: { spoken?: boolean } = {}): Promise<string> {
+export async function chat(
+  userText: string,
+  state: AppState,
+  actions: StoreActions,
+  opts: { spoken?: boolean; onToken?: (token: string) => void } = {},
+): Promise<string> {
+  if (state.model === 'local') return localChat(userText, state, opts);
   const client = createClient(state);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
@@ -359,6 +387,16 @@ export async function chat(userText: string, state: AppState, actions: StoreActi
 
 /** A short morning briefing built from tasks and memories, with live info (weather, news) when useful. */
 export async function briefing(state: AppState): Promise<string> {
+  if (state.model === 'local') {
+    return localComplete(
+      [
+        { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+        { role: 'user', content: '오늘의 브리핑을 해 줘. 오늘 꼭 할 일, 기한이 지난 일, 이번 주에 다가오는 일, 기억 목록에서 오늘 챙기면 좋을 것을 짧은 소제목과 글머리표로 정리해 줘.' },
+      ],
+      undefined,
+      700,
+    );
+  }
   const client = createClient(state);
   const googleEmail = await google.connectedEmail();
   let googleData = '';
