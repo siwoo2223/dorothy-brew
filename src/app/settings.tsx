@@ -45,7 +45,10 @@ export default function Settings() {
         <Input value={key} onChangeText={setKey} placeholder="sk-ant-…" autoCapitalize="none" autoCorrect={false} secureTextEntry />
         <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
         <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
+        <WorkspaceField />
       </Card>
+
+      <ModelCard />
 
       <VoiceCard />
 
@@ -84,6 +87,58 @@ export default function Settings() {
         />
       </Card>
     </ScrollView>
+  );
+}
+
+const MODEL_OPTIONS = [
+  { value: 'haiku', label: 'Haiku (추천)', note: '빠르고 아주 저렴해요. 일상 대화·할 일·기억에 충분해요.' },
+  { value: 'opus', label: 'Opus', note: '가장 똑똑하지만 약 40배 비싸요. 복잡한 고민이나 긴 글이 필요할 때만.' },
+] as const;
+
+function ModelCard() {
+  const t = useTheme();
+  const { state, actions } = useStore();
+  const current = MODEL_OPTIONS.find((o) => o.value === state.model) ?? MODEL_OPTIONS[0];
+  return (
+    <Card>
+      <Title>도로시의 두뇌 (모델)</Title>
+      <View style={styles.hours}>
+        {MODEL_OPTIONS.map((o) => {
+          const active = state.model === o.value;
+          return (
+            <Pressable
+              key={o.value}
+              onPress={() => actions.setModel(o.value)}
+              style={[styles.hour, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : 'transparent' }]}
+            >
+              <Text style={{ color: active ? t.accentText : t.text }}>{o.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Body muted>{current.note}</Body>
+    </Card>
+  );
+}
+
+/** Only needed when the key isn't tied to a workspace (the API then asks for anthropic-workspace-id). */
+function WorkspaceField() {
+  const { state, actions } = useStore();
+  const [value, setValue] = useState(state.workspaceId);
+  return (
+    <>
+      <Body muted>워크스페이스 ID (선택) — &quot;not scoped to a workspace&quot; 오류가 날 때만 넣어요. 콘솔의 Settings → Workspaces에서 wrkspc_로 시작하는 ID를 복사하세요.</Body>
+      <Input value={value} onChangeText={setValue} placeholder="wrkspc_…" autoCapitalize="none" autoCorrect={false} />
+      <Button
+        label={state.workspaceId ? '워크스페이스 ID 변경' : '워크스페이스 ID 저장'}
+        variant="ghost"
+        disabled={value.trim() === state.workspaceId}
+        onPress={() => {
+          actions.setWorkspaceId(value);
+          Alert.alert('저장됨', value.trim() ? '이제 이 워크스페이스로 요청해요.' : '워크스페이스 ID를 지웠어요.');
+        }}
+      />
+    </>
   );
 }
 
