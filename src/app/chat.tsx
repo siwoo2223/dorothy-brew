@@ -1,13 +1,13 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '../components/ui';
 import { chat, describeError } from '../lib/assistant';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { useKeyboardInset } from '../lib/useKeyboardInset';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
 
 const SUGGESTIONS = ['내일 아침 8시에 운동 알려줘', '나에 대해 뭘 알고 있어?', '오늘 마닐라 날씨 어때?', '이번 주에 놓친 거 있어?'];
@@ -16,8 +16,8 @@ type Phase = 'off' | 'wake' | 'command' | 'busy';
 
 export default function Chat() {
   const t = useTheme();
-  // Tab screens render a standard navigation header above the content.
-  const headerHeight = useSafeAreaInsets().top + 44;
+  // Keeps the composer above the keyboard (Android no longer resizes the window for it).
+  const keyboard = useKeyboardInset();
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -186,13 +186,15 @@ export default function Chat() {
   });
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerHeight}>
+    <View ref={keyboard.ref} style={{ flex: 1, paddingBottom: keyboard.inset }}>
       <FlatList
         ref={list}
         data={state.chat}
         keyExtractor={(m) => m.id}
         contentContainerStyle={styles.list}
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
+        onLayout={() => list.current?.scrollToEnd({ animated: false })}
+        keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: t.text }]}>무엇을 도와드릴까요?</Text>
@@ -290,7 +292,7 @@ export default function Chat() {
           <Text style={{ color: t.subtext, fontSize: 12 }}>대화 지우기</Text>
         </Pressable>
       )}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
