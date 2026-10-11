@@ -33,6 +33,7 @@ CLASS_SEARCH = "Edit"
 CLASS_INPUT = "RichEdit50W"
 # 새 카톡 화면: 검색칸이 따로 창(Edit)이 아니라 화면을 눌러 입력하는 칸일 때의 표시
 VIRTUAL_BOX = -1
+TRACE_FILE = Path(__file__).resolve().parent.parent / "logs" / "kakao_trace.log"
 # 2026-10-10 - 카톡 메인 창을 이 크기로 맞춘 뒤 검색 버튼을 찾는다(진단에 찍힌 지금 크기)
 KAKAO_MAIN_SIZE = (510, 642)
 
@@ -129,7 +130,22 @@ class Win32KakaoDriver:
         win32api.PostMessage(hwnd, win32con.WM_KEYUP, win32con.VK_RETURN, 0)
 
     def _log(self, text: str) -> None:
+        if not hasattr(self, "trace"):
+            self.trace = []
         self.trace.append(text)
+        # 2026-10-11 - "박대희는 메시지 간 게 없는데 완료": 나중에 무슨 일이 있었는지 볼 수 있게 단계별 기록을
+        # logs/kakao_trace.log 에 남긴다(2MB 넘으면 .old 로 넘김).
+        try:
+            import datetime as _dt
+
+            path = TRACE_FILE
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > 2_000_000:
+                path.replace(path.with_suffix(".old"))
+            with path.open("a", encoding="utf-8") as f:
+                f.write(f"[{_dt.datetime.now():%m-%d %H:%M:%S}] {text}\n")
+        except Exception:
+            pass
 
     def _main(self) -> int:
         win32api, win32con, win32gui = self._w()
@@ -1525,6 +1541,8 @@ class KakaoPCSender:
 
     def _send_one(self, m: OutgoingMessage) -> SendResult:
         name = unicodedata.normalize("NFC", m.chat_name).strip()  # 카톡 창 제목과 같은 '완성형' 한글로
+        if hasattr(self.driver, "_log"):
+            self.driver._log(f"===== 보내기 시작: '{name}' (글 {len(m.text)}자, 첨부 {len(m.attachments)}개)")
         try:
             chat = self.driver.open_chat(name, m.search_tab or None)
         except ChatNotFound as exc:
