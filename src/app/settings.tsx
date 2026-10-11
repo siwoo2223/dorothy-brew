@@ -4,6 +4,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
+import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
@@ -91,8 +92,13 @@ export default function Settings() {
 }
 
 const MODEL_OPTIONS = [
-  { value: 'haiku', label: 'Haiku (추천)', note: '빠르고 아주 저렴해요. 일상 대화·할 일·기억에 충분해요.' },
-  { value: 'opus', label: 'Opus', note: '가장 똑똑하지만 약 40배 비싸요. 복잡한 고민이나 긴 글이 필요할 때만.' },
+  {
+    value: 'local',
+    label: '📱 휴대폰 두뇌',
+    note: '무료 · 대화가 휴대폰 밖으로 나가지 않음 · 인터넷 없이도 동작. 대신 덜 똑똑하고, 검색·캘린더·메일·자동 기억은 못 해요.',
+  },
+  { value: 'haiku', label: 'Claude Haiku', note: '빠르고 아주 저렴해요. 검색·캘린더·메일·자동 기억까지 다 해요.' },
+  { value: 'opus', label: 'Claude Opus', note: '가장 똑똑하지만 약 40배 비싸요. 복잡한 고민이나 긴 글이 필요할 때만.' },
 ] as const;
 
 function ModelCard() {
@@ -117,6 +123,7 @@ function ModelCard() {
         })}
       </View>
       <Body muted>{current.note}</Body>
+      <LocalBrainPanel />
     </Card>
   );
 }

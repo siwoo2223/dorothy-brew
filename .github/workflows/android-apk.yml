@@ -40,6 +40,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The phone downloads this file at runtime, so make sure the URL in localBrain.ts still resolves.
+      - name: Check on-device model URL
+        continue-on-error: true
+        run: |
+          URL=$(grep -o "https://huggingface.co[^']*\.gguf" src/lib/localBrain.ts)
+          echo "Model URL: $URL"
+          curl -sSfIL "$URL" | grep -iE '^(HTTP|content-length|x-linked-size)' || { echo "::warning::Model URL did not resolve: $URL"; exit 1; }
+
       - name: Typecheck and lint
         run: |
           npx tsc --noEmit
@@ -77,7 +85,8 @@ jobs:
               -Pandroid.injected.signing.key.password="$KEYSTORE_PASSWORD"
             )
           fi
-          ./gradlew assembleRelease --no-daemon "${SIGNING[@]}"
+          # arm64 only: every current Galaxy phone, and the on-device LLM (llama.cpp) compiles per ABI.
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a "${SIGNING[@]}"
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/dorothy.apk"
 
       - uses: actions/upload-artifact@v4

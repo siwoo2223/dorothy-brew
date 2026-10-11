@@ -21,6 +21,8 @@ export default function Chat() {
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // The phone brain streams its reply; show it as it is written.
+  const [streaming, setStreaming] = useState('');
   const list = useRef<FlatList>(null);
   const router = useRouter();
   const params = useLocalSearchParams<{ voice?: string }>();
@@ -162,7 +164,11 @@ export default function Chat() {
     actions.appendChat({ role: 'user', text: message });
     const voiceReply = spoken || phase.current !== 'off';
     try {
-      const reply = await chat(message, snapshot, actions, { spoken: voiceReply });
+      const reply = await chat(message, snapshot, actions, {
+        spoken: voiceReply,
+        onToken: (token) => setStreaming((s) => s + token),
+      });
+      setStreaming('');
       actions.appendChat({ role: 'assistant', text: reply });
       if (voiceReply) speak(reply, afterReply);
     } catch (e) {
@@ -170,6 +176,7 @@ export default function Chat() {
       actions.appendChat({ role: 'assistant', text: `⚠️ ${msg}` });
       if (voiceReply) speak(msg, afterReply);
     } finally {
+      setStreaming('');
       setBusy(false);
     }
   };
@@ -214,7 +221,15 @@ export default function Chat() {
             </View>
           );
         }}
-        ListFooterComponent={busy ? <ActivityIndicator style={{ alignSelf: 'flex-start', margin: 8 }} /> : null}
+        ListFooterComponent={
+          streaming ? (
+            <View style={[styles.bubble, { alignSelf: 'flex-start', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+              <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>{streaming}▍</Text>
+            </View>
+          ) : busy ? (
+            <ActivityIndicator style={{ alignSelf: 'flex-start', margin: 8 }} />
+          ) : null
+        }
       />
       {(voice.error || canListen) && (
         <View style={[styles.voiceBar, { borderTopColor: t.border }]}>
