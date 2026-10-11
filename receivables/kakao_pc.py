@@ -1291,13 +1291,40 @@ class Win32KakaoDriver:
                 self._log(f"{label} 가 줄바꿈으로 들어가 지움")
                 continue
             self.send_key = "ctrl+enter" if label == "Ctrl+Enter" else "enter"
-            if after < before:
+            if after < before and not (win32gui.IsWindow(box) and win32gui.IsWindow(chat)):
+                # 2026-10-11 - "박대희는 메시지 간 게 없는데 완료": 창이 사라져도 글자 수가 0 으로 읽혀 '전송됨'이 될 수 있다
+                self.unverified = True
+                self._log(f"{label} 누름 — 채팅방 창이 사라져 전송 여부를 알 수 없음")
+            elif after < before and not self._seen_in_chat(chat, text):
+                self.unverified = True
+                self._log(f"{label} 누름 — 입력칸은 비었지만 채팅방 화면에서 보낸 글을 찾지 못함(전송 확인 필요)")
+            elif after < before:
                 self._log(f"전송됨({label}, 입력칸 비워짐)")
             else:  # 입력칸이 그대로면 확신할 수 없음 → 다시 보내지도, 지우지도 않는다
                 self.unverified = True
                 self._log(f"{label} 누름 — 입력칸에 글이 그대로 있음(전송 확인 필요, 글은 남겨 둠)")
             return
         raise RuntimeError("Enter·Ctrl+Enter 모두 줄바꿈으로만 들어가 전송되지 않았습니다")
+
+    def _seen_in_chat(self, chat, text: str) -> bool:
+        """보낸 글의 앞부분이 채팅방 화면(말풍선)에 보이는지 글자 인식으로 확인. 화면을 못 읽으면 True(판단 보류)."""
+        def key(t: str) -> str:
+            return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", t or "")).lower()
+
+        lines = [key(ln) for ln in text.splitlines() if len(key(ln)) >= 4]
+        if not lines:
+            return True
+        try:
+            from .kakao_names import ocr_all_lines
+
+            time.sleep(0.8)
+            shown = key(" ".join(ln.text for ln in ocr_all_lines(chat)))
+        except Exception:
+            return True
+        # 말풍선은 길면 앞부분만 보이므로 앞쪽 4줄 중 2줄(1줄짜리 글이면 1줄)의 앞 6글자가 보이면 보낸 것으로 본다
+        # (예전에 보낸 같은 머리글 한 줄만으로 '보냄'이 되지 않게)
+        first = lines[:4]
+        return sum(ln[:6] in shown for ln in first) >= min(2, len(first))
 
     def _bring_to_front(self, hwnd) -> None:
         win32api, win32con, win32gui = self._w()
