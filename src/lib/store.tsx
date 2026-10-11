@@ -16,6 +16,7 @@ const KEYS = {
   voiceOnOpen: 'dorothy.voiceOnOpen',
   workspaceId: 'dorothy.workspaceId',
   model: 'dorothy.model',
+  planHour: 'dorothy.planHour',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
@@ -37,6 +38,8 @@ export type AppState = {
   model: ModelChoice;
   /** Hour (0-23) of the daily briefing notification, or null when off. */
   briefingHour: number | null;
+  /** Hour (0-23) of the nightly "plan tomorrow" reminder, or null when off. */
+  planHour: number | null;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
   voiceOnOpen: VoiceOnOpen;
 };
@@ -52,6 +55,7 @@ const initialState: AppState = {
   workspaceId: '',
   model: 'haiku',
   briefingHour: null,
+  planHour: null,
   voiceOnOpen: 'off',
 };
 
@@ -71,7 +75,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -81,6 +85,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.voiceOnOpen),
         AsyncStorage.getItem(KEYS.workspaceId),
         AsyncStorage.getItem(KEYS.model),
+        AsyncStorage.getItem(KEYS.planHour),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -88,6 +93,7 @@ function useStoreValue() {
         profile: profile ? JSON.parse(profile) : initialState.profile,
         chat: chat ? JSON.parse(chat) : [],
         briefingHour: hour ? Number(hour) : null,
+        planHour: planHour ? JSON.parse(planHour) : null,
         voiceOnOpen: voiceOnOpen ? JSON.parse(voiceOnOpen) : 'off',
         apiKey: apiKey ?? '',
         workspaceId: workspaceId ? JSON.parse(workspaceId) : '',
@@ -118,6 +124,7 @@ function useStoreValue() {
       setWorkspaceId: (id: string) => update('workspaceId', id.trim()),
       setModel: (model: ModelChoice) => update('model', model),
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
+      setPlanHour: (hour: number | null) => update('planHour', hour),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {

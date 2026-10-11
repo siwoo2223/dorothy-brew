@@ -5,6 +5,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../lib/notifications';
+import { NotificationRouter } from '../components/NotificationRouter';
 import { VoiceLauncher } from '../components/VoiceLauncher';
 import { StoreProvider } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -23,6 +24,7 @@ export default function RootLayout() {
         <StoreProvider>
           <StatusBar style="auto" />
           <VoiceLauncher />
+          <NotificationRouter />
           <Tabs
             screenOptions={{
               headerStyle: { backgroundColor: theme.bg },

@@ -4,6 +4,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
+import { InboxCard } from '../components/InboxCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
@@ -54,6 +55,8 @@ export default function Settings() {
       <VoiceCard />
 
       <GoogleCard />
+
+      <InboxCard />
 
       <ImportCard />
 

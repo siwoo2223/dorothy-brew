@@ -5,7 +5,8 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { Input } from '../components/ui';
-import { chat, describeError } from '../lib/assistant';
+import { chat, describeError, PLAN_REQUEST } from '../lib/assistant';
+import { planData } from '../lib/inbox';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
@@ -23,7 +24,7 @@ export default function Chat() {
   const [streaming, setStreaming] = useState('');
   const list = useRef<FlatList>(null);
   const router = useRouter();
-  const params = useLocalSearchParams<{ voice?: string }>();
+  const params = useLocalSearchParams<{ voice?: string; plan?: string }>();
   const canListen = voiceInputAvailable();
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
@@ -38,7 +39,7 @@ export default function Chat() {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // send is declared below and needs `voice`, so the recognizer reaches it through a ref.
-  const sendRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
+  const sendRef = useRef<(text: string, spoken?: boolean, extra?: string) => void>(() => {});
 
   const voice = useVoiceInput(
     (text) => {
@@ -141,6 +142,18 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.voice]);
 
+  // Opened with ?plan=1 (the "내일 할 일" button or the nightly reminder): ask for tomorrow's plan
+  // with the day's messages and calls attached to this one turn.
+  useEffect(() => {
+    if (!params.plan) return;
+    router.setParams({ plan: undefined });
+    (async () => {
+      const data = await planData(getState().model === 'local' ? 2500 : 12000).catch(() => null);
+      sendRef.current(PLAN_REQUEST, false, data ?? undefined);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.plan]);
+
   const afterReply = () => {
     if (phase.current === 'off') return;
     // Allow one follow-up without the name; silence falls back to waiting for "도로시야".
@@ -148,10 +161,10 @@ export default function Chat() {
     listenForCommand();
   };
 
-  const send = async (text: string, spoken = false) => {
+  const send = async (text: string, spoken = false, extra?: string) => {
     const message = text.trim();
     if (!message || busy) return;
-    if (!state.apiKey) {
+    if (state.model !== 'local' && !state.apiKey) {
       Alert.alert('API 키 필요', '설정 탭에서 Claude API 키를 먼저 입력해 주세요.');
       return;
     }
@@ -164,6 +177,7 @@ export default function Chat() {
     try {
       const reply = await chat(message, snapshot, actions, {
         spoken: voiceReply,
+        extra,
         onToken: (token) => setStreaming((s) => s + token),
       });
       setStreaming('');
