@@ -14,6 +14,9 @@ type NativeInbox = {
   openAppDetails(): void;
   getMessages(sinceMs: number, limit: number): Promise<InboxMessage[]>;
   messageCount(): number;
+  historyCount(): number;
+  importMessages(messages: InboxMessage[]): Promise<number>;
+  searchMessages(keyword: string, sinceMs: number, limit: number): Promise<InboxMessage[]>;
   clearMessages(): void;
   getCalls(sinceMs: number, limit: number): Promise<CallEntry[]>;
 };
@@ -25,7 +28,21 @@ export const notificationAccessGranted = () => native?.isNotificationAccessGrant
 export const openNotificationAccess = () => native?.openNotificationAccessSettings();
 export const openAppDetails = () => native?.openAppDetails();
 export const messageCount = () => native?.messageCount() ?? 0;
+export const historyCount = () => native?.historyCount() ?? 0;
 export const clearMessages = () => native?.clearMessages();
+
+/** Searches saved notifications and imported chats (e.g. KakaoTalk exports). */
+export async function searchMessages(keyword: string, sinceMs = 0, limit = 300): Promise<InboxMessage[]> {
+  return native ? native.searchMessages(keyword, sinceMs, limit) : [];
+}
+
+/** Saves messages parsed from an export file; returns how many were new. */
+export async function importMessages(messages: InboxMessage[]): Promise<number> {
+  if (!native) return 0;
+  let added = 0;
+  for (let i = 0; i < messages.length; i += 2000) added += await native.importMessages(messages.slice(i, i + 2000));
+  return added;
+}
 
 export async function getMessages(sinceMs: number, limit = 300): Promise<InboxMessage[]> {
   return native ? native.getMessages(sinceMs, limit) : [];

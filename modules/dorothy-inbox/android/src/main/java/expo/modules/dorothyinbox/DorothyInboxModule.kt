@@ -40,6 +40,16 @@ class DorothyInboxModule : Module() {
 
     Function("messageCount") { InboxStore.count(context) }
 
+    Function("historyCount") { InboxStore.historyCount(context) }
+
+    AsyncFunction("importMessages") { messages: List<Map<String, Any>> ->
+      InboxStore.importChats(context, messages)
+    }
+
+    AsyncFunction("searchMessages") { keyword: String, sinceMs: Double, limit: Int ->
+      InboxStore.search(context, keyword, sinceMs.toLong(), limit)
+    }
+
     Function("clearMessages") { InboxStore.clear(context) }
 
     AsyncFunction("getCalls") { sinceMs: Double, limit: Int ->
