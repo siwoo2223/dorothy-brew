@@ -97,7 +97,8 @@ export default function Chat() {
   function listenForCommand() {
     if (phase.current !== 'command') return;
     listeningFor.current = 'command';
-    voice.start();
+    // Silence after a reply is normal in standby, so don't show a "didn't hear you" hint.
+    voice.start({ quiet: true });
   }
 
   const setStandby = (on: boolean) => {

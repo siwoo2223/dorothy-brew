@@ -74,6 +74,14 @@ export function stopSpeaking() {
 
 type VoiceState = 'idle' | 'listening' | 'error';
 
+// lastText/delivered: some recognizers (seen on Samsung with Google's service) stream partial
+// results but finish with an empty or missing final result, so the last partial is sent on 'end'.
+function newSession(quiet = false, startedAt = Date.now()) {
+  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet };
+}
+
+const RECOGNIZER_FAILURES = ['language-not-supported', 'service-not-allowed', 'client', 'busy', 'unknown', 'network'];
+
 // Recognizers spell the name several ways ("도로시야", "도로 시", "돌아시").
 const WAKE_WORD = /(도\s?로\s?시|돌\s?로\s?시|돌아시|도로씨)(야|아|여)?[\s,.!?~]*/;
 
@@ -105,7 +113,7 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
     onEndRef.current = onEnd;
   }, [onFinal, onEnd]);
 
-  const session = useRef({ startedAt: 0, error: undefined as string | undefined, heardSpeech: false });
+  const session = useRef(newSession(false, 0));
 
   useEffect(() => {
     if (!recognizer) return;
@@ -113,23 +121,40 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
       recognizer.addListener('start', () => setState('listening')),
       recognizer.addListener('end', () => {
         setState((s) => (s === 'listening' ? 'idle' : s));
-        const { startedAt, error, heardSpeech } = session.current;
+        const current = session.current;
+        if (!current.delivered && current.lastText) {
+          current.delivered = true;
+          setTranscript('');
+          onFinalRef.current(current.lastText);
+        } else if (!current.heardSpeech && !current.error && !current.quiet) {
+          setError('잘 못 들었어요. 🎙️을 누르고 다시 말해 주세요.');
+        }
+        const { startedAt, error, heardSpeech } = current;
         onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
       }),
       recognizer.addListener('result', (event) => {
         const text = event.results[0]?.transcript ?? '';
         if (text.trim()) {
           session.current.heardSpeech = true;
+          session.current.lastText = text.trim();
           setError('');
         }
         setTranscript(text);
-        if (event.isFinal && text.trim()) {
+        if (event.isFinal && text.trim() && !session.current.delivered) {
+          session.current.delivered = true;
           setTranscript('');
           onFinalRef.current(text.trim());
+          // Continuous sessions keep going after a final result; start collecting the next sentence.
+          session.current.delivered = false;
+          session.current.lastText = '';
         }
       }),
       recognizer.addListener('error', (event) => {
         session.current.error = event.error;
+        // If the preferred Google service misbehaves on this phone, use the phone's default next time.
+        if (servicePackage && !session.current.heardSpeech && RECOGNIZER_FAILURES.includes(event.error)) {
+          servicePackage = '';
+        }
         // Silence or a user cancel is not worth an error message.
         if (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'speech-timeout') {
           setState('idle');
@@ -149,7 +174,7 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
     // In standby a failed restart is handled by the caller; don't flash an error for every retry.
     if (!opts.quiet) setError('');
     setTranscript('');
-    session.current = { startedAt: Date.now(), error: undefined, heardSpeech: false };
+    session.current = newSession(!!opts.quiet);
     const permission = await recognizer.requestPermissionsAsync();
     if (!permission.granted) {
       setError('마이크와 음성 인식 권한을 허용해 주세요.');
@@ -172,6 +197,8 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
 
   const stop = useCallback(() => recognizer?.stop(), []);
   const cancel = useCallback(() => {
+    // A cancelled session must not send whatever was half-heard.
+    session.current.delivered = true;
     recognizer?.abort();
     setTranscript('');
   }, []);
