@@ -57,3 +57,23 @@ export async function cancelDailyBriefing(): Promise<void> {
   if (Platform.OS === 'web') return;
   await Notifications.cancelScheduledNotificationAsync(BRIEFING_ID).catch(() => {});
 }
+
+const PLAN_ID = 'nightly-plan';
+
+/** Every evening: "shall I sort out tomorrow?" Tapping it opens the chat and asks for the plan (see NotificationRouter). */
+export async function scheduleNightlyPlan(hour: number): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  if (!(await ensureNotificationPermission())) return false;
+  await Notifications.cancelScheduledNotificationAsync(PLAN_ID).catch(() => {});
+  await Notifications.scheduleNotificationAsync({
+    identifier: PLAN_ID,
+    content: { title: '🌙 내일 할 일 정리할까요?', body: '오늘 받은 메시지와 통화를 보고 내일 할 일을 정리해 드릴게요.', data: { url: '/chat?plan=1' } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0, channelId: 'reminders' },
+  });
+  return true;
+}
+
+export async function cancelNightlyPlan(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await Notifications.cancelScheduledNotificationAsync(PLAN_ID).catch(() => {});
+}

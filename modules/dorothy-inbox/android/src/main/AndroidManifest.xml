@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.READ_CALL_LOG" />
+
+  <application>
+    <!-- Saves incoming messenger notifications so Dorothy can sum up what needs doing. Off until the user grants notification access. -->
+    <service
+      android:name="expo.modules.dorothyinbox.DorothyNotificationListener"
+      android:exported="true"
+      android:label="도로시 메시지 정리"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

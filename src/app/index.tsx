@@ -115,6 +115,12 @@ export default function Today() {
         <Button label={brief ? '다시 브리핑 받기' : '브리핑 받기'} onPress={runBriefing} disabled={loading || !state.apiKey} />
       </Card>
 
+      <Card>
+        <Title>🌙 내일 할 일</Title>
+        <Body muted>오늘 받은 카톡·문자·메신저, 통화, 일정을 모아 내일 해야 할 일을 정리해요. 메시지와 통화는 설정 → 메시지·통화에서 먼저 연결해 주세요.</Body>
+        <Button label="내일 할 일 정리하기" onPress={() => router.navigate({ pathname: '/chat', params: { plan: '1' } })} />
+      </Card>
+
       <View style={styles.talkRow}>
         <View style={{ flex: 1 }}>
           <Button label="💬 글로 말 걸기" variant="ghost" onPress={() => router.navigate('/chat')} />
