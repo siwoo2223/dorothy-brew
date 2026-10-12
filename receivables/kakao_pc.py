@@ -76,6 +76,44 @@ def search_queries(name: str) -> list[str]:
 FRIEND_HEADER = re.compile(r"^\W*(친\s*구|즐겨\s*찾기|내\s*프로필|채널|추천\s*친구|업데이트한\s*(프로필|친구)|생일인\s*친구)[\s\W\d]*$")
 
 
+def has_fail_marks(img, scale: float = 1.0) -> bool:
+    """채팅방 화면 그림에 카톡 '전송 실패' 표시(흰 상자 안의 빨간 ✕)가 있는지. 빨간 점 중 둘레가 흰색인 것이 몇 개 이상."""
+    img = img.convert("RGB")
+    w, h = img.size
+    px = img.load()
+    d = max(5, int(7 * scale))
+
+    def white(x, y):
+        if not (0 <= x < w and 0 <= y < h):
+            return False
+        r, g, b = px[x, y]
+        return r > 230 and g > 230 and b > 230
+
+    def retry_left(x, y):
+        """✕ 왼쪽 가까이에 회색 ↻ 아이콘이 있는지(같은 흰 상자 안)"""
+        for dx in range(int(8 * scale), int(34 * scale)):
+            for dy in range(-int(6 * scale), int(6 * scale) + 1):
+                xx, yy = x - dx, y + dy
+                if 0 <= xx < w and 0 <= yy < h:
+                    r2, g2, b2 = px[xx, yy]
+                    if max(r2, g2, b2) < 150 and max(r2, g2, b2) - min(r2, g2, b2) < 30:
+                        return True
+        return False
+
+    hits = 0
+    for y in range(d, h - d, 2):
+        for x in range(d, w - d, 2):
+            r, g, b = px[x, y]
+            if r > 200 and g < 110 and b < 110 and r - g > 110:
+                ring = [(x + d, y), (x - d, y), (x, y + d), (x, y - d),
+                        (x + d, y + d), (x - d, y - d), (x + d, y - d), (x - d, y + d)]
+                if sum(white(a, c) for a, c in ring) >= 6 and retry_left(x, y):
+                    hits += 1
+                    if hits >= 3:
+                        return True
+    return False
+
+
 def find_line(lines, want: str, exact: bool = False, below: float | None = None):
     """OCR 줄들 중 글자가 want 와 같은(또는 want 를 포함하는) 줄. 띄어쓰기·기호는 무시. below 가 있으면 그 아래 줄만."""
     def key(s: str) -> str:
@@ -1322,6 +1360,39 @@ class Win32KakaoDriver:
             return
         raise RuntimeError("Enter·Ctrl+Enter 모두 줄바꿈으로만 들어가 전송되지 않았습니다")
 
+    def send_failed_marks(self, chat) -> bool:
+        """채팅방 화면에 카톡 '전송 실패' 표시(말풍선 옆 흰 상자 안의 ↻ 와 빨간 ✕)가 있는지.
+
+        2026-10-12 - "박대희꺼 안된게 이렇게 되어서 발송이 안되었던거야": 카톡이 인터넷 문제 등으로 못 보내면 글·사진이
+        방에는 보이지만 옆에 ↻ ✕ 가 붙고 상대에게는 가지 않는다. 입력칸이 비고 화면에 글도 보여 '완료'로 잘못 남았다.
+        → 빨간 점들 중 둘레가 흰색(흰 상자 안)인 것을 찾는다(노란 말풍선 안의 빨간 이모지는 둘레가 노랑이라 제외)."""
+        from PIL import ImageGrab
+
+        from .kakao_names import _dpi_aware
+
+        _, _, win32gui = self._w()
+        try:
+            _dpi_aware()
+            left, top, right, bottom = win32gui.GetWindowRect(chat)
+            box = self._input_box(chat)
+            if box:
+                bottom = min(bottom, win32gui.GetWindowRect(box)[1] - 4)
+            top = top + int((bottom - top) * 0.12)  # 방 이름·공지 줄 제외
+            if bottom - top < 50:
+                return False
+            img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True).convert("RGB")
+        except Exception as exc:
+            self._log(f"전송 실패 표시 확인 못 함: {exc}")
+            return False
+        try:
+            scale = __import__("ctypes").windll.user32.GetDpiForWindow(chat) / 96.0
+        except Exception:
+            scale = 1.0
+        if has_fail_marks(img, scale):
+            self._log("채팅방에 카톡 '전송 실패'(↻ ✕) 표시가 보임")
+            return True
+        return False
+
     def _seen_in_chat(self, chat, text: str) -> bool:
         """보낸 글의 앞부분이 채팅방 화면(말풍선)에 보이는지 글자 인식으로 확인. 화면을 못 읽으면 True(판단 보류)."""
         def key(t: str) -> str:
@@ -1572,6 +1643,13 @@ class KakaoPCSender:
             except Exception as exc:
                 # 글은 이미 갔으므로 '성공'으로 남겨 중복 발송을 막고, 첨부 실패는 경고로 알린다
                 note += f" ⚠️ 첨부 실패: {exc}"
+        if hasattr(self.driver, "send_failed_marks"):
+            time.sleep(2.5)  # 카톡이 보내기를 끝내고 실패면 ↻ ✕ 를 띄울 시간
+            if self.driver.send_failed_marks(chat):
+                self._close(chat)
+                return SendResult(m.key, m.to, False,
+                                  f"{where}'{name}': 카톡 화면에 '전송 실패'(↻ ✕) 표시 - 카톡 인터넷 연결을 확인하고 다시 보내 주세요"
+                                  f"(방에 남은 실패 말풍선은 ✕ 로 지워 주세요){note}")
         self._close(chat)
         # 2026-10-10 광고 올리기: 직원 프로필 전송(친구 목록 → 프로필 전송 → 이 방)
         if m.photos_first and not m.profiles:
