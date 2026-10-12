@@ -22,7 +22,9 @@ jobs:
     env:
       CI: '1'
       # Public OAuth client IDs (Settings → Secrets and variables → Actions → Variables).
-      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+      # Android OAuth client IDs are not secret (identified by package name + SHA-1), so the project's
+      # own client ID is the default; a repo Variable of the same name still overrides it.
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '293661491064-h4c97gcf5t7fpr5h0tammv1mhtbc4kvh.apps.googleusercontent.com' }}
       EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
