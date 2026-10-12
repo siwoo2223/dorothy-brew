@@ -7,6 +7,7 @@ import { ImportCard } from '../components/ImportCard';
 import { InboxCard } from '../components/InboxCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
+import { VoiceMatchCard } from '../components/VoiceMatchCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -53,6 +54,8 @@ export default function Settings() {
       <ModelCard />
 
       <VoiceCard />
+
+      <VoiceMatchCard />
 
       <GoogleCard />
 

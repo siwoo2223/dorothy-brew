@@ -7,6 +7,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Input } from '../components/ui';
 import { chat, describeError, PLAN_REQUEST } from '../lib/assistant';
 import { planData } from '../lib/inbox';
+import { deleteRecording, isOwner } from '../lib/speaker';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
@@ -37,6 +38,11 @@ export default function Chat() {
   const failures = useRef(0);
   const continuousOk = useRef(Platform.OS !== 'android' || Number(Platform.Version) >= 33);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // In standby, record each utterance and accept it only if it's the owner's voice.
+  const voiceMatch = useRef(state.speakerMatch);
+  useEffect(() => {
+    voiceMatch.current = state.speakerMatch;
+  }, [state.speakerMatch]);
 
   // send is declared below and needs `voice`, so the recognizer reaches it through a ref.
   const sendRef = useRef<(text: string, spoken?: boolean, extra?: string) => void>(() => {});
@@ -85,21 +91,29 @@ export default function Chat() {
       const delay = Math.min(800 * 2 ** failures.current, 8000);
       retryTimer.current = setTimeout(listenForWake, delay);
     },
+    // Voiceprint gate: accept the sentence only when it's the owner's voice (fails open if not set up).
+    async (audioUri) => {
+      const { owner } = await isOwner(audioUri);
+      deleteRecording(audioUri);
+      return owner;
+    },
   );
   const listening = voice.state === 'listening';
 
   function listenForWake() {
     if (phase.current !== 'wake') return;
     listeningFor.current = 'wake';
-    // Continuous recognition (no beep, no gaps) needs Android 13+ and a recognizer that supports it.
-    voice.start({ continuous: continuousOk.current, quiet: true });
+    // With voice-match on, each utterance is recorded one at a time (so it can be verified);
+    // continuous recognition would merge everyone's speech into one file.
+    const record = voiceMatch.current;
+    voice.start({ continuous: continuousOk.current && !record, quiet: true, record });
   }
 
   function listenForCommand() {
     if (phase.current !== 'command') return;
     listeningFor.current = 'command';
     // Silence after a reply is normal in standby, so don't show a "didn't hear you" hint.
-    voice.start({ quiet: true });
+    voice.start({ quiet: true, record: voiceMatch.current });
   }
 
   const setStandby = (on: boolean) => {
