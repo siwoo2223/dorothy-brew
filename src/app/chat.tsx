@@ -24,6 +24,8 @@ export default function Chat() {
   // The phone brain streams its reply; show it as it is written.
   const [streaming, setStreaming] = useState('');
   const list = useRef<FlatList>(null);
+  // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
+  const atBottom = useRef(true);
   const router = useRouter();
   const params = useLocalSearchParams<{ voice?: string; plan?: string }>();
   const canListen = voiceInputAvailable();
@@ -184,6 +186,8 @@ export default function Chat() {
     }
     setDraft('');
     setBusy(true);
+    // Sending my own message always jumps to the newest, even if I had scrolled up.
+    atBottom.current = true;
     // Snapshot before appending so the new message is not sent twice.
     const snapshot = getState();
     actions.appendChat({ role: 'user', text: message });
@@ -219,8 +223,15 @@ export default function Chat() {
         data={state.chat}
         keyExtractor={(m) => m.id}
         contentContainerStyle={styles.list}
-        onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
-        onLayout={() => list.current?.scrollToEnd({ animated: false })}
+        // Only auto-scroll when the user is already at the bottom, so scrolling up to read earlier
+        // messages isn't yanked back down by streaming text or a keyboard-driven relayout.
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          atBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80;
+        }}
+        scrollEventThrottle={100}
+        onContentSizeChange={() => atBottom.current && list.current?.scrollToEnd({ animated: true })}
+        onLayout={() => atBottom.current && list.current?.scrollToEnd({ animated: false })}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>

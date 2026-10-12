@@ -49,7 +49,8 @@
         {
           "enableOpenCLAndHexagon": true
         }
-      ]
+      ],
+      "expo-background-task"
     ]
   }
 }

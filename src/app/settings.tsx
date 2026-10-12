@@ -5,6 +5,7 @@ import { Body, Button, Card, Input, Title } from '../components/ui';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
 import { InboxCard } from '../components/InboxCard';
+import { ProactiveCard } from '../components/ProactiveCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
 import { VoiceMatchCard } from '../components/VoiceMatchCard';
@@ -60,6 +61,8 @@ export default function Settings() {
       <GoogleCard />
 
       <InboxCard />
+
+      <ProactiveCard />
 
       <ImportCard />
 
