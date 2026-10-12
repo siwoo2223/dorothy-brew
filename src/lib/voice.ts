@@ -294,3 +294,40 @@ export function recordUtterance(fileName: string, maxMs = 6000): Promise<string 
       .catch(() => finishWith(null));
   });
 }
+
+/**
+ * Transcribes a saved audio file (e.g. a call recording — the recognizer decodes m4a/amr to PCM
+ * internally). Returns the combined text, best-effort. Runs entirely on the recognizer; the chat
+ * hook ignores these events because it didn't start the session.
+ */
+export function transcribeAudioFile(uri: string, timeoutMs = 240000): Promise<string> {
+  return new Promise((resolve) => {
+    if (!recognizer) return resolve('');
+    const parts: string[] = [];
+    let done = false;
+    const subs: { remove: () => void }[] = [];
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      subs.forEach((s) => s.remove());
+      resolve(parts.join(' ').replace(/\s+/g, ' ').trim());
+    };
+    subs.push(
+      recognizer.addListener('result', (e) => {
+        const text = e.results[0]?.transcript?.trim();
+        if (e.isFinal && text) parts.push(text);
+      }),
+      recognizer.addListener('end', finish),
+      recognizer.addListener('error', () => finish()),
+    );
+    const timer = setTimeout(() => recognizer?.stop(), timeoutMs);
+    recognizer
+      .requestPermissionsAsync()
+      .then((p) => {
+        if (!p.granted) return finish();
+        recognizer!.start({ lang: LANG, interimResults: false, continuous: true, androidRecognitionServicePackage: androidService(), audioSource: { uri } });
+      })
+      .catch(() => finish());
+  });
+}
