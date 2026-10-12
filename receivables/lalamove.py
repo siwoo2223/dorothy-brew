@@ -32,8 +32,44 @@ def page_state(text: str) -> str:
     return "unknown"
 
 
-def read_pages(links: Iterable[str], log: Callable[[str], None] = print, timeout_ms: int = 30000) -> dict[str, str]:
-    """링크마다 화면을 열어 상태를 읽는다. 반환: {링크: 상태}. playwright 가 없으면 ImportError."""
+_WHEN = re.compile(r"Completed\s+(Today|Yesterday|[A-Z][a-z]{2,8}\.?\s+\d{1,2}(?:,?\s+\d{4})?)\s*,?\s*(\d{1,2}:\d{2}\s*[AP]M)?", re.I)
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+def completed_date(text: str, today) -> str:
+    """'Completed Yesterday, 4:02 PM' / 'Completed Oct 10, 4:02 PM' → 완료 날짜 'YYYY-MM-DD'. 못 읽으면 ''.
+    2026-10-12 - 월요일에 넣은 링크가 토요일에 이미 끝난 라라무브 주문이라, 배송 안 한 날짜로 '배송 완료' 안내가 나갔다
+    → 언제 완료됐는지 읽어 사이트가 링크 넣은 날보다 전에 끝난 주문이면 배송완료로 바꾸지 않게 한다."""
+    import datetime as dt
+
+    m = _WHEN.search(text or "")
+    if not m:
+        return ""
+    day = m.group(1).strip().lower()
+    if day == "today":
+        d = today
+    elif day == "yesterday":
+        d = today - dt.timedelta(days=1)
+    else:
+        parts = re.split(r"[\s,.]+", day)
+        mon = _MONTHS.get(parts[0][:3])
+        if not mon or len(parts) < 2 or not parts[1].isdigit():
+            return ""
+        year = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else today.year
+        try:
+            d = dt.date(year, mon, int(parts[1]))
+        except ValueError:
+            return ""
+        if d > today:  # 연도 없이 12월 날짜를 1월에 읽은 경우
+            d = d.replace(year=d.year - 1)
+    return d.isoformat()
+
+
+def read_pages(links: Iterable[str], log: Callable[[str], None] = print, timeout_ms: int = 30000,
+               detail: bool = False) -> dict:
+    """링크마다 화면을 열어 상태를 읽는다. 반환: {링크: 상태}, detail=True 면 {링크: {"state", "completed_date"}}.
+    playwright 가 없으면 ImportError."""
+    import datetime as dt
     from playwright.sync_api import sync_playwright
 
     out: dict[str, str] = {}
@@ -52,10 +88,12 @@ def read_pages(links: Iterable[str], log: Callable[[str], None] = print, timeout
                     except Exception:
                         pass
                     page.wait_for_timeout(1500)  # 상태 글자가 채워질 시간
-                    out[link] = page_state(page.inner_text("body"))
+                    text = page.inner_text("body")
+                    state = page_state(text)
+                    out[link] = {"state": state, "completed_date": completed_date(text, dt.date.today()) if state == "completed" else ""} if detail else state
                 except Exception as exc:
                     log(f"  라라무브 링크를 열지 못함: {exc}")
-                    out[link] = "unknown"
+                    out[link] = {"state": "unknown", "completed_date": ""} if detail else "unknown"
         finally:
             browser.close()
     return out

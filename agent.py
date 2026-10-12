@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from receivables import control, envfile, lalamove, self_update, user_activity  # noqa: E402
 from receivables.site_agent import Agent, SiteAPI, SiteError, windows_extract_names, windows_sender  # noqa: E402
 
-VERSION = "2026-10-11b"
+VERSION = "2026-10-12a"
 UPDATE_CHECK_SECONDS = 3600  # 새 버전 확인 간격
 LALAMOVE_CHECK_SECONDS = 900  # 라라무브 배송 완료 확인 간격(15분)
 POLL_SECONDS = 20
@@ -166,7 +166,7 @@ def main(argv: list[str]) -> int:
             if agent.lalamove_check and time.time() >= next_lalamove_check:
                 next_lalamove_check = time.time() + LALAMOVE_CHECK_SECONDS
                 try:
-                    agent.check_lalamove(lambda links: lalamove.read_pages(links, log))
+                    agent.check_lalamove(lambda links: lalamove.read_pages(links, log, detail=True))
                 except ImportError:
                     if not lalamove_warned:
                         log("라라무브 확인에 필요한 프로그램(playwright)이 아직 없습니다. 다음 업데이트 때 설치됩니다.")

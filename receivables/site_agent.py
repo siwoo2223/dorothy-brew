@@ -98,8 +98,10 @@ class SiteAPI:
     def lalamove_list(self) -> list[dict]:
         return list(self._post({"action": "lalamove_list"}).get("items") or [])
 
-    def lalamove_done(self, shipment_id: int, link: str) -> bool:
-        return bool(self._post({"action": "lalamove_done", "id": shipment_id, "link": link}).get("changed"))
+    def lalamove_done(self, shipment_id: int, link: str, completed_date: str = "") -> dict:
+        """반환: {"changed": bool, "stale": bool}"""
+        d = self._post({"action": "lalamove_done", "id": shipment_id, "link": link, "completed_date": completed_date})
+        return {"changed": bool(d.get("changed")), "stale": bool(d.get("stale"))}
 
     def send_names(self, tab: str, exact: bool, names: list[str], error: str = "") -> None:
         self._post({"action": "names", "tab": tab, "exact": exact, "names": names, "error": error})
@@ -300,9 +302,17 @@ class Agent:
         states = reader([it["link"] for it in items])
         done = 0
         for it in items:
-            if states.get(it["link"]) == "completed" and self.api.lalamove_done(int(it["id"]), it["link"]):
+            st = states.get(it["link"])
+            info = st if isinstance(st, dict) else {"state": st, "completed_date": ""}
+            if info.get("state") != "completed":
+                continue
+            res = self.api.lalamove_done(int(it["id"]), it["link"], info.get("completed_date") or "")
+            if res is True or (isinstance(res, dict) and res.get("changed")):
                 done += 1
                 self.log(f"🛵 라라무브 배송 완료 확인: {it.get('tracking_no', '')} → 배송완료 (상태 안내로 고객에게 알림)")
+            elif isinstance(res, dict) and res.get("stale"):
+                self.log(f"⚠️ 라라무브 링크가 이미 {info.get('completed_date')}에 끝난 주문입니다: {it.get('tracking_no', '')} "
+                         "→ 배송완료로 바꾸지 않음(링크가 맞는지 확인해 주세요)")
         return done
 
     def _send(self, sender, m: SiteMessage) -> SendResult:
