@@ -25,7 +25,9 @@ jobs:
       # Android OAuth client IDs are not secret (identified by package name + SHA-1), so the project's
       # own client ID is the default; a repo Variable of the same name still overrides it.
       EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '293661491064-h4c97gcf5t7fpr5h0tammv1mhtbc4kvh.apps.googleusercontent.com' }}
-      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+      # The browser OAuth flow uses the reversed-client-ID custom scheme, which Google honours only
+      # for iOS-type clients (even on Android), so this is the client the Google sign-in actually uses.
+      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '293661491064-al7bnr4huepdnu05i6iqtbeb1t60tk34.apps.googleusercontent.com' }}
     steps:
       - uses: actions/checkout@v4
 

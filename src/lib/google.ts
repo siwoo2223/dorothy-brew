@@ -31,7 +31,11 @@ export const discovery: AuthSession.DiscoveryDocument = {
 };
 
 export function googleClientId(): string {
-  return Platform.OS === 'ios' ? CLIENT_IDS.ios : Platform.OS === 'android' ? CLIENT_IDS.android : '';
+  // The AppAuth browser flow redirects to the reversed-client-ID custom scheme, which Google only
+  // accepts for iOS-type OAuth clients — even on Android (an Android client returns 400
+  // invalid_request here). So prefer the iOS client; the Android client is a fallback.
+  if (Platform.OS === 'web') return '';
+  return CLIENT_IDS.ios || CLIENT_IDS.android;
 }
 
 /** Google redirects native clients to the reversed client ID scheme, which app.config.ts registers. */
