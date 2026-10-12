@@ -133,7 +133,7 @@ const ISO_DESC = '현지 시간대 오프셋을 포함한 ISO 8601 시각(예: 2
 const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'calendar_list_events',
-    description: 'Google 캘린더(기본 캘린더)에서 기간 내 일정을 시작 시각 순으로 가져온다.',
+    description: '연결된 모든 Google 계정의 캘린더에서 기간 내 일정을 시작 시각 순으로 가져온다.',
     strict: true,
     input_schema: {
       type: 'object',
@@ -247,7 +247,7 @@ function formatNow(): string {
 }
 
 /** Everything Dorothy knows right now. Sent as a second system block so the persona block stays cacheable. */
-export function buildContext(state: AppState, googleEmail: string | null = null): string {
+export function buildContext(state: AppState, googleEmails: string[] = []): string {
   const { profile, memories, tasks } = state;
   const now = Date.now();
   const open = tasks.filter((t) => !t.done);
@@ -260,7 +260,7 @@ export function buildContext(state: AppState, googleEmail: string | null = null)
   return [
     `현재 시각: ${formatNow()}`,
     `사용자 이름: ${profile.name || '(아직 모름)'}`,
-    `Google 계정: ${googleEmail ? `${googleEmail} 연결됨 (캘린더·Gmail 도구 사용 가능)` : '연결 안 됨'}`,
+    `Google 계정: ${googleEmails.length ? `${googleEmails.join(', ')} 연결됨 (캘린더·Gmail 도구는 연결된 모든 계정을 함께 봅니다)` : '연결 안 됨'}`,
     profile.about ? `사용자 자기소개:\n${profile.about}` : '',
     `기억 목록 (${memories.length}개):\n${memories.map((m) => `- [${m.id}] (${m.category}) ${m.content}`).join('\n') || '(없음)'}`,
     `진행 중인 할 일 (${open.length}개):\n${open.map(taskLine).join('\n') || '(없음)'}`,
@@ -394,18 +394,18 @@ export async function chat(
       ],
     },
   ];
-  const googleEmail = await google.connectedEmail();
+  const googleEmails = await google.connectedEmails();
   const phone = await inbox.inboxStatus();
   const tools = [
     ...TOOLS,
     webSearchTool(state.model, 5),
-    ...(googleEmail ? GOOGLE_TOOLS : []),
+    ...(googleEmails.length ? GOOGLE_TOOLS : []),
     ...(phone.messages ? [MESSAGE_TOOL] : []),
     ...(phone.calls ? [CALL_TOOL] : []),
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
     { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: buildContext(state, googleEmail) },
+    { type: 'text', text: buildContext(state, googleEmails) },
   ];
 
   const replies: string[] = [];
@@ -458,9 +458,9 @@ export async function briefing(state: AppState): Promise<string> {
     );
   }
   const client = createClient(state);
-  const googleEmail = await google.connectedEmail();
+  const googleEmails = await google.connectedEmails();
   let googleData = '';
-  if (googleEmail) {
+  if (googleEmails.length) {
     // Fetched up front so the briefing needs no tool round trips.
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -485,7 +485,7 @@ export async function briefing(state: AppState): Promise<string> {
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
     { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: buildContext(state, googleEmail) },
+    { type: 'text', text: buildContext(state, googleEmails) },
   ];
 
   const parts: string[] = [];

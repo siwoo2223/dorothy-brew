@@ -4,7 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import { Body, Button, Card, Title } from '../components/ui';
 import { briefing, describeError } from '../lib/assistant';
-import { CalendarEvent, connectedEmail, listEvents } from '../lib/google';
+import { CalendarEvent, connectedEmails, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { voiceInputAvailable } from '../lib/voice';
@@ -27,7 +27,7 @@ export default function Today() {
   useFocusEffect(
     useCallback(() => {
       (async () => {
-        if (!(await connectedEmail())) return setEvents(null);
+        if (!(await connectedEmails()).length) return setEvents(null);
         const start = new Date();
         start.setHours(0, 0, 0, 0);
         const end = new Date(start);
