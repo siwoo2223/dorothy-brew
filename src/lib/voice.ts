@@ -76,9 +76,14 @@ type VoiceState = 'idle' | 'listening' | 'error';
 
 // lastText/delivered: some recognizers (seen on Samsung with Google's service) stream partial
 // results but finish with an empty or missing final result, so the last partial is sent on 'end'.
-function newSession(quiet = false, startedAt = Date.now()) {
-  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet };
+function newSession(quiet = false, startedAt = Date.now(), record = false) {
+  // started: this hook owns the current recognition. Enrollment (recordUtterance) drives the shared
+  // recognizer directly, so the hook ignores those events instead of sending them to the chat.
+  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet, record, audioUri: null as string | null, started: false };
 }
+
+// Fixed path so each standby recording overwrites the last one (no buildup in the cache).
+const VOICE_FILE = 'dorothy-standby.wav';
 
 const RECOGNIZER_FAILURES = ['language-not-supported', 'service-not-allowed', 'client', 'busy', 'unknown', 'network'];
 
@@ -102,16 +107,24 @@ export function extractWakeCommand(text: string): string | null {
 /** How a listening session ended, so callers can tell a normal pause from a recognizer that keeps failing. */
 export type SessionEnd = { error?: string; durationMs: number; heardSpeech: boolean };
 
-export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: SessionEnd) => void) {
+export function useVoiceInput(
+  onFinal: (text: string) => void,
+  onEnd?: (info: SessionEnd) => void,
+  // When set and a session is started with { record: true }, the finished sentence is delivered
+  // only if this returns true — used in standby to accept the owner's voice and ignore others.
+  verifyAudio?: (audioUri: string | null, text: string) => Promise<boolean>,
+) {
   const [state, setState] = useState<VoiceState>('idle');
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState('');
   const onFinalRef = useRef(onFinal);
   const onEndRef = useRef(onEnd);
+  const verifyAudioRef = useRef(verifyAudio);
   useEffect(() => {
     onFinalRef.current = onFinal;
     onEndRef.current = onEnd;
-  }, [onFinal, onEnd]);
+    verifyAudioRef.current = verifyAudio;
+  }, [onFinal, onEnd, verifyAudio]);
 
   const session = useRef(newSession(false, 0));
 
@@ -119,20 +132,45 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
     if (!recognizer) return;
     const subs = [
       recognizer.addListener('start', () => setState('listening')),
+      recognizer.addListener('audiostart', (event) => {
+        if (event.uri) session.current.audioUri = event.uri;
+      }),
+      recognizer.addListener('audioend', (event) => {
+        if (event.uri) session.current.audioUri = event.uri;
+      }),
       recognizer.addListener('end', () => {
+        if (!session.current.started) return; // not our session (e.g. enrollment)
+        session.current.started = false;
         setState((s) => (s === 'listening' ? 'idle' : s));
         const current = session.current;
+        const finish = () => {
+          const { startedAt, error, heardSpeech } = current;
+          onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
+        };
         if (!current.delivered && current.lastText) {
+          const text = current.lastText;
+          const uri = current.audioUri;
           current.delivered = true;
           setTranscript('');
-          onFinalRef.current(current.lastText);
+          const verify = verifyAudioRef.current;
+          // In record mode the sentence was held back so the voiceprint could be checked here,
+          // once the audio file is finalized (the 'audioend' event has fired by now).
+          if (current.record && verify) {
+            verify(uri, text)
+              .then((ok) => {
+                if (ok) onFinalRef.current(text);
+              })
+              .finally(finish);
+            return;
+          }
+          onFinalRef.current(text);
         } else if (!current.heardSpeech && !current.error && !current.quiet) {
           setError('잘 못 들었어요. 🎙️을 누르고 다시 말해 주세요.');
         }
-        const { startedAt, error, heardSpeech } = current;
-        onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
+        finish();
       }),
       recognizer.addListener('result', (event) => {
+        if (!session.current.started) return; // not our session (e.g. enrollment)
         const text = event.results[0]?.transcript ?? '';
         if (text.trim()) {
           session.current.heardSpeech = true;
@@ -141,15 +179,22 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
         }
         setTranscript(text);
         if (event.isFinal && text.trim() && !session.current.delivered) {
-          session.current.delivered = true;
-          setTranscript('');
-          onFinalRef.current(text.trim());
-          // Continuous sessions keep going after a final result; start collecting the next sentence.
-          session.current.delivered = false;
-          session.current.lastText = '';
+          if (session.current.record) {
+            // Hold the sentence; it is verified against the voiceprint and delivered on 'end',
+            // once the recorded audio file is ready.
+            session.current.lastText = text.trim();
+          } else {
+            session.current.delivered = true;
+            setTranscript('');
+            onFinalRef.current(text.trim());
+            // Continuous sessions keep going after a final result; start collecting the next sentence.
+            session.current.delivered = false;
+            session.current.lastText = '';
+          }
         }
       }),
       recognizer.addListener('error', (event) => {
+        if (!session.current.started) return; // not our session (e.g. enrollment)
         session.current.error = event.error;
         // If the preferred Google service misbehaves on this phone, use the phone's default next time.
         if (servicePackage && !session.current.heardSpeech && RECOGNIZER_FAILURES.includes(event.error)) {
@@ -167,16 +212,18 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
     return () => subs.forEach((s) => s.remove());
   }, []);
 
-  /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). */
-  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean } = {}) => {
+  /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). `record` saves the audio for the voiceprint check. */
+  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean; record?: boolean } = {}) => {
     if (!recognizer) return;
     stopSpeaking();
     // In standby a failed restart is handled by the caller; don't flash an error for every retry.
     if (!opts.quiet) setError('');
     setTranscript('');
-    session.current = newSession(!!opts.quiet);
+    session.current = newSession(!!opts.quiet, Date.now(), !!opts.record);
+    session.current.started = true;
     const permission = await recognizer.requestPermissionsAsync();
     if (!permission.granted) {
+      session.current.started = false;
       setError('마이크와 음성 인식 권한을 허용해 주세요.');
       setState('error');
       return;
@@ -187,6 +234,8 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
       continuous: !!opts.continuous,
       addsPunctuation: true,
       androidRecognitionServicePackage: androidService(),
+      // Overwrites the same file each time, so recordings don't pile up in the cache.
+      recordingOptions: opts.record ? { persist: true, outputFileName: VOICE_FILE } : undefined,
     });
   }, []);
 
@@ -204,4 +253,44 @@ export function useVoiceInput(onFinal: (text: string) => void, onEnd?: (info: Se
   }, []);
 
   return { state, transcript, error, start, stop, cancel, showError };
+}
+
+/**
+ * Records one spoken phrase for voiceprint enrollment and resolves its saved audio file URI (or
+ * null if nothing usable was captured). Drives the recognizer directly with its own listeners;
+ * useVoiceInput ignores these events because it didn't start the session.
+ */
+export function recordUtterance(fileName: string, maxMs = 6000): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!recognizer) return resolve(null);
+    let uri: string | null = null;
+    let heard = false;
+    let done = false;
+    const subs: { remove: () => void }[] = [];
+    const cleanup = () => subs.forEach((s) => s.remove());
+    const finishWith = (value: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      cleanup();
+      resolve(value);
+    };
+    subs.push(
+      recognizer.addListener('audiostart', (e) => e.uri && (uri = e.uri)),
+      recognizer.addListener('audioend', (e) => e.uri && (uri = e.uri)),
+      recognizer.addListener('result', (e) => {
+        if (e.results[0]?.transcript?.trim()) heard = true;
+      }),
+      recognizer.addListener('end', () => finishWith(heard ? uri : null)),
+      recognizer.addListener('error', (e) => finishWith(e.error === 'no-speech' ? null : heard ? uri : null)),
+    );
+    const timer = setTimeout(() => recognizer?.stop(), maxMs);
+    recognizer
+      .requestPermissionsAsync()
+      .then((p) => {
+        if (!p.granted) return finishWith(null);
+        recognizer!.start({ lang: LANG, interimResults: true, continuous: false, androidRecognitionServicePackage: androidService(), recordingOptions: { persist: true, outputFileName: fileName } });
+      })
+      .catch(() => finishWith(null));
+  });
 }
