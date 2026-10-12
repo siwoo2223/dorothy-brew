@@ -58,11 +58,18 @@ function forSpeech(text: string): string {
     .trim();
 }
 
+// Which system voice reads replies aloud; set from the saved setting (see setSpeechVoice).
+let speechVoice: string | undefined;
+export function setSpeechVoice(identifier?: string) {
+  speechVoice = identifier || undefined;
+}
+
 export function speak(text: string, onDone?: () => void) {
   Speech.stop();
   Speech.speak(forSpeech(text), {
     language: LANG,
     rate: 1.05,
+    voice: speechVoice,
     onDone,
     onError: () => onDone?.(),
   });
@@ -70,6 +77,24 @@ export function speak(text: string, onDone?: () => void) {
 
 export function stopSpeaking() {
   Speech.stop();
+}
+
+/** Korean text-to-speech voices available on this phone, for letting the user pick Dorothy's voice. */
+export async function listKoreanVoices(): Promise<{ identifier: string; name: string }[]> {
+  try {
+    const voices = await Speech.getAvailableVoicesAsync();
+    return voices
+      .filter((v) => v.language?.toLowerCase().startsWith('ko'))
+      .map((v) => ({ identifier: v.identifier, name: v.name || v.identifier }));
+  } catch {
+    return [];
+  }
+}
+
+/** Speaks a short sample with a given voice, so the user can hear it before choosing. */
+export function previewVoice(identifier: string) {
+  Speech.stop();
+  Speech.speak('안녕하세요, 저는 도로시예요. 이 목소리로 말할게요.', { language: LANG, rate: 1.05, voice: identifier });
 }
 
 type VoiceState = 'idle' | 'listening' | 'error';

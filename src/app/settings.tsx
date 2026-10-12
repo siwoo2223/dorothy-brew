@@ -9,6 +9,7 @@ import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
+import { VoicePickerCard } from '../components/VoicePickerCard';
 import { VoiceMatchCard } from '../components/VoiceMatchCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
@@ -56,6 +57,8 @@ export default function Settings() {
       <ModelCard />
 
       <VoiceCard />
+
+      <VoicePickerCard />
 
       <VoiceMatchCard />
 

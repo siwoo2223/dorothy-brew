@@ -4,6 +4,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { Platform } from 'react-native';
 
 import { cancelReminder, scheduleReminder } from './notifications';
+import { setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ChatTurn, Memory, Profile, Task } from './types';
 
@@ -18,6 +19,7 @@ const KEYS = {
   model: 'dorothy.model',
   planHour: 'dorothy.planHour',
   speakerMatch: 'dorothy.speakerMatch',
+  voiceId: 'dorothy.voiceId',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 
@@ -43,6 +45,8 @@ export type AppState = {
   planHour: number | null;
   /** In standby, only act on the owner's voice (needs a voiceprint enrolled in Settings). */
   speakerMatch: boolean;
+  /** Chosen system TTS voice id for Dorothy's spoken replies ('' = phone default). */
+  voiceId: string;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
   voiceOnOpen: VoiceOnOpen;
 };
@@ -60,6 +64,7 @@ const initialState: AppState = {
   briefingHour: null,
   planHour: null,
   speakerMatch: false,
+  voiceId: '',
   voiceOnOpen: 'off',
 };
 
@@ -79,7 +84,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -91,6 +96,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.model),
         AsyncStorage.getItem(KEYS.planHour),
         AsyncStorage.getItem(KEYS.speakerMatch),
+        AsyncStorage.getItem(KEYS.voiceId),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -100,11 +106,13 @@ function useStoreValue() {
         briefingHour: hour ? Number(hour) : null,
         planHour: planHour ? JSON.parse(planHour) : null,
         speakerMatch: speakerMatch ? JSON.parse(speakerMatch) : false,
+        voiceId: voiceId ? JSON.parse(voiceId) : '',
         voiceOnOpen: voiceOnOpen ? JSON.parse(voiceOnOpen) : 'off',
         apiKey: apiKey ?? '',
         workspaceId: workspaceId ? JSON.parse(workspaceId) : '',
         model: model ? JSON.parse(model) : 'haiku',
       };
+      setSpeechVoice(ref.current.voiceId);
       setState(ref.current);
       setLoaded(true);
     })();
@@ -113,6 +121,7 @@ function useStoreValue() {
   const update = useCallback(<K extends keyof AppState>(key: K, value: AppState[K]) => {
     ref.current = { ...ref.current, [key]: value };
     setState(ref.current);
+    if (key === 'voiceId') setSpeechVoice(value as string);
     if (key === 'apiKey') {
       secret.set(API_KEY, value as string);
     } else if (key === 'briefingHour') {
@@ -132,6 +141,7 @@ function useStoreValue() {
       setBriefingHour: (hour: number | null) => update('briefingHour', hour),
       setPlanHour: (hour: number | null) => update('planHour', hour),
       setSpeakerMatch: (on: boolean) => update('speakerMatch', on),
+      setVoiceId: (id: string) => update('voiceId', id),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
