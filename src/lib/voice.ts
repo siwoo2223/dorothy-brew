@@ -259,6 +259,12 @@ export function useVoiceInput(
       continuous: !!opts.continuous,
       addsPunctuation: true,
       androidRecognitionServicePackage: androidService(),
+      // Wait longer through pauses so Dorothy doesn't cut in while the user is still speaking.
+      androidIntentOptions: {
+        EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS: 2000,
+        EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
+        EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 2000,
+      },
       // Overwrites the same file each time, so recordings don't pile up in the cache.
       recordingOptions: opts.record ? { persist: true, outputFileName: VOICE_FILE } : undefined,
     });

@@ -349,3 +349,16 @@ export async function createDraft(input: { to: string; subject: string; body: st
   });
   return { id: draft.id };
 }
+
+/** Actually sends an email. Only call after the user has clearly confirmed sending. */
+export async function sendMail(input: { to: string; subject: string; body: string; threadId?: string }) {
+  const routed = input.threadId ? routeId(input.threadId) : { email: '', realId: undefined as string | undefined };
+  const token = await tokenForEmail(routed.email);
+  const subject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(input.subject)))}?=`;
+  const raw = [`To: ${input.to}`, `Subject: ${subject}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', '', input.body].join('\r\n');
+  const sent = await api<{ id: string }>(token, `${GMAIL}/messages/send`, {
+    method: 'POST',
+    body: JSON.stringify({ raw: utf8ToBase64Url(raw), threadId: routed.realId }),
+  });
+  return { id: sent.id, from: routed.email || undefined };
+}
