@@ -4,6 +4,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
+import { CallCard } from '../components/CallCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
@@ -63,6 +64,8 @@ export default function Settings() {
       <InboxCard />
 
       <ProactiveCard />
+
+      <CallCard />
 
       <ImportCard />
 
