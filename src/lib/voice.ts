@@ -58,11 +58,18 @@ function forSpeech(text: string): string {
     .trim();
 }
 
+// Which system voice reads replies aloud; set from the saved setting (see setSpeechVoice).
+let speechVoice: string | undefined;
+export function setSpeechVoice(identifier?: string) {
+  speechVoice = identifier || undefined;
+}
+
 export function speak(text: string, onDone?: () => void) {
   Speech.stop();
   Speech.speak(forSpeech(text), {
     language: LANG,
     rate: 1.05,
+    voice: speechVoice,
     onDone,
     onError: () => onDone?.(),
   });
@@ -70,6 +77,24 @@ export function speak(text: string, onDone?: () => void) {
 
 export function stopSpeaking() {
   Speech.stop();
+}
+
+/** Korean text-to-speech voices available on this phone, for letting the user pick Dorothy's voice. */
+export async function listKoreanVoices(): Promise<{ identifier: string; name: string }[]> {
+  try {
+    const voices = await Speech.getAvailableVoicesAsync();
+    return voices
+      .filter((v) => v.language?.toLowerCase().startsWith('ko'))
+      .map((v) => ({ identifier: v.identifier, name: v.name || v.identifier }));
+  } catch {
+    return [];
+  }
+}
+
+/** Speaks a short sample with a given voice, so the user can hear it before choosing. */
+export function previewVoice(identifier: string) {
+  Speech.stop();
+  Speech.speak('안녕하세요, 저는 도로시예요. 이 목소리로 말할게요.', { language: LANG, rate: 1.05, voice: identifier });
 }
 
 type VoiceState = 'idle' | 'listening' | 'error';
@@ -300,7 +325,9 @@ export function recordUtterance(fileName: string, maxMs = 6000): Promise<string 
  * internally). Returns the combined text, best-effort. Runs entirely on the recognizer; the chat
  * hook ignores these events because it didn't start the session.
  */
-export function transcribeAudioFile(uri: string, timeoutMs = 240000): Promise<string> {
+export type TranscribeOptions = { sampleRate?: number; channels?: number; onDevice?: boolean; timeoutMs?: number };
+
+function transcribeOnce(uri: string, opts: TranscribeOptions): Promise<string> {
   return new Promise((resolve) => {
     if (!recognizer) return resolve('');
     const parts: string[] = [];
@@ -321,13 +348,31 @@ export function transcribeAudioFile(uri: string, timeoutMs = 240000): Promise<st
       recognizer.addListener('end', finish),
       recognizer.addListener('error', () => finish()),
     );
-    const timer = setTimeout(() => recognizer?.stop(), timeoutMs);
+    const timer = setTimeout(() => recognizer?.stop(), opts.timeoutMs ?? 240000);
     recognizer
       .requestPermissionsAsync()
       .then((p) => {
         if (!p.granted) return finish();
-        recognizer!.start({ lang: LANG, interimResults: false, continuous: true, androidRecognitionServicePackage: androidService(), audioSource: { uri } });
+        recognizer!.start({
+          lang: LANG,
+          interimResults: false,
+          continuous: true,
+          // On-device avoids the "Server disconnected" error when streaming a file to the online service.
+          requiresOnDeviceRecognition: opts.onDevice,
+          // The file is decoded but not resampled, so the recognizer must be told the file's real rate.
+          audioSource: { uri, sampleRate: opts.sampleRate, audioChannels: opts.channels },
+        });
       })
       .catch(() => finish());
   });
+}
+
+/**
+ * Transcribes a saved audio file. Tries on-device recognition first (reliable for streamed files),
+ * then falls back to the online service. Needs the file's real sample rate (see audioInfo).
+ */
+export async function transcribeAudioFile(uri: string, opts: TranscribeOptions = {}): Promise<string> {
+  const onDevice = await transcribeOnce(uri, { ...opts, onDevice: true });
+  if (onDevice) return onDevice;
+  return transcribeOnce(uri, { ...opts, onDevice: false });
 }

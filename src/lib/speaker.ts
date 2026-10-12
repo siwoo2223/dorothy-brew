@@ -248,8 +248,10 @@ export async function enrollFromRecordings(uris: string[]): Promise<{ ok: boolea
   const centroid = normalize(embeds[0].map((_, i) => embeds.reduce((s, e) => s + e[i], 0) / embeds.length));
   const selfSims = embeds.map((e) => cosine(e, centroid));
   const minSelf = Math.min(...selfSims);
-  // A little below the owner's own worst match, clamped to a sane range.
-  const threshold = Math.min(0.9, Math.max(0.55, minSelf - 0.08));
+  // Well below the owner's own worst enrollment match: live speech (different words, a bit of
+  // noise) scores lower than enrollment, so a lenient threshold avoids ignoring the owner. We'd
+  // rather occasionally accept a very similar voice than lock the owner out.
+  const threshold = Math.min(0.8, Math.max(0.35, minSelf - 0.2));
   await saveVoicePrint({ centroid, threshold, samples: embeds.length });
   return { ok: true, message: `목소리를 등록했어요 (${embeds.length}개 녹음).` };
 }

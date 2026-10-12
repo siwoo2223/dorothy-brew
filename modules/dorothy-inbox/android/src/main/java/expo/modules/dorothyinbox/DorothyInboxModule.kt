@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import android.provider.CallLog
 import android.provider.Settings
@@ -41,6 +43,36 @@ class DorothyInboxModule : Module() {
     Function("messageCount") { InboxStore.count(context) }
 
     Function("historyCount") { InboxStore.historyCount(context) }
+
+    // The sample rate / channels of an audio file, so the recognizer is told the true rate
+    // (feeding 48kHz audio as 16kHz makes transcription fail).
+    AsyncFunction("audioInfo") { uriString: String ->
+      val extractor = MediaExtractor()
+      try {
+        val uri = Uri.parse(uriString)
+        if (uri.scheme == "content") {
+          context.contentResolver.openFileDescriptor(uri, "r")!!.use { pfd -> extractor.setDataSource(pfd.fileDescriptor) }
+        } else {
+          extractor.setDataSource(uri.path ?: uriString.removePrefix("file://"))
+        }
+        var result = mapOf("sampleRate" to 16000, "channels" to 1)
+        for (i in 0 until extractor.trackCount) {
+          val f = extractor.getTrackFormat(i)
+          if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+            result = mapOf(
+              "sampleRate" to if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE)) f.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 16000,
+              "channels" to if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) f.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1,
+            )
+            break
+          }
+        }
+        result
+      } catch (e: Throwable) {
+        mapOf("sampleRate" to 16000, "channels" to 1)
+      } finally {
+        extractor.release()
+      }
+    }
 
     AsyncFunction("importMessages") { messages: List<Map<String, Any>> ->
       InboxStore.importChats(context, messages)

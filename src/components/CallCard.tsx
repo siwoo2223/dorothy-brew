@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform } from 'react-native';
 
+import { audioInfo } from '../lib/inbox';
 import { useStore } from '../lib/store';
 import { transcribeAudioFile, voiceInputAvailable } from '../lib/voice';
 import { Body, Button, Card, Title } from './ui';
@@ -29,7 +30,8 @@ export function CallCard() {
       const texts: string[] = [];
       for (let i = 0; i < picked.assets.length; i++) {
         setStatus(`녹음 ${i + 1}/${picked.assets.length} 글로 바꾸는 중… (길면 몇 분 걸려요)`);
-        const text = await transcribeAudioFile(picked.assets[i].uri);
+        const info = await audioInfo(picked.assets[i].uri).catch(() => ({ sampleRate: 16000, channels: 1 }));
+        const text = await transcribeAudioFile(picked.assets[i].uri, { sampleRate: info.sampleRate, channels: info.channels });
         if (text) texts.push(`[${picked.assets[i].name}]\n${text}`);
       }
       if (!texts.length) {

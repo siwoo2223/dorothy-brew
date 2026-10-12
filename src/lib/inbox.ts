@@ -19,6 +19,7 @@ type NativeInbox = {
   searchMessages(keyword: string, sinceMs: number, limit: number): Promise<InboxMessage[]>;
   clearMessages(): void;
   getCalls(sinceMs: number, limit: number): Promise<CallEntry[]>;
+  audioInfo(uri: string): Promise<{ sampleRate: number; channels: number }>;
 };
 
 const native = Platform.OS === 'android' ? requireOptionalNativeModule<NativeInbox>('DorothyInbox') : null;
@@ -67,6 +68,11 @@ export async function requestCallLog(): Promise<boolean> {
 export async function getCalls(sinceMs: number, limit = 100): Promise<CallEntry[]> {
   if (!(await callLogGranted())) return [];
   return native!.getCalls(sinceMs, limit);
+}
+
+/** The sample rate and channel count of an audio file, for feeding the recognizer the correct rate. */
+export async function audioInfo(uri: string): Promise<{ sampleRate: number; channels: number }> {
+  return native ? native.audioInfo(uri) : { sampleRate: 16000, channels: 1 };
 }
 
 const CALL_TYPE: Record<CallEntry['type'], string> = { incoming: '받은 전화', outgoing: '건 전화', missed: '부재중', rejected: '거절', other: '기타' };
