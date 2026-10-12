@@ -1,10 +1,12 @@
 import { Tabs } from 'expo-router/js-tabs';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Text } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../lib/notifications';
+import { ensureProactiveRegistered } from '../lib/proactive';
 import { NotificationRouter } from '../components/NotificationRouter';
 import { VoiceLauncher } from '../components/VoiceLauncher';
 import { StoreProvider } from '../lib/store';
@@ -17,6 +19,9 @@ const icon = (emoji: string) =>
 
 export default function RootLayout() {
   const theme = useTheme();
+  useEffect(() => {
+    ensureProactiveRegistered();
+  }, []);
   return (
     <SafeAreaProvider>
       {/* Android draws edge-to-edge, so the keyboard is tracked natively instead of by window resizing. */}
