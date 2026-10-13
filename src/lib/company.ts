@@ -20,15 +20,18 @@ export function companyConfigured(): boolean {
   return !!endpointUrl && !!token;
 }
 
-/** Fetches the JSON summary (or the schema dump) as text, to hand straight to Claude. */
-export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): Promise<string> {
+/** Builds the endpoint URL with the given query params and fetches the response as text. */
+async function get(params: Record<string, string>): Promise<string> {
   if (!endpointUrl || !token) {
     throw new Error('회사 현황이 아직 연결되지 않았어요. 설정 → "회사 현황 연결"에서 주소와 토큰을 넣어 주세요.');
   }
+  const qs = Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
   const sep = endpointUrl.includes('?') ? '&' : '?';
   let res: Response;
   try {
-    res = await fetch(`${endpointUrl}${sep}mode=${mode}`, {
+    res = await fetch(`${endpointUrl}${sep}${qs}`, {
       method: 'GET',
       headers: { 'X-Dorothy-Token': token, Accept: 'application/json' },
     });
@@ -39,4 +42,23 @@ export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): 
   if (res.status === 403) throw new Error('회사 서버가 접근을 거부했어요(토큰 불일치). 설정의 토큰을 확인해 주세요.');
   if (!res.ok) throw new Error(`회사 서버 오류 (${res.status}): ${text.slice(0, 300)}`);
   return text;
+}
+
+/** Fetches the JSON summary (or the schema dump) as text, to hand straight to Claude. */
+export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): Promise<string> {
+  return get({ mode });
+}
+
+/**
+ * Looks up one entity:
+ *  - voyage:   query = voyage code (AIR/FROZEN/DRY + number, e.g. 'FROZEN17')
+ *  - customer: query = name or code to search
+ *  - tracking: query = tracking number (조회번호)
+ */
+export async function fetchCompanyLookup(type: 'voyage' | 'customer' | 'tracking', query: string): Promise<string> {
+  const q = (query || '').trim();
+  if (!q) throw new Error('무엇을 조회할지 값이 비어 있어요.');
+  if (type === 'voyage') return get({ mode: 'voyage', code: q.toUpperCase() });
+  if (type === 'customer') return get({ mode: 'customer', q });
+  return get({ mode: 'track', no: q });
 }
