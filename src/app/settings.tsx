@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
+import { CompanyCard } from '../components/CompanyCard';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
@@ -63,6 +64,8 @@ export default function Settings() {
       <VoiceMatchCard />
 
       <GoogleCard />
+
+      <CompanyCard />
 
       <InboxCard />
 
