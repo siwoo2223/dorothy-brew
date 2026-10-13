@@ -4,6 +4,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { Platform } from 'react-native';
 
 import { cancelReminder, scheduleReminder } from './notifications';
+import { setCompanyConfig } from './company';
 import { setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ChatTurn, Memory, Profile, Task } from './types';
@@ -20,8 +21,10 @@ const KEYS = {
   planHour: 'dorothy.planHour',
   speakerMatch: 'dorothy.speakerMatch',
   voiceId: 'dorothy.voiceId',
+  companyUrl: 'dorothy.companyUrl',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
+const COMPANY_TOKEN = 'dorothy.companyToken';
 
 export type ImportBundle = {
   profile?: { name?: string; about?: string };
@@ -49,6 +52,10 @@ export type AppState = {
   voiceId: string;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
   voiceOnOpen: VoiceOnOpen;
+  /** Read-only company-status endpoint (e.g. .../dorothy_report.php). '' = not connected. */
+  companyUrl: string;
+  /** Secret token for the company endpoint (kept in SecureStore, like the API key). */
+  companyToken: string;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -66,6 +73,8 @@ const initialState: AppState = {
   speakerMatch: false,
   voiceId: '',
   voiceOnOpen: 'off',
+  companyUrl: '',
+  companyToken: '',
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -84,7 +93,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -97,6 +106,8 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.planHour),
         AsyncStorage.getItem(KEYS.speakerMatch),
         AsyncStorage.getItem(KEYS.voiceId),
+        AsyncStorage.getItem(KEYS.companyUrl),
+        secret.get(COMPANY_TOKEN),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -111,8 +122,11 @@ function useStoreValue() {
         apiKey: apiKey ?? '',
         workspaceId: workspaceId ? JSON.parse(workspaceId) : '',
         model: model ? JSON.parse(model) : 'haiku',
+        companyUrl: companyUrl ? JSON.parse(companyUrl) : '',
+        companyToken: companyToken ?? '',
       };
       setSpeechVoice(ref.current.voiceId);
+      setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
       setState(ref.current);
       setLoaded(true);
     })();
@@ -122,13 +136,16 @@ function useStoreValue() {
     ref.current = { ...ref.current, [key]: value };
     setState(ref.current);
     if (key === 'voiceId') setSpeechVoice(value as string);
+    if (key === 'companyUrl' || key === 'companyToken') setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
     if (key === 'apiKey') {
       secret.set(API_KEY, value as string);
+    } else if (key === 'companyToken') {
+      secret.set(COMPANY_TOKEN, value as string);
     } else if (key === 'briefingHour') {
       if (value === null) AsyncStorage.removeItem(KEYS.briefingHour);
       else AsyncStorage.setItem(KEYS.briefingHour, String(value));
     } else {
-      AsyncStorage.setItem(KEYS[key as Exclude<keyof AppState, 'apiKey'>], JSON.stringify(value));
+      AsyncStorage.setItem(KEYS[key as Exclude<keyof AppState, 'apiKey' | 'companyToken'>], JSON.stringify(value));
     }
   }, []);
 
@@ -143,6 +160,8 @@ function useStoreValue() {
       setSpeakerMatch: (on: boolean) => update('speakerMatch', on),
       setVoiceId: (id: string) => update('voiceId', id),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
+      setCompanyUrl: (url: string) => update('companyUrl', url.trim()),
+      setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
