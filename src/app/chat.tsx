@@ -73,8 +73,13 @@ export default function Chat() {
       if (was === 'command' && phase.current === 'command') phase.current = 'wake';
       if (phase.current !== 'wake' || (was !== 'wake' && was !== 'command')) return;
 
+      // A quiet standby ending with no speech is normal, not a failure — otherwise long silences
+      // make standby back off (up to 8s between listens) or even switch itself off while nobody is
+      // speaking. Only a session that dies almost instantly (a broken recognizer loop) or a hard
+      // error counts against us.
       const silence = info.error === undefined || info.error === 'no-speech' || info.error === 'speech-timeout';
-      const healthy = info.heardSpeech || (silence && info.durationMs > 3000);
+      const instant = info.durationMs < 500;
+      const healthy = info.heardSpeech || (silence && !instant);
       failures.current = healthy ? 0 : failures.current + 1;
 
       if (failures.current >= 3 && continuousOk.current) {
