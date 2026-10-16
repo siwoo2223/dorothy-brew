@@ -8,6 +8,10 @@
  * the TTS voice), so the assistant's tool loop can reach it without threading
  * state through every call.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+
 let endpointUrl = '';
 let token = '';
 
@@ -18,6 +22,22 @@ export function setCompanyConfig(url: string, secret: string) {
 
 export function companyConfigured(): boolean {
   return !!endpointUrl && !!token;
+}
+
+/**
+ * Loads the saved URL + token straight from storage and sets the module config. The background
+ * check runs in a fresh JS context where the store never mounted, so it can't rely on
+ * setCompanyConfig having been called; it calls this first. Returns whether a config is present.
+ */
+export async function loadCompanyConfig(): Promise<boolean> {
+  try {
+    const url = await AsyncStorage.getItem('dorothy.companyUrl');
+    const secret = Platform.OS === 'web' ? await AsyncStorage.getItem('dorothy.companyToken') : await SecureStore.getItemAsync('dorothy.companyToken');
+    setCompanyConfig(url ? JSON.parse(url) : '', secret ?? '');
+  } catch {
+    // leave whatever is already set
+  }
+  return companyConfigured();
 }
 
 /** Builds the endpoint URL with the given query params and fetches the response as text. */
