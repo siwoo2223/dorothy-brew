@@ -69,6 +69,11 @@ export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): 
   return get({ mode });
 }
 
+/** "Needs attention today": this week's departing/arriving voyages, long-stuck shipments, unpaid hint. */
+export async function fetchCompanyAttention(): Promise<string> {
+  return get({ mode: 'attention' });
+}
+
 /**
  * Looks up one entity:
  *  - voyage:   query = voyage code (AIR/FROZEN/DRY + number, e.g. 'FROZEN17')
