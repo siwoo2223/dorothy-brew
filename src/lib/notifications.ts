@@ -77,3 +77,26 @@ export async function cancelNightlyPlan(): Promise<void> {
   if (Platform.OS === 'web') return;
   await Notifications.cancelScheduledNotificationAsync(PLAN_ID).catch(() => {});
 }
+
+const WEEKLY_ID = 'weekly-report';
+
+/**
+ * Repeats every week on the given weekday (expo weekday: 1=Sunday … 7=Saturday) at 9am. Tapping it
+ * opens the chat and generates the weekly business report (see NotificationRouter + chat ?weekly=1).
+ */
+export async function scheduleWeeklyReport(weekday: number, hour = 9): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  if (!(await ensureNotificationPermission())) return false;
+  await Notifications.cancelScheduledNotificationAsync(WEEKLY_ID).catch(() => {});
+  await Notifications.scheduleNotificationAsync({
+    identifier: WEEKLY_ID,
+    content: { title: '📊 주간 사업 리포트', body: '지난주 어땠는지 도로시가 정리해 드릴게요.', data: { url: '/chat?weekly=1' } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday, hour, minute: 0, channelId: 'reminders' },
+  });
+  return true;
+}
+
+export async function cancelWeeklyReport(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await Notifications.cancelScheduledNotificationAsync(WEEKLY_ID).catch(() => {});
+}

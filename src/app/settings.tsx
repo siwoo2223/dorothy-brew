@@ -3,6 +3,7 @@ import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { CompanyCard } from '../components/CompanyCard';
+import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
@@ -66,6 +67,8 @@ export default function Settings() {
       <GoogleCard />
 
       <CompanyCard />
+
+      <WeeklyReportCard />
 
       <InboxCard />
 
