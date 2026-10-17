@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Anthropic from '@anthropic-ai/sdk';
 
 import * as company from './company';
@@ -631,4 +632,92 @@ export async function briefing(state: AppState): Promise<string> {
     messages.push({ role: 'assistant', content: response.content });
   }
   return '브리핑을 만드는 데 시간이 너무 오래 걸렸어요. 다시 시도해 주세요.';
+}
+
+const WEEKLY_SNAPSHOT_KEY = 'dorothy.weeklySnapshot';
+
+/** Pulls a few headline numbers out of the company report JSON for week-over-week comparison. */
+function companySnapshot(reportJson: string): { total: number; inProgress: number; customers: number } | null {
+  try {
+    const d = JSON.parse(reportJson);
+    return {
+      total: Number(d?.shipments?.total ?? 0),
+      inProgress: Number(d?.shipments?.in_progress ?? 0),
+      customers: Number(d?.customers?.total ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A weekly business review: this week's company status + attention + how the headline numbers moved
+ * since the last report (a local snapshot). Falls back to a personal weekly review without a key or
+ * on the phone brain.
+ */
+export async function weeklyReport(state: AppState): Promise<string> {
+  if (state.model === 'local' || !state.apiKey) {
+    return localComplete(
+      [
+        { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+        { role: 'user', content: '지난 한 주를 돌아보는 주간 리포트를 써 줘. 완료한 일, 남은 일, 다음 주에 챙길 것을 짧게 정리해 줘.' },
+      ],
+      undefined,
+      700,
+    );
+  }
+  const client = createClient(state);
+
+  let companyData = '';
+  let deltaNote = '';
+  if (company.companyConfigured()) {
+    const [report, attention] = await Promise.all([
+      company.fetchCompanyReport('report').catch(() => ''),
+      company.fetchCompanyAttention().catch(() => ''),
+    ]);
+    if (report) {
+      const cur = companySnapshot(report);
+      try {
+        const prevRaw = await AsyncStorage.getItem(WEEKLY_SNAPSHOT_KEY);
+        const prev = prevRaw ? JSON.parse(prevRaw) : null;
+        if (prev && cur) {
+          const sign = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
+          deltaNote =
+            `\n<since_last_report date="${prev.date}">\n` +
+            `화물 총계 ${sign(cur.total - prev.total)} (지금 ${cur.total}), 진행중 ${sign(cur.inProgress - prev.inProgress)} (지금 ${cur.inProgress}), 고객 ${sign(cur.customers - prev.customers)} (지금 ${cur.customers})\n` +
+            `</since_last_report>`;
+        }
+        if (cur) await AsyncStorage.setItem(WEEKLY_SNAPSHOT_KEY, JSON.stringify({ ...cur, date: new Date().toISOString().slice(0, 10) }));
+      } catch {
+        // snapshot is best-effort
+      }
+      companyData = `\n\n<company_status>\n${report}\n</company_status>`;
+    }
+    if (attention) companyData += `\n\n<company_attention>\n${attention}\n</company_attention>`;
+    companyData += deltaNote;
+  }
+
+  const messages: Anthropic.Beta.BetaMessageParam[] = [
+    {
+      role: 'user',
+      content:
+        '주간 사업 리포트를 써 줘. 아래 회사 현황·오늘 챙길 일·지난 리포트 대비 변화를 바탕으로, 사장이 한 주를 돌아보고 다음 주를 준비하도록 정리해 줘. ' +
+        '순서: ①지난주 대비 변화(화물·고객 증감, 이번 달 vs 지난달 청구/수지 추세) ②지금 눈에 띄는 것(이번 주 출항·입항, 오래 묶인 화물) ③다음 주 챙길 것. ' +
+        '숫자는 받은 그대로, 단위가 불분명하면 단정하지 말고 "서버 값 기준". 짧은 소제목과 글머리표로, 휴대폰 화면에 맞게. 회사 데이터가 없으면 할 일·일정 기준으로 한 주를 정리해 줘.' +
+        companyData,
+    },
+  ];
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: buildContext(state) },
+  ];
+  const response = await client.beta.messages.create({
+    ...modelParams(state.model),
+    max_tokens: 8000,
+    output_config: { effort: 'low' },
+    system,
+    messages,
+  });
+  if (response.stop_reason === 'refusal') return '주간 리포트를 만들지 못했어요.';
+  return textOf(response.content) || '주간 리포트가 비어 있어요. 다시 시도해 주세요.';
 }

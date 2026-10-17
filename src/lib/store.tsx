@@ -22,6 +22,7 @@ const KEYS = {
   speakerMatch: 'dorothy.speakerMatch',
   voiceId: 'dorothy.voiceId',
   companyUrl: 'dorothy.companyUrl',
+  weeklyReportDay: 'dorothy.weeklyReportDay',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -56,6 +57,8 @@ export type AppState = {
   companyUrl: string;
   /** Secret token for the company endpoint (kept in SecureStore, like the API key). */
   companyToken: string;
+  /** Weekday (expo: 1=Sun … 7=Sat) for the weekly business report, or null when off. */
+  weeklyReportDay: number | null;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -75,6 +78,7 @@ const initialState: AppState = {
   voiceOnOpen: 'off',
   companyUrl: '',
   companyToken: '',
+  weeklyReportDay: null,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -93,7 +97,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken] = await Promise.all([
+      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
@@ -108,6 +112,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.voiceId),
         AsyncStorage.getItem(KEYS.companyUrl),
         secret.get(COMPANY_TOKEN),
+        AsyncStorage.getItem(KEYS.weeklyReportDay),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -124,6 +129,7 @@ function useStoreValue() {
         model: model ? JSON.parse(model) : 'haiku',
         companyUrl: companyUrl ? JSON.parse(companyUrl) : '',
         companyToken: companyToken ?? '',
+        weeklyReportDay: weeklyReportDay ? JSON.parse(weeklyReportDay) : null,
       };
       setSpeechVoice(ref.current.voiceId);
       setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
@@ -162,6 +168,7 @@ function useStoreValue() {
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
       setCompanyUrl: (url: string) => update('companyUrl', url.trim()),
       setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),
+      setWeeklyReportDay: (day: number | null) => update('weeklyReportDay', day),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };

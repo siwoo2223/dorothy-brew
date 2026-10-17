@@ -6,7 +6,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { Input } from '../components/ui';
-import { chat, describeError, PLAN_REQUEST } from '../lib/assistant';
+import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
 import { useStore } from '../lib/store';
@@ -28,7 +28,7 @@ export default function Chat() {
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
   const router = useRouter();
-  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string }>();
+  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string }>();
   const canListen = voiceInputAvailable();
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
@@ -189,6 +189,27 @@ export default function Chat() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.call]);
+
+  // Opened with ?weekly=1 (the weekly-report notification or the settings button): generate the
+  // weekly business review and post it into the chat.
+  useEffect(() => {
+    if (!params.weekly) return;
+    router.setParams({ weekly: undefined });
+    (async () => {
+      if (busy) return;
+      setBusy(true);
+      atBottom.current = true;
+      try {
+        const reply = await weeklyReport(getState());
+        actions.appendChat({ role: 'assistant', text: reply });
+      } catch (e) {
+        actions.appendChat({ role: 'assistant', text: `⚠️ ${describeError(e)}` });
+      } finally {
+        setBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.weekly]);
 
   const afterReply = () => {
     if (phase.current === 'off') return;
