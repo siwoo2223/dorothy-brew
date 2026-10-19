@@ -7,10 +7,11 @@ import { cancelReminder, scheduleReminder } from './notifications';
 import { setCompanyConfig } from './company';
 import { setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Memory, Profile, Task } from './types';
+import type { ChatTurn, Followup, Memory, Profile, Task } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
+  followups: 'dorothy.followups',
   memories: 'dorothy.memories',
   profile: 'dorothy.profile',
   chat: 'dorothy.chat',
@@ -35,6 +36,8 @@ export type ImportBundle = {
 
 export type AppState = {
   tasks: Task[];
+  /** Replies to send / requests to handle, tracked from messages & calls. */
+  followups: Followup[];
   memories: Memory[];
   profile: Profile;
   chat: ChatTurn[];
@@ -65,6 +68,7 @@ export type VoiceOnOpen = 'off' | 'listen' | 'standby';
 
 const initialState: AppState = {
   tasks: [],
+  followups: [],
   memories: [],
   profile: { name: '', about: '' },
   chat: [],
@@ -97,8 +101,9 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
+        AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
         AsyncStorage.getItem(KEYS.chat),
@@ -116,6 +121,7 @@ function useStoreValue() {
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
+        followups: followups ? JSON.parse(followups) : [],
         memories: memories ? JSON.parse(memories) : [],
         profile: profile ? JSON.parse(profile) : initialState.profile,
         chat: chat ? JSON.parse(chat) : [],
@@ -200,6 +206,23 @@ function useStoreValue() {
         const exists = ref.current.memories.some((m) => m.id === id);
         update('memories', ref.current.memories.filter((m) => m.id !== id));
         return exists;
+      },
+
+      addFollowup(input: { who: string; what: string; source?: string }): Followup {
+        // Skip an obvious duplicate (same person + same thing still open).
+        const dup = ref.current.followups.find((f) => !f.done && f.who === input.who && f.what === input.what);
+        if (dup) return dup;
+        const followup: Followup = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
+        update('followups', [...ref.current.followups, followup]);
+        return followup;
+      },
+      completeFollowup(id: string): boolean {
+        const exists = ref.current.followups.some((f) => f.id === id);
+        update('followups', ref.current.followups.map((f) => (f.id === id ? { ...f, done: true } : f)));
+        return exists;
+      },
+      deleteFollowup(id: string) {
+        update('followups', ref.current.followups.filter((f) => f.id !== id));
       },
 
       /** Merges an exported/handwritten JSON bundle; skips memories and tasks that already exist. */
