@@ -46,9 +46,34 @@ export function VoicePickerCard() {
         })}
       </View>
       {voices.length === 0 && <Body muted>이 휴대폰에서 고를 수 있는 한국어 목소리를 찾지 못했어요. 휴대폰 TTS 설정을 확인해 주세요.</Body>}
+
+      <Body muted>말하기 속도</Body>
+      <View style={styles.row}>
+        {SPEEDS.map((s) => {
+          const active = Math.abs(state.speechRate - s.value) < 0.01;
+          return (
+            <Pressable
+              key={s.label}
+              onPress={() => {
+                actions.setSpeechRate(s.value);
+                previewVoice(state.voiceId);
+              }}
+              style={[styles.pill, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : 'transparent' }]}
+            >
+              <Text style={{ color: active ? t.accentText : t.text, fontSize: 13 }}>{s.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </Card>
   );
 }
+
+const SPEEDS = [
+  { label: '느리게', value: 0.85 },
+  { label: '보통', value: 1.05 },
+  { label: '빠르게', value: 1.3 },
+];
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

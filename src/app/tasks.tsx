@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { useStore } from '../lib/store';
-import type { Task } from '../lib/types';
+import type { Followup, Task } from '../lib/types';
 import { useTheme } from '../lib/theme';
 
 type Preset = { label: string; at: () => Date | undefined };
@@ -38,6 +38,7 @@ export default function Tasks() {
   const byDue = (a: Task, b: Task) => (a.dueAt ?? '9999').localeCompare(b.dueAt ?? '9999');
   const open = state.tasks.filter((x) => !x.done).sort(byDue);
   const done = state.tasks.filter((x) => x.done).reverse();
+  const openFollowups = (state.followups ?? []).filter((f) => !f.done).reverse();
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -57,6 +58,15 @@ export default function Tasks() {
         <Button label="추가" onPress={add} disabled={!title.trim()} />
         <Body muted>자세한 시간은 도로시에게 말로 부탁해도 돼요. “금요일 오후 3시 치과 예약 알려줘”</Body>
       </Card>
+
+      {openFollowups.length > 0 && (
+        <>
+          <Title>✉️ 회신·부탁 ({openFollowups.length})</Title>
+          {openFollowups.map((f) => (
+            <FollowupRow key={f.id} followup={f} onToggle={() => actions.completeFollowup(f.id)} onDelete={() => actions.deleteFollowup(f.id)} />
+          ))}
+        </>
+      )}
 
       <Title>진행 중 ({open.length})</Title>
       {open.length === 0 && <Body muted>할 일이 없어요. 여유로운 하루 보내세요 🌿</Body>}
@@ -89,6 +99,22 @@ function TaskRow({ task, onToggle, onDelete }: { task: Task; onToggle: () => voi
           </Text>
         )}
         {task.notes ? <Text style={{ color: t.subtext, fontSize: 12 }}>{task.notes}</Text> : null}
+      </View>
+      <Pressable onPress={onDelete} hitSlop={8}>
+        <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function FollowupRow({ followup, onToggle, onDelete }: { followup: Followup; onToggle: () => void; onDelete: () => void }) {
+  const t = useTheme();
+  return (
+    <View style={[styles.row, { backgroundColor: t.card, borderColor: t.border }]}>
+      <Pressable onPress={onToggle} hitSlop={8} style={[styles.check, { borderColor: t.accent, backgroundColor: 'transparent' }]} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: t.text, fontSize: 15 }}>{followup.who}</Text>
+        <Text style={{ color: t.subtext, fontSize: 12 }}>{followup.what}{followup.source ? ` · ${followup.source}` : ''}</Text>
       </View>
       <Pressable onPress={onDelete} hitSlop={8}>
         <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>

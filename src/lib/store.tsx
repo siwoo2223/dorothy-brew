@@ -5,12 +5,13 @@ import { Platform } from 'react-native';
 
 import { cancelReminder, scheduleReminder } from './notifications';
 import { setCompanyConfig } from './company';
-import { setSpeechVoice } from './voice';
+import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Memory, Profile, Task } from './types';
+import type { ChatTurn, Followup, Memory, Profile, Task } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
+  followups: 'dorothy.followups',
   memories: 'dorothy.memories',
   profile: 'dorothy.profile',
   chat: 'dorothy.chat',
@@ -23,6 +24,7 @@ const KEYS = {
   voiceId: 'dorothy.voiceId',
   companyUrl: 'dorothy.companyUrl',
   weeklyReportDay: 'dorothy.weeklyReportDay',
+  speechRate: 'dorothy.speechRate',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -35,6 +37,8 @@ export type ImportBundle = {
 
 export type AppState = {
   tasks: Task[];
+  /** Replies to send / requests to handle, tracked from messages & calls. */
+  followups: Followup[];
   memories: Memory[];
   profile: Profile;
   chat: ChatTurn[];
@@ -51,6 +55,8 @@ export type AppState = {
   speakerMatch: boolean;
   /** Chosen system TTS voice id for Dorothy's spoken replies ('' = phone default). */
   voiceId: string;
+  /** How fast Dorothy speaks (1.0 = normal). */
+  speechRate: number;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
   voiceOnOpen: VoiceOnOpen;
   /** Read-only company-status endpoint (e.g. .../dorothy_report.php). '' = not connected. */
@@ -65,6 +71,7 @@ export type VoiceOnOpen = 'off' | 'listen' | 'standby';
 
 const initialState: AppState = {
   tasks: [],
+  followups: [],
   memories: [],
   profile: { name: '', about: '' },
   chat: [],
@@ -75,6 +82,7 @@ const initialState: AppState = {
   planHour: null,
   speakerMatch: false,
   voiceId: '',
+  speechRate: 1.05,
   voiceOnOpen: 'off',
   companyUrl: '',
   companyToken: '',
@@ -97,8 +105,9 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
+        AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
         AsyncStorage.getItem(KEYS.profile),
         AsyncStorage.getItem(KEYS.chat),
@@ -113,9 +122,11 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.companyUrl),
         secret.get(COMPANY_TOKEN),
         AsyncStorage.getItem(KEYS.weeklyReportDay),
+        AsyncStorage.getItem(KEYS.speechRate),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
+        followups: followups ? JSON.parse(followups) : [],
         memories: memories ? JSON.parse(memories) : [],
         profile: profile ? JSON.parse(profile) : initialState.profile,
         chat: chat ? JSON.parse(chat) : [],
@@ -130,8 +141,10 @@ function useStoreValue() {
         companyUrl: companyUrl ? JSON.parse(companyUrl) : '',
         companyToken: companyToken ?? '',
         weeklyReportDay: weeklyReportDay ? JSON.parse(weeklyReportDay) : null,
+        speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
       };
       setSpeechVoice(ref.current.voiceId);
+      setSpeechRate(ref.current.speechRate);
       setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
       setState(ref.current);
       setLoaded(true);
@@ -142,6 +155,7 @@ function useStoreValue() {
     ref.current = { ...ref.current, [key]: value };
     setState(ref.current);
     if (key === 'voiceId') setSpeechVoice(value as string);
+    if (key === 'speechRate') setSpeechRate(value as number);
     if (key === 'companyUrl' || key === 'companyToken') setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
     if (key === 'apiKey') {
       secret.set(API_KEY, value as string);
@@ -165,6 +179,7 @@ function useStoreValue() {
       setPlanHour: (hour: number | null) => update('planHour', hour),
       setSpeakerMatch: (on: boolean) => update('speakerMatch', on),
       setVoiceId: (id: string) => update('voiceId', id),
+      setSpeechRate: (rate: number) => update('speechRate', rate),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
       setCompanyUrl: (url: string) => update('companyUrl', url.trim()),
       setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),
@@ -200,6 +215,23 @@ function useStoreValue() {
         const exists = ref.current.memories.some((m) => m.id === id);
         update('memories', ref.current.memories.filter((m) => m.id !== id));
         return exists;
+      },
+
+      addFollowup(input: { who: string; what: string; source?: string }): Followup {
+        // Skip an obvious duplicate (same person + same thing still open).
+        const dup = ref.current.followups.find((f) => !f.done && f.who === input.who && f.what === input.what);
+        if (dup) return dup;
+        const followup: Followup = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
+        update('followups', [...ref.current.followups, followup]);
+        return followup;
+      },
+      completeFollowup(id: string): boolean {
+        const exists = ref.current.followups.some((f) => f.id === id);
+        update('followups', ref.current.followups.map((f) => (f.id === id ? { ...f, done: true } : f)));
+        return exists;
+      },
+      deleteFollowup(id: string) {
+        update('followups', ref.current.followups.filter((f) => f.id !== id));
       },
 
       /** Merges an exported/handwritten JSON bundle; skips memories and tasks that already exist. */

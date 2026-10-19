@@ -10,6 +10,19 @@ export type Task = {
   notificationId?: string;
 };
 
+/** Something the user owes someone: a reply to send or a request to handle, found in messages/calls. */
+export type Followup = {
+  id: string;
+  /** Who it's with (person or chat room), e.g. "김 대표", "엄마". */
+  who: string;
+  /** What's owed, e.g. "견적 회신", "배송일 안내". */
+  what: string;
+  done: boolean;
+  createdAt: string;
+  /** Where it came from, e.g. "카카오톡", "부재중 전화", "문자". */
+  source?: string;
+};
+
 export type Memory = {
   id: string;
   /** e.g. "가족", "건강", "취향", "일" */

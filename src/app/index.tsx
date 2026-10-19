@@ -46,6 +46,7 @@ export default function Today() {
   const overdue = open.filter((x) => x.dueAt && new Date(x.dueAt) < now);
   const today = open.filter((x) => x.dueAt && new Date(x.dueAt) >= now && new Date(x.dueAt) <= endOfToday);
   const undated = open.filter((x) => !x.dueAt);
+  const openFollowups = (state.followups ?? []).filter((x) => !x.done);
 
   const runBriefing = async () => {
     setLoading(true);
@@ -106,6 +107,18 @@ export default function Today() {
               </Text>
             </Body>
           ))}
+        </Card>
+      )}
+
+      {openFollowups.length > 0 && (
+        <Card>
+          <Title>✉️ 회신·부탁 ({openFollowups.length})</Title>
+          {openFollowups.slice(0, 6).map((f) => (
+            <Body key={f.id}>
+              • {f.who} <Text style={{ color: t.subtext }}>— {f.what}{f.source ? ` (${f.source})` : ''}</Text>
+            </Body>
+          ))}
+          {openFollowups.length > 6 && <Body muted>외 {openFollowups.length - 6}건 · 할 일 탭에서 모두 보기</Body>}
         </Card>
       )}
 

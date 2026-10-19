@@ -13,7 +13,7 @@ import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
 
-const SUGGESTIONS = ['내일 아침 8시에 운동 알려줘', '나에 대해 뭘 알고 있어?', '오늘 마닐라 날씨 어때?', '이번 주에 놓친 거 있어?'];
+const SUGGESTIONS = ['오늘 뭐부터 해야 해?', '이번 주 출항·입항 뭐 있어?', '이번 달 수지 어때?', '회신할 거 뭐 있어?', '내일 할 일 정리해줘'];
 
 type Phase = 'off' | 'wake' | 'command' | 'busy';
 
