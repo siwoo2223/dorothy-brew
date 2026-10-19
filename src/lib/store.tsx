@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 
 import { cancelReminder, scheduleReminder } from './notifications';
 import { setCompanyConfig } from './company';
-import { setSpeechVoice } from './voice';
+import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ChatTurn, Followup, Memory, Profile, Task } from './types';
 
@@ -24,6 +24,7 @@ const KEYS = {
   voiceId: 'dorothy.voiceId',
   companyUrl: 'dorothy.companyUrl',
   weeklyReportDay: 'dorothy.weeklyReportDay',
+  speechRate: 'dorothy.speechRate',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -54,6 +55,8 @@ export type AppState = {
   speakerMatch: boolean;
   /** Chosen system TTS voice id for Dorothy's spoken replies ('' = phone default). */
   voiceId: string;
+  /** How fast Dorothy speaks (1.0 = normal). */
+  speechRate: number;
   /** What happens when the app is opened: nothing, listen once, or enter standby. */
   voiceOnOpen: VoiceOnOpen;
   /** Read-only company-status endpoint (e.g. .../dorothy_report.php). '' = not connected. */
@@ -79,6 +82,7 @@ const initialState: AppState = {
   planHour: null,
   speakerMatch: false,
   voiceId: '',
+  speechRate: 1.05,
   voiceOnOpen: 'off',
   companyUrl: '',
   companyToken: '',
@@ -101,7 +105,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -118,6 +122,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.companyUrl),
         secret.get(COMPANY_TOKEN),
         AsyncStorage.getItem(KEYS.weeklyReportDay),
+        AsyncStorage.getItem(KEYS.speechRate),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -136,8 +141,10 @@ function useStoreValue() {
         companyUrl: companyUrl ? JSON.parse(companyUrl) : '',
         companyToken: companyToken ?? '',
         weeklyReportDay: weeklyReportDay ? JSON.parse(weeklyReportDay) : null,
+        speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
       };
       setSpeechVoice(ref.current.voiceId);
+      setSpeechRate(ref.current.speechRate);
       setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
       setState(ref.current);
       setLoaded(true);
@@ -148,6 +155,7 @@ function useStoreValue() {
     ref.current = { ...ref.current, [key]: value };
     setState(ref.current);
     if (key === 'voiceId') setSpeechVoice(value as string);
+    if (key === 'speechRate') setSpeechRate(value as number);
     if (key === 'companyUrl' || key === 'companyToken') setCompanyConfig(ref.current.companyUrl, ref.current.companyToken);
     if (key === 'apiKey') {
       secret.set(API_KEY, value as string);
@@ -171,6 +179,7 @@ function useStoreValue() {
       setPlanHour: (hour: number | null) => update('planHour', hour),
       setSpeakerMatch: (on: boolean) => update('speakerMatch', on),
       setVoiceId: (id: string) => update('voiceId', id),
+      setSpeechRate: (rate: number) => update('speechRate', rate),
       setVoiceOnOpen: (mode: VoiceOnOpen) => update('voiceOnOpen', mode),
       setCompanyUrl: (url: string) => update('companyUrl', url.trim()),
       setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),

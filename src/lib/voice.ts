@@ -64,11 +64,17 @@ export function setSpeechVoice(identifier?: string) {
   speechVoice = identifier || undefined;
 }
 
+// How fast Dorothy speaks (1.0 = normal). Set from the saved setting.
+let speechRate = 1.05;
+export function setSpeechRate(rate?: number) {
+  if (typeof rate === 'number' && rate > 0) speechRate = rate;
+}
+
 export function speak(text: string, onDone?: () => void) {
   Speech.stop();
   Speech.speak(forSpeech(text), {
     language: LANG,
-    rate: 1.05,
+    rate: speechRate,
     voice: speechVoice,
     onDone,
     onError: () => onDone?.(),
@@ -92,9 +98,9 @@ export async function listKoreanVoices(): Promise<{ identifier: string; name: st
 }
 
 /** Speaks a short sample with a given voice, so the user can hear it before choosing. */
-export function previewVoice(identifier: string) {
+export function previewVoice(identifier?: string) {
   Speech.stop();
-  Speech.speak('안녕하세요, 저는 도로시예요. 이 목소리로 말할게요.', { language: LANG, rate: 1.05, voice: identifier });
+  Speech.speak('안녕하세요, 저는 도로시예요. 이 목소리로 말할게요.', { language: LANG, rate: speechRate, voice: identifier || undefined });
 }
 
 type VoiceState = 'idle' | 'listening' | 'error';
