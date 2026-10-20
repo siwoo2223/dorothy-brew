@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import random
+import inspect
 import re
 import unicodedata
 import struct
@@ -783,7 +784,7 @@ class Win32KakaoDriver:
             time.sleep(0.2)
         return 0
 
-    def send_profile(self, friend: str, room: str) -> None:
+    def send_profile(self, friend: str, room: str, last: bool = True) -> None:
         """친구 목록의 friend(직원)를 오른쪽 클릭 → '프로필 전송' → 공유 대상 선택에서 '채팅' 탭 → room 검색 → 선택 → 확인.
 
         2026-10-10 요청 - "내프로필은 아니라 직원들 프로필을 올릴꺼야": 광고 올리기의 마지막 단계.
@@ -812,7 +813,7 @@ class Win32KakaoDriver:
             if not box:
                 raise RuntimeError("친구 탭 검색칸을 찾지 못했습니다 [진단: " + self._diagnose(main) + "]")
             self._set_search(box, friend)
-            time.sleep(self.wait)
+            time.sleep(min(self.wait, 1.0))  # 친구 검색은 목록이 바로 걸러진다
             results = self._search_list(main, "friends")
             if results:
                 titles = _ocr_screen(results)()
@@ -913,7 +914,7 @@ class Win32KakaoDriver:
                 self._click_at((dl + dr) / 2, top_y + (db - dt) * 0.07)
                 self._paste_text(room)
                 top_y += (db - dt) * 0.1
-            time.sleep(self.wait)
+            time.sleep(min(self.wait, 1.0))
             lines = ocr_all_lines(dialog)
             names = [ln for ln in lines if ln.y > top_y and find_line([ln], "확인", exact=True) is None
                      and find_line([ln], "취소", exact=True) is None
@@ -937,7 +938,10 @@ class Win32KakaoDriver:
             if not ok:
                 raise RuntimeError(f"'확인' 버튼을 찾지 못했습니다(읽은 글자: {', '.join(x.text for x in lines[-6:])})")
             self._click_at(ok.x + ok.w / 2, ok.y + ok.h / 2)
-            time.sleep(1.0)
+            for _ in range(10):  # 닫힐 때까지 최대 2초(닫히면 바로 다음으로)
+                if not (win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog)):
+                    break
+                time.sleep(0.2)
             if win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog):
                 raise RuntimeError("'확인'을 눌렀지만 공유 대상 선택 창이 닫히지 않았습니다(방 선택이 안 됐을 수 있음)")
             dialog = 0
@@ -949,7 +953,10 @@ class Win32KakaoDriver:
                 b = self._panel_box(main, "friends")
                 if b:
                     win32api.SendMessage(b, win32con.WM_SETTEXT, 0, "")
-                self._ensure_chats_tab(main)  # 다음 발송을 위해 채팅 탭으로 되돌림(화면 글자로 확인)
+                # 2026-10-20 요청 - "프로필 전송하는 속도를 더 빠르게": 다음 프로필이 있으면 친구 탭에 그대로 두고, 마지막에만
+                # 다음 발송을 위해 채팅 탭으로 되돌린다(프로필마다 채팅 탭 ↔ 친구 탭을 오가던 시간을 줄임)
+                if last:
+                    self._ensure_chats_tab(main)
             except Exception:
                 pass
             _keep_on_top(main, False)
@@ -981,7 +988,7 @@ class Win32KakaoDriver:
         """프로필 전송 전 준비: 2026-10-10 요청 - "손팀장도 양대리 같은 프로세스로": 두 번째(양대리)는 첫 번째가 친구 탭과
         친구 검색칸을 열어 둔 상태에서 시작해 잘 됐다. 첫 번째도 같은 상태에서 시작하도록 친구 탭 → 검색칸 열기를 먼저 해 둔다."""
         _, _, win32gui = self._w()
-        time.sleep(1.5)  # 방 창이 다 닫힐 때까지
+        time.sleep(0.8)  # 방 창이 다 닫힐 때까지
         main = self._main()
 
         def visible_box(t: str) -> int:
@@ -1267,11 +1274,8 @@ class Win32KakaoDriver:
             texts = " ".join(ln.text for ln in ocr_all_lines(main))
             return "안읽음" in texts or "안 읽음" in texts or ("채팅" in texts and "친구" not in texts)
 
-        _focus(main)
-        _press(win32con.VK_CONTROL, ord("1"))
-        time.sleep(0.8)
-        if not on_chats():
-            self._log("카톡 메인 창 '친구' 탭(단축키)")
+        # 2026-10-20 - 이미 친구 탭이면 아무것도 누르지 않는다(속도). 새 카톡 화면은 단축키(Ctrl+1)가 안 먹어 아이콘부터 누른다.
+        if self._current_tab(main) == "friends":
             return
         try:
             import ctypes
@@ -1282,10 +1286,16 @@ class Win32KakaoDriver:
         for y in (62, 70, 55):  # 왼쪽 맨 위 사람 모양 아이콘
             _focus(main)
             self._click_at(left + 34 * scale, top + y * scale)
-            time.sleep(0.6)
+            time.sleep(0.4)
             if not on_chats():
                 self._log("카톡 메인 창 왼쪽 '친구' 아이콘을 누름")
                 return
+        _focus(main)
+        _press(win32con.VK_CONTROL, ord("1"))
+        time.sleep(0.8)
+        if not on_chats():
+            self._log("카톡 메인 창 '친구' 탭(단축키)")
+            return
         raise RuntimeError("카톡 메인 창을 친구 탭으로 바꾸지 못했습니다(왼쪽 맨 위 사람 아이콘을 한 번 눌러 두세요)")
 
     def _ensure_chats_tab(self, main: int, force_click: bool = False) -> None:
@@ -1759,12 +1769,17 @@ class KakaoPCSender:
         if m.profiles and hasattr(self.driver, "prepare_profiles"):
             self.driver.prepare_profiles()
         for attempt in (1, 2):
-            for friend in (m.profiles if attempt == 1 else list(failed)):
+            todo = list(m.profiles if attempt == 1 else failed)
+            for i, friend in enumerate(todo):
                 if not hasattr(self.driver, "send_profile"):
                     note += f" ⚠️ 프로필 전송 미지원({friend})"
                     continue
                 try:
-                    self.driver.send_profile(friend, name)
+                    is_last = i == len(todo) - 1 and (attempt == 2 or not failed)
+                    if "last" in inspect.signature(self.driver.send_profile).parameters:
+                        self.driver.send_profile(friend, name, last=is_last)
+                    else:  # last 를 받지 않는 드라이버(테스트용 등)
+                        self.driver.send_profile(friend, name)
                     note += f" (+{friend} 프로필{' · 다시 시도' if attempt == 2 else ''})"
                     failed.pop(friend, None)
                 except Exception as exc:
