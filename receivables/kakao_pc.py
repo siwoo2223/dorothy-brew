@@ -1169,7 +1169,39 @@ class Win32KakaoDriver:
             if visible():
                 raise RuntimeError("사진 전송 확인 창이 닫히지 않았습니다(2026-10-20c) - " + " | ".join(tried))
             self._log(f"사진 전송 확인 창 닫힘({time.time() - start:.0f}초)")
-        time.sleep(3.0 + 0.7 * len(names))  # 올라가는 시간(닫을 때도 다 올라갈 때까지 기다림)
+        # 2026-10-20 요청 - "사진 다음에 문구 보내는 거는 12/15 이때 보내고": 사진 위에 뜨는 올리기 진행(12/15)을 읽어
+        # 80% 쯤 올라갔을 때 문구로 넘어간다(다 올라가길 기다리지 않음). 진행 표시를 못 읽으면 예전처럼 잠깐 기다린다.
+        self._album_total = len(names)
+        need = max(1, -(-len(names) * 4 // 5))  # 15장이면 12
+        start, seen = time.time(), False
+        while time.time() - start < 180:
+            done = self.upload_progress(chat, len(names))
+            if done is None:
+                if seen or time.time() - start > 5:
+                    break  # 다 올라갔거나(표시 사라짐) 표시를 못 읽음
+            else:
+                seen = True
+                if done >= need:
+                    break
+            time.sleep(0.7)
+        if not seen:
+            time.sleep(max(0.0, 3.0 + 0.7 * len(names) - (time.time() - start)))
+        self._log(f"사진 올리기 진행을 보고 문구로 넘어감({time.time() - start:.0f}초, {'진행 표시 읽음' if seen else '진행 표시 못 읽음'})")
+
+    def upload_progress(self, chat, total: int):
+        """채팅방 사진 위에 뜨는 올리기 진행('12/15')의 앞 숫자. 표시가 없으면 None.
+        날짜('10/15 목') 같은 글과 헷갈리지 않게, 그 줄 글자가 '숫자/전체장수' 뿐일 때만 본다."""
+        from .kakao_names import ocr_all_lines
+
+        try:
+            lines = ocr_all_lines(chat)
+        except Exception:
+            return None
+        for ln in lines:
+            m = re.fullmatch(r"(\d{1,2})\s*/\s*(\d{1,2})", ln.text.strip())
+            if m and int(m.group(2)) == total and int(m.group(1)) <= total:
+                return int(m.group(1))
+        return None
 
     def _dialog_address(self, dialog: int) -> str:
         """파일 선택 창 위쪽 주소 줄의 글자('주소: C:\…')."""
@@ -1648,6 +1680,12 @@ class Win32KakaoDriver:
         """
         win32api, win32con, win32gui = self._w()
         deadline = time.time() + self.CLOSE_WAIT_MAX
+        # 2026-10-20 - 사진 묶음이 아직 올라가는 중이면(진행 '13/15' 표시) 닫기를 누르지 않고 끝날 때까지 기다린다
+        # (닫기를 눌러 '전송 중인 파일이 있습니다' 창이 뜨고 5초씩 쉬던 시간을 줄임)
+        total = getattr(self, "_album_total", 0)
+        while total and time.time() < deadline and self.upload_progress(chat, total) is not None:
+            time.sleep(1.0)
+        self._album_total = 0
         while True:
             before = set(self._kakao_windows())
             win32api.PostMessage(chat, win32con.WM_CLOSE, 0, 0)
