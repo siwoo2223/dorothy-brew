@@ -131,6 +131,23 @@ def find_line(lines, want: str, exact: bool = False, below: float | None = None)
     return best
 
 
+def find_send_button(lines, top: float | None = None, height: float | None = None):
+    """카톡 '파일 전송' 확인 창의 아래쪽 큰 버튼('15개 전송' 등).
+
+    2026-10-20 - "두번째 큰 박스를 눌러야 하는데, 상단에 작은 전송 버튼을 누르고 있네": 창 제목 '파일 전송'의 '전송'을 버튼으로
+    알고 눌렀다 → 'N개 전송'을 먼저 찾고, 없으면 '전송'·'보내기'·'확인' 글자 중 창 위쪽 1/4(제목 줄)을 뺀 가장 아래 줄.
+    """
+    def key(t: str) -> str:
+        return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", t or ""))
+
+    counted = [ln for ln in lines if re.fullmatch(r"\d+개(전송|보내기)", key(ln.text))]
+    if counted:
+        return max(counted, key=lambda ln: ln.y)
+    limit = top + height / 4 if top is not None and height else None
+    cands = [ln for ln in lines if key(ln.text) in ("전송", "보내기", "확인") and (limit is None or ln.y > limit)]
+    return max(cands, key=lambda ln: ln.y) if cands else None
+
+
 class Win32KakaoDriver:
     """pywin32 로 PC 카카오톡 창에 직접 메시지를 보내는 드라이버 (Windows 전용)."""
 
@@ -1105,7 +1122,8 @@ class Win32KakaoDriver:
                 except Exception as exc:
                     lines = []
                     self._log(f"사진 전송 확인 창 글자 읽기 실패: {exc}")
-                button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
+                l_, t_, r_, b_ = win32gui.GetWindowRect(confirm)
+                button = find_send_button(lines, t_, b_ - t_)
                 if button:
                     self._click_at(button.x + button.w / 2, button.y + button.h / 2)
                     self._log(f"사진 전송 확인 창의 '{button.text}' 누름")
@@ -1113,7 +1131,10 @@ class Win32KakaoDriver:
                     self._log(f"사진 전송 확인 창에서 버튼을 못 찾음(읽은 글자: {', '.join(ln.text for ln in lines[:10])}) → Enter")
                     from .kakao_names import _focus
                     _focus(confirm)
-                    self._key(win32con.VK_RETURN)
+                    if attempt == 0:
+                        self._key(win32con.VK_RETURN)
+                    else:  # 그래도 안 닫히면 창 아래 가운데(큰 'N개 전송' 버튼 자리)를 누른다
+                        self._click_at((l_ + r_) / 2, b_ - (b_ - t_) * 0.09)
                 time.sleep(1.5)
             if win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm):
                 raise RuntimeError("사진 전송 확인 창의 '전송'이 눌리지 않았습니다")
@@ -1501,7 +1522,8 @@ class Win32KakaoDriver:
                 from .kakao_names import ocr_all_lines
 
                 lines = ocr_all_lines(confirm)
-                button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
+                l_, t_, r_, b_ = win32gui.GetWindowRect(confirm)
+                button = find_send_button(lines, t_, b_ - t_)
                 if button:
                     self._click_at(button.x + button.w / 2, button.y + button.h / 2)
                     clicked = True
