@@ -1226,6 +1226,34 @@ class Win32KakaoDriver:
         win32gui.EnumChildWindows(dialog, visit, None)
         return found[0] if found else 0
 
+    def _current_tab(self, main: int) -> str:
+        """카톡 메인 창이 지금 보고 있는 탭: 'friends' | 'chats' | ''(모름).
+
+        2026-10-20 녹화 - 친구 탭으로 바꿨는데도 '아직 채팅 탭'으로 보고 친구 아이콘을 거듭 누르다 실패했다(화면 전체 글자에서
+        '안읽음'·'채팅' 낱말을 찾던 방식이 친구 목록·배너 글자에 걸림). → 창 맨 위 왼쪽 제목('친구' / '채팅')으로 판단한다."""
+        from .kakao_names import ocr_all_lines
+
+        _, _, win32gui = self._w()
+        try:
+            lines = ocr_all_lines(main)
+        except Exception:
+            return ""
+        left, top, right, _b = win32gui.GetWindowRect(main)
+        try:
+            scale = __import__("ctypes").windll.user32.GetDpiForWindow(main) / 96.0
+        except Exception:
+            scale = 1.0
+        for ln in sorted(lines, key=lambda x: x.y):
+            if ln.y - top > 110 * scale or ln.x > left + (right - left) * 0.6:
+                continue
+            t = re.sub(r"[\s\W_]+", "", ln.text)
+            if t.startswith("친구"):
+                return "friends"
+            if t.startswith("채팅"):
+                return "chats"
+        texts = " ".join(ln.text for ln in lines)
+        return "chats" if ("안읽음" in texts or "안 읽음" in texts) else ""
+
     def _ensure_friends_tab(self, main: int) -> None:
         """카톡 메인 창을 친구 탭으로. 단축키(Ctrl+1) → 화면에 채팅 탭 글자(안읽음 등)가 보이면 왼쪽 첫째 아이콘 클릭."""
         from .kakao_names import _focus, _press, ocr_all_lines
@@ -1233,6 +1261,9 @@ class Win32KakaoDriver:
         win32api, win32con, win32gui = self._w()
 
         def on_chats() -> bool:
+            tab = self._current_tab(main)
+            if tab:
+                return tab != "friends"
             texts = " ".join(ln.text for ln in ocr_all_lines(main))
             return "안읽음" in texts or "안 읽음" in texts or ("채팅" in texts and "친구" not in texts)
 
@@ -1265,6 +1296,9 @@ class Win32KakaoDriver:
         win32api, win32con, win32gui = self._w()
 
         def on_chats() -> bool:
+            tab = self._current_tab(main)
+            if tab:
+                return tab == "chats"
             try:
                 texts = " ".join(ln.text for ln in ocr_all_lines(main))
             except Exception:
