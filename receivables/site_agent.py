@@ -187,6 +187,12 @@ class Agent:
         self.sleep = sleep
         self.local_stop = local_stop
         self.download_dir = download_dir
+        try:  # 예전에 받아 두고 남은 첨부·임시 사진 폴더 정리
+            n = clean_downloads(download_dir)
+            if n:
+                log(f"예전에 받아 둔 첨부(사진) 폴더 {n}개를 지웠습니다.")
+        except Exception:
+            pass
         self.max_failures = max_failures
         self.reporter = Reporter(api, log)
         self.extract_names = extract_names
@@ -336,6 +342,8 @@ class Agent:
         else:
             self.reporter.add(m.id, status_for(result), result.detail)
         self.log(f"  {'✅' if result.ok else '❌'} {label}: {result.detail}")
+        if m.attachments:
+            clean_downloads(self.download_dir, self.download_dir / str(m.id))
         return result
 
     def _names(self, req: dict) -> None:
@@ -353,6 +361,32 @@ class Agent:
                 self.api.send_names(tab, exact, [], error=str(exc))
             except SiteError:
                 pass
+
+
+def clean_downloads(download_dir: Path, just_sent: Path | None = None, keep_minutes: float = 60) -> int:
+    """2026-10-20 요청 - "사진을 매번 받아서 다운로드만 받고 있는 것 같은데, 전송이 다 끝나면 삭제를 해줘 내 컴퓨터에서는":
+    보낸 메시지의 첨부 폴더(attachments/site/<번호>)를 지우고, 예전에 남은 첨부 폴더와 사진 묶음용 임시 폴더(kf_album_*)도
+    keep_minutes 분이 지났으면 지운다(카톡이 아직 올리는 중이라 못 지운 파일은 다음에 다시). 반환: 지운 폴더 수."""
+    import shutil
+    import tempfile
+
+    removed = 0
+    cutoff = time.time() - keep_minutes * 60
+    targets = [just_sent] if just_sent is not None else []
+    try:
+        targets += [d for d in Path(download_dir).iterdir() if d.is_dir() and d.stat().st_mtime < cutoff]
+    except OSError:
+        pass
+    try:
+        targets += [d for d in Path(tempfile.gettempdir()).glob("kf_album_*") if d.is_dir() and d.stat().st_mtime < cutoff]
+    except OSError:
+        pass
+    for d in targets:
+        if d is None or not d.exists():
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        removed += not d.exists()
+    return removed
 
 
 def windows_extract_names(tab: str, exact: bool, log: Callable[[str], None]) -> list[str]:

@@ -771,7 +771,7 @@ class Win32KakaoDriver:
         win32api.mouse_event(down, 0, 0, 0, 0)
         time.sleep(0.05)
         win32api.mouse_event(up, 0, 0, 0, 0)
-        time.sleep(0.4)
+        time.sleep(0.25)
 
     def _new_window(self, before: dict[int, str], seconds: float = 4.0) -> int:
         """before 에 없던 카톡 창(메뉴·대화상자)이 뜨면 그 창."""
@@ -779,7 +779,7 @@ class Win32KakaoDriver:
         while time.time() < end:
             new = [h for h in self._kakao_windows() if h not in before]
             if new:
-                time.sleep(0.4)
+                time.sleep(0.25)
                 return new[-1]
             time.sleep(0.2)
         return 0
@@ -796,6 +796,7 @@ class Win32KakaoDriver:
         main = self._main()
         _keep_on_top(main, True)
         dialog = 0
+        t0 = time.time()
         try:
             # 2026-10-10 - 프로필 실패 로그의 '읽은 글자: 전체, 즐겨찾기 안읽음, 기나글로벌…' = 채팅 탭 화면이었다.
             # 친구 탭 검색칸은 채팅 탭에서도 크기가 있어 '보인다'고 잘못 판단했다 → 항상 친구 탭으로 바꾸고 화면 글자로 확인한다.
@@ -872,7 +873,7 @@ class Win32KakaoDriver:
                 _keep_on_top(main, True)
                 before = self._kakao_windows()
                 self._click_at(x, y, right=True)
-                menu = self._new_window(before, 2.0)
+                menu = self._new_window(before, 0.8)  # 새 카톡은 메뉴가 창으로 안 잡혀 오래 기다리면 낭비
                 if menu:
                     lines = ocr_all_lines(menu)
                 else:
@@ -892,7 +893,7 @@ class Win32KakaoDriver:
             if not dialog:
                 raise RuntimeError("'공유 대상 선택' 창이 뜨지 않았습니다")
             _keep_on_top(dialog, True)
-            time.sleep(0.5)  # 창 안 글자가 다 그려질 시간
+            time.sleep(0.3)  # 창 안 글자가 다 그려질 시간
             lines = ocr_all_lines(dialog)
             head = find_line(lines, "공유 대상 선택") or find_line(lines, "대화상대 선택")
             # 2026-10-10 - "'채팅' 탭을 찾지 못했습니다": 탭 글자가 '친구 채팅' 처럼 한 줄로 붙어 읽히면 줄 단위로는
@@ -900,7 +901,7 @@ class Win32KakaoDriver:
             tab = self._find_tab(dialog, lines, head)
             if tab:
                 self._click_at(tab.x + tab.w / 2, tab.y + tab.h / 2)
-                time.sleep(0.5)
+                time.sleep(0.3)
             else:
                 self._log(f"공유 대상 선택 창에 '채팅' 탭이 안 보임 → 바로 검색(읽은 글자: {', '.join(x.text for x in lines[:8])})")
             dl, dt, dr, db = win32gui.GetWindowRect(dialog)
@@ -945,7 +946,7 @@ class Win32KakaoDriver:
             if win32gui.IsWindow(dialog) and win32gui.IsWindowVisible(dialog):
                 raise RuntimeError("'확인'을 눌렀지만 공유 대상 선택 창이 닫히지 않았습니다(방 선택이 안 됐을 수 있음)")
             dialog = 0
-            self._log(f"'{friend}' 프로필을 '{room}' 에 전송")
+            self._log(f"'{friend}' 프로필을 '{room}' 에 전송({time.time() - t0:.1f}초)")
         finally:
             if dialog and win32gui.IsWindow(dialog):
                 win32api.PostMessage(dialog, win32con.WM_CLOSE, 0, 0)
@@ -1055,6 +1056,7 @@ class Win32KakaoDriver:
 
         win32api, win32con, win32gui = self._w()
         folder = Path(tempfile.mkdtemp(prefix="kf_album_"))
+        self._album_dirs = getattr(self, "_album_dirs", []) + [folder]  # 방을 다 올리고 닫으면 지운다(close_chat)
         names = []
         for i, f in enumerate(files, start=1):
             name = f"{i:02d}{Path(f).suffix.lower() or '.jpg'}"
@@ -1651,6 +1653,11 @@ class Win32KakaoDriver:
             win32api.PostMessage(chat, win32con.WM_CLOSE, 0, 0)
             time.sleep(1.0)
             if not win32gui.IsWindow(chat) or not win32gui.IsWindowVisible(chat):
+                # 다 올라가고 닫혔으니 사진 묶음용으로 복사해 둔 임시 사진을 지운다
+                import shutil
+                for d in getattr(self, "_album_dirs", []):
+                    shutil.rmtree(d, ignore_errors=True)
+                self._album_dirs = []
                 return
             # 채팅방이 안 닫혔으면 '전송 중인 파일이 있습니다' 확인 창이 뜬 것 → 그 창만 닫는다(= 취소, 전송 계속)
             for h in set(self._kakao_windows()) - before:

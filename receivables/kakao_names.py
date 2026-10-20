@@ -417,30 +417,44 @@ def ocr_rect(left: int, top: int, right: int, bottom: int, words: bool = False) 
     left, top, right, bottom = int(left), int(top), int(right), int(bottom)
     img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
     img = ImageOps.autocontrast(ImageOps.grayscale(img))
-    img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")
 
-    async def recognize():
-        writer = DataWriter()
-        writer.write_bytes(img.tobytes())
-        bitmap = SoftwareBitmap.create_copy_from_buffer(writer.detach_buffer(), BitmapPixelFormat.RGBA8, img.width, img.height)
-        return await engine.recognize_async(bitmap)
+    # 2026-10-20 요청 - "프로필 전송 더 빠르게": 같은 화면(그림이 똑같음)을 줄 단위·낱말 단위로 연달아 읽는 일이 많아,
+    # 바로 전에 읽은 화면과 그림이 같으면 글자 인식을 다시 하지 않고 그 결과를 쓴다.
+    import hashlib
+
+    key = ((left, top, right, bottom), hashlib.md5(img.tobytes()).digest())
+    if _OCR_CACHE.get("key") == key:
+        raw = _OCR_CACHE["raw"]
+    else:
+        img = img.resize((img.width * scale, img.height * scale), Image.LANCZOS).convert("RGBA")
+
+        async def recognize():
+            writer = DataWriter()
+            writer.write_bytes(img.tobytes())
+            bitmap = SoftwareBitmap.create_copy_from_buffer(writer.detach_buffer(), BitmapPixelFormat.RGBA8, img.width, img.height)
+            return await engine.recognize_async(bitmap)
+
+        raw = [(line.text, [(w.text, (w.bounding_rect.x, w.bounding_rect.y, w.bounding_rect.width, w.bounding_rect.height))
+                            for w in line.words]) for line in asyncio.run(recognize()).lines]
+        _OCR_CACHE.update(key=key, raw=raw)
 
     out = []
-    for line in asyncio.run(recognize()).lines:
+    for text, ws in raw:
         if words:
-            for w in line.words:
-                r = w.bounding_rect
-                out.append(OcrLine(w.text, left + r.x / scale, top + r.y / scale, r.width / scale, r.height / scale))
+            for wt, (x, y, w, h) in ws:
+                out.append(OcrLine(wt, left + x / scale, top + y / scale, w / scale, h / scale))
             continue
-        rects = [w.bounding_rect for w in line.words]
-        if not rects:
+        if not ws:
             continue
-        x0 = min(r.x for r in rects)
-        y0 = min(r.y for r in rects)
-        x1 = max(r.x + r.width for r in rects)
-        y1 = max(r.y + r.height for r in rects)
-        out.append(OcrLine(line.text, left + x0 / scale, top + y0 / scale, (x1 - x0) / scale, (y1 - y0) / scale))
+        x0 = min(r[0] for _t, r in ws)
+        y0 = min(r[1] for _t, r in ws)
+        x1 = max(r[0] + r[2] for _t, r in ws)
+        y1 = max(r[1] + r[3] for _t, r in ws)
+        out.append(OcrLine(text, left + x0 / scale, top + y0 / scale, (x1 - x0) / scale, (y1 - y0) / scale))
     return out
+
+
+_OCR_CACHE: dict = {}
 
 
 def _ocr_reader(hwnd: int):
