@@ -1114,30 +1114,52 @@ class Win32KakaoDriver:
             self._log("사진 전송 확인 창이 뜨지 않음(바로 올라간 것으로 봄)")
         else:
             time.sleep(0.8)  # 미리보기가 다 그려질 때까지
-            for attempt in range(4):
-                if not (win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm)):
-                    break
+            # 2026-10-20 - 큰 버튼을 눌러도 사진(수 MB × 15장)이 다 올라갈 때까지 '파일 전송' 창이 떠 있어서, 6초 만에
+            # '안 눌렸다'로 실패 처리했다 → 한 번 누른 뒤에는 창이 닫힐 때까지 최대 3분 기다린다. 같은 버튼이 그대로 보일 때만
+            # (8초 뒤 한 번) 다시 누른다. 실패하면 무엇을 읽고 눌렀는지 실패 사유에 남긴다.
+            from .kakao_names import _focus
+
+            def visible() -> bool:
+                return bool(win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm))
+
+            def press(attempt: int) -> str:
                 try:
                     lines = ocr_all_lines(confirm)
                 except Exception as exc:
                     lines = []
                     self._log(f"사진 전송 확인 창 글자 읽기 실패: {exc}")
                 l_, t_, r_, b_ = win32gui.GetWindowRect(confirm)
+                seen = ", ".join(ln.text for ln in lines[-8:])
                 button = find_send_button(lines, t_, b_ - t_)
+                _focus(confirm)
                 if button:
                     self._click_at(button.x + button.w / 2, button.y + button.h / 2)
-                    self._log(f"사진 전송 확인 창의 '{button.text}' 누름")
-                else:
-                    self._log(f"사진 전송 확인 창에서 버튼을 못 찾음(읽은 글자: {', '.join(ln.text for ln in lines[:10])}) → Enter")
-                    from .kakao_names import _focus
-                    _focus(confirm)
-                    if attempt == 0:
-                        self._key(win32con.VK_RETURN)
-                    else:  # 그래도 안 닫히면 창 아래 가운데(큰 'N개 전송' 버튼 자리)를 누른다
-                        self._click_at((l_ + r_) / 2, b_ - (b_ - t_) * 0.09)
-                time.sleep(1.5)
-            if win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm):
-                raise RuntimeError("사진 전송 확인 창의 '전송'이 눌리지 않았습니다")
+                    done = f"'{button.text}' 누름({int(button.x)},{int(button.y)})"
+                elif attempt == 0:
+                    self._key(win32con.VK_RETURN)
+                    done = "버튼 못 찾아 Enter"
+                else:  # 창 아래 가운데(큰 'N개 전송' 버튼 자리)
+                    self._click_at((l_ + r_) / 2, b_ - (b_ - t_) * 0.09)
+                    done = "버튼 못 찾아 창 아래 가운데 누름"
+                msg = f"{done} / 창 {r_ - l_}x{b_ - t_} / 읽은 글자: {seen}"
+                self._log("사진 전송 확인 창: " + msg)
+                return msg
+
+            tried = [press(0)]
+            start = time.time()
+            while visible() and time.time() - start < 180:
+                time.sleep(1.0)
+                if visible() and len(tried) < 3 and time.time() - start > 8 * len(tried):
+                    try:
+                        rect = win32gui.GetWindowRect(confirm)
+                        still = find_send_button(ocr_all_lines(confirm), rect[1], rect[3] - rect[1])
+                    except Exception:
+                        still = None
+                    if still is not None or "못 찾아" in tried[-1]:
+                        tried.append(press(len(tried)))
+            if visible():
+                raise RuntimeError("사진 전송 확인 창이 닫히지 않았습니다(2026-10-20c) - " + " | ".join(tried))
+            self._log(f"사진 전송 확인 창 닫힘({time.time() - start:.0f}초)")
         time.sleep(3.0 + 0.7 * len(names))  # 올라가는 시간(닫을 때도 다 올라갈 때까지 기다림)
 
     def _dialog_address(self, dialog: int) -> str:
