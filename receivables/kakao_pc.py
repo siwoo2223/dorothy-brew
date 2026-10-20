@@ -1084,18 +1084,39 @@ class Win32KakaoDriver:
             raise RuntimeError("파일 선택 창에서 사진을 열지 못했습니다")
         self._log(f"파일 선택 창에서 사진 {len(names)}장 선택")
         # ④ 카톡이 '전송' 확인 창을 띄우면 '전송' 버튼을 누른다(안 뜨면 바로 올라가는 것)
-        confirm = next((h for h in self._kakao_windows() if h not in before and h != chat), 0)
-        if confirm:
-            from .kakao_names import ocr_all_lines
+        # 2026-10-20 - "파일 선택까지는 되는데 사진 파일 전송이 안돼": 사진이 많거나(14장) 큰 png 가 섞이면 확인 창이 1.5초 뒤에
+        # 늦게 떠서 못 보고 지나갔다 → 확인 창을 최대 15초 기다리고, 글자를 다시 읽어 '전송'을 누른 뒤 닫혔는지 확인한다.
+        from .kakao_names import ocr_all_lines
 
-            lines = ocr_all_lines(confirm)
-            button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
-            if button:
-                self._click_at(button.x + button.w / 2, button.y + button.h / 2)
-                self._log(f"사진 전송 확인 창의 '{button.text}' 누름")
-            else:
-                self._key(win32con.VK_RETURN)
-            time.sleep(1.0)
+        confirm, end = 0, time.time() + 15.0
+        while time.time() < end and not confirm:
+            confirm = next((h for h in self._kakao_windows() if h not in before and h != chat), 0)
+            if not confirm:
+                time.sleep(0.5)
+        if not confirm:
+            self._log("사진 전송 확인 창이 뜨지 않음(바로 올라간 것으로 봄)")
+        else:
+            time.sleep(0.8)  # 미리보기가 다 그려질 때까지
+            for attempt in range(4):
+                if not (win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm)):
+                    break
+                try:
+                    lines = ocr_all_lines(confirm)
+                except Exception as exc:
+                    lines = []
+                    self._log(f"사진 전송 확인 창 글자 읽기 실패: {exc}")
+                button = find_line(lines, "전송", exact=True) or find_line(lines, "보내기", exact=True) or find_line(lines, "확인", exact=True)
+                if button:
+                    self._click_at(button.x + button.w / 2, button.y + button.h / 2)
+                    self._log(f"사진 전송 확인 창의 '{button.text}' 누름")
+                else:
+                    self._log(f"사진 전송 확인 창에서 버튼을 못 찾음(읽은 글자: {', '.join(ln.text for ln in lines[:10])}) → Enter")
+                    from .kakao_names import _focus
+                    _focus(confirm)
+                    self._key(win32con.VK_RETURN)
+                time.sleep(1.5)
+            if win32gui.IsWindow(confirm) and win32gui.IsWindowVisible(confirm):
+                raise RuntimeError("사진 전송 확인 창의 '전송'이 눌리지 않았습니다")
         time.sleep(3.0 + 0.7 * len(names))  # 올라가는 시간(닫을 때도 다 올라갈 때까지 기다림)
 
     def _dialog_address(self, dialog: int) -> str:
