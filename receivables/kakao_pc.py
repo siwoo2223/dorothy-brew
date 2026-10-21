@@ -149,6 +149,27 @@ def find_send_button(lines, top: float | None = None, height: float | None = Non
     return max(cands, key=lambda ln: ln.y) if cands else None
 
 
+def pick_share_room(room: str, texts: list[str]):
+    """공유 대상 선택 창에서 방 이름을 끝까지 못 읽었을 때(2026-10-21 - '매일 실랑다스마 1회 1777' 이 '람다스마 1회 1777' 로
+    읽혀 못 보냄): 방 이름으로 검색해 걸러진 목록이므로, 인원수(끝의 숫자)가 붙은 방 줄이 하나뿐이고 그 줄이 방 이름의
+    뒷부분과 상당히 비슷하면(60% 이상, 또는 방 이름 안에 들어 있으면) 그 줄을 고른다. 아니면 None."""
+    import difflib
+
+    def key(t: str) -> str:
+        return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFC", t or "")).lower()
+
+    target = key(room)
+    rows = [(i, key(re.sub(r"\s+\d+$", "", t.strip()))) for i, t in enumerate(texts) if re.search(r"\S\s+\d+$", t.strip())]
+    if len(rows) != 1 or not target:
+        return None
+    i, k = rows[0]
+    if len(k) < 3:
+        return None
+    tail = target[-len(k):]
+    score = max(difflib.SequenceMatcher(None, k, tail).ratio(), difflib.SequenceMatcher(None, k, target).ratio())
+    return i if (k in target or score >= 0.6) else None
+
+
 class Win32KakaoDriver:
     """pywin32 로 PC 카카오톡 창에 직접 메시지를 보내는 드라이버 (Windows 전용)."""
 
@@ -922,6 +943,10 @@ class Win32KakaoDriver:
                      and find_line([ln], "전송", exact=True) is None and find_line([ln], "공유", exact=True) is None]
             # 결과 줄은 'MANILA OFFICE 5' 처럼 방 이름 뒤에 인원수가 붙는다 → 숫자를 떼고 비교
             idx = pick_search_result(room, [re.sub(r"\s+\d+$", "", ln.text.strip()) for ln in names])
+            if idx is None:
+                idx = pick_share_room(room, [ln.text for ln in names])
+                if idx is not None:
+                    self._log(f"공유 대상 '{room}': 글자를 덜 읽었지만 검색으로 걸러진 방 줄('{names[idx].text}')을 사용")
             if idx is None:
                 raise RuntimeError(f"공유 대상 선택 창에서 '{room}' 방을 찾지 못했습니다(읽은 글자: {', '.join(x.text for x in names[:6])})")
             target = names[idx]
