@@ -1431,6 +1431,26 @@ class Win32KakaoDriver:
             self._bring_to_front(chat)
         time.sleep(0.3)
 
+    def _clear_popups(self, chat) -> int:
+        """채팅방을 덮고 있는 카톡의 제목 없는 작은 창(새 메시지 알림 등)을 숨긴다. 숨긴 수."""
+        win32api, win32con, win32gui = self._w()
+        try:
+            cl, ct, cr, cb = win32gui.GetWindowRect(chat)
+        except Exception:
+            return 0
+        main = win32gui.FindWindow(None, MAIN_TITLE)
+        n = 0
+        for h, title in self._kakao_windows().items():
+            if h in (chat, main) or title:
+                continue
+            l, t, r, b = win32gui.GetWindowRect(h)
+            if r <= cl or l >= cr or b <= ct or t >= cb:
+                continue  # 채팅방과 겹치지 않음
+            win32gui.ShowWindow(h, win32con.SW_HIDE)
+            self._log(f"채팅방을 덮은 카톡 알림 창 숨김({win32gui.GetClassName(h)}, {r - l}x{b - t})")
+            n += 1
+        return n
+
     def _guard(self, chat) -> None:
         """키를 누르기 직전: 맨 앞 창이 채팅방이 아니면 멈춘다(다른 창에 키가 들어가지 않게)."""
         _, _, win32gui = self._w()
@@ -1445,10 +1465,19 @@ class Win32KakaoDriver:
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         x, y = (left + right) // 2, (top + bottom) // 2
         if chat is not None:
-            under = win32gui.WindowFromPoint((x, y))
-            if under != hwnd and win32gui.GetAncestor(under, 2) != chat:  # 2 = GA_ROOT
-                title = win32gui.GetWindowText(win32gui.GetAncestor(under, 2))
-                raise RuntimeError(f"채팅방 입력칸이 다른 창('{title}')에 가려져 있어 누르지 않았습니다")
+            # 2026-10-22 - "입력칸이 다른 창('')에 가려져": 아침에 들어온 카톡 새 메시지 알림 창(제목 없음)이 채팅방을 덮었다.
+            # → 덮고 있는 카톡 알림 창을 숨기고 채팅방을 다시 올린 뒤 몇 번 더 확인한다(다른 프로그램 알림이면 사라지길 기다림).
+            for attempt in range(4):
+                under = win32gui.WindowFromPoint((x, y))
+                root = win32gui.GetAncestor(under, 2)  # 2 = GA_ROOT
+                if under == hwnd or root == chat:
+                    break
+                if attempt == 3:
+                    title = win32gui.GetWindowText(root)
+                    raise RuntimeError(f"채팅방 입력칸이 다른 창('{title}', {win32gui.GetClassName(root)})에 가려져 있어 누르지 않았습니다")
+                self._clear_popups(chat)
+                time.sleep(1.0 + attempt)
+                self._raise_chat(chat)
         win32api.SetCursorPos((x, y))
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
@@ -1540,6 +1569,9 @@ class Win32KakaoDriver:
         _, _, win32gui = self._w()
         try:
             _dpi_aware()
+            # 2026-10-22 - 카톡 새 메시지 알림 창이 채팅방 위에 떠 있으면 그 그림(빨간 표시 등)을 실패 표시로 잘못 볼 수 있다
+            if self._clear_popups(chat):
+                self._raise_chat(chat)
             left, top, right, bottom = win32gui.GetWindowRect(chat)
             box = self._input_box(chat)
             if box:
