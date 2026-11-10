@@ -9,6 +9,7 @@ import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
+import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { VoiceCard } from '../components/VoiceCard';
 import { VoicePickerCard } from '../components/VoicePickerCard';
@@ -46,6 +47,8 @@ export default function Settings() {
         // Re-mount when the stored profile changes (e.g. after an import) so the form never saves stale text over it.
         <ProfileCard key={`${state.profile.name}|${state.profile.about}`} />
       )}
+
+      <UpdateCard />
 
       <Card>
         <Title>Claude API 키</Title>
