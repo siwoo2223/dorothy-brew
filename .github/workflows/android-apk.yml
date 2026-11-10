@@ -21,6 +21,10 @@ jobs:
     timeout-minutes: 60
     env:
       CI: '1'
+      # Baked into the APK so the in-app updater (src/lib/update.ts) knows which build it is and
+      # can compare itself to the latest GitHub release ("build-<run_number>"). Also drives
+      # android.versionCode (app.config.ts) so each published APK installs as a proper upgrade.
+      EXPO_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
       # Public OAuth client IDs (Settings → Secrets and variables → Actions → Variables).
       # Android OAuth client IDs are not secret (identified by package name + SHA-1), so the project's
       # own client ID is the default; a repo Variable of the same name still overrides it.

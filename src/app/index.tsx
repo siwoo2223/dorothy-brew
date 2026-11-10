@@ -7,6 +7,7 @@ import { briefing, describeError } from '../lib/assistant';
 import { CalendarEvent, connectedEmails, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { checkForUpdate } from '../lib/update';
 import { voiceInputAvailable } from '../lib/voice';
 
 function greeting(hour: number) {
@@ -23,6 +24,15 @@ export default function Today() {
   const [brief, setBrief] = useState('');
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+  const [updateBuild, setUpdateBuild] = useState<number | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      checkForUpdate()
+        .then((u) => setUpdateBuild(u.available ? (u.latest?.build ?? null) : null))
+        .catch(() => {});
+    }, []),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -65,6 +75,14 @@ export default function Today() {
         {greeting(now.getHours())}{state.profile.name ? `, ${state.profile.name}님` : ''}
       </Text>
       <Body muted>{now.toLocaleDateString('ko-KR', { dateStyle: 'full' })}</Body>
+
+      {updateBuild !== null && (
+        <Card style={{ borderColor: t.accent }}>
+          <Title>🔄 새 업데이트 (빌드 {updateBuild})</Title>
+          <Body>앱에서 바로 받아 설치할 수 있어요.</Body>
+          <Button label="업데이트 하러 가기" onPress={() => router.navigate('/settings')} />
+        </Card>
+      )}
 
       {!state.apiKey && (
         <Card style={{ borderColor: t.accent }}>
