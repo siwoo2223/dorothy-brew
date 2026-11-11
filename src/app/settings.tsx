@@ -7,6 +7,7 @@ import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { GoogleCard } from '../components/GoogleCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
+import { RecordingBackupCard } from '../components/RecordingBackupCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { UpdateCard } from '../components/UpdateCard';
@@ -78,6 +79,8 @@ export default function Settings() {
       <ProactiveCard />
 
       <CallCard />
+
+      <RecordingBackupCard />
 
       <ImportCard />
 

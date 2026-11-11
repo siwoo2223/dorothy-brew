@@ -7,6 +7,7 @@ import { briefing, describeError } from '../lib/assistant';
 import { CalendarEvent, connectedEmails, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
+import { autoBackupIfDue } from '../lib/recordings';
 import { checkForUpdate } from '../lib/update';
 import { voiceInputAvailable } from '../lib/voice';
 
@@ -31,6 +32,8 @@ export default function Today() {
       checkForUpdate()
         .then((u) => setUpdateBuild(u.available ? (u.latest?.build ?? null) : null))
         .catch(() => {});
+      // Back up any new call recordings in the background (no-op unless set up and enabled).
+      autoBackupIfDue().catch(() => {});
     }, []),
   );
 

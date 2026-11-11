@@ -21,6 +21,9 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
+  // Lets Dorothy upload call recordings to Drive. drive.file only grants access to files the app
+  // itself creates (not the user's other Drive files), so it is the least-privilege choice.
+  'https://www.googleapis.com/auth/drive.file',
 ];
 
 export const discovery: AuthSession.DiscoveryDocument = {
@@ -361,4 +364,61 @@ export async function sendMail(input: { to: string; subject: string; body: strin
     body: JSON.stringify({ raw: utf8ToBase64Url(raw), threadId: routed.realId }),
   });
   return { id: sent.id, from: routed.email || undefined };
+}
+
+// ---------- Drive (call-recording backup) ----------
+const DRIVE = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,size,name';
+
+/** Whether a Google account is connected at all (Drive uses the first one). */
+export async function driveReady(): Promise<boolean> {
+  return (await loadAccounts()).length > 0;
+}
+
+const folderCache: Record<string, string> = {};
+
+/** Finds (or creates) a Drive folder of the given name that this app owns, returning its id. */
+export async function ensureDriveFolder(name: string): Promise<string> {
+  if (folderCache[name]) return folderCache[name];
+  const token = await tokenForEmail('');
+  const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await api<{ files: { id: string }[] }>(token, `${DRIVE}/files?q=${q}&spaces=drive&fields=files(id)`);
+  if (found.files?.[0]?.id) return (folderCache[name] = found.files[0].id);
+  const created = await api<{ id: string }>(token, `${DRIVE}/files?fields=id`, {
+    method: 'POST',
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  return (folderCache[name] = created.id);
+}
+
+/**
+ * Uploads one file (given as base64) into a Drive folder via a multipart/related request.
+ * Returns the new file's id and the byte size Drive stored, so the caller can verify before
+ * deleting the local original.
+ */
+export async function uploadToDrive(input: {
+  folderId: string;
+  name: string;
+  mimeType: string;
+  base64: string;
+}): Promise<{ id: string; size: number; name: string }> {
+  const token = await tokenForEmail('');
+  const boundary = 'dorothy-' + Math.random().toString(36).slice(2);
+  const metadata = { name: input.name, parents: [input.folderId] };
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: ${input.mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${input.base64}\r\n` +
+    `--${boundary}--`;
+  const res = await fetch(DRIVE_UPLOAD, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const text = await res.text();
+  if (res.status === 403) {
+    throw new Error('구글 드라이브 권한이 없어요. 설정에서 구글을 다시 연결해 드라이브 권한을 허용해 주세요.');
+  }
+  if (!res.ok) throw new Error(`드라이브 업로드 오류 ${res.status}: ${text.slice(0, 200)}`);
+  const json = JSON.parse(text) as { id: string; size?: string; name: string };
+  return { id: json.id, size: Number(json.size ?? 0), name: json.name };
 }
