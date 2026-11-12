@@ -9,6 +9,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.provider.CallLog
 import android.provider.Settings
+import android.provider.Telephony
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -113,6 +114,35 @@ class DorothyInboxModule : Module() {
         }
       }
       calls
+    }
+
+    // Reads real SMS text messages (not KakaoTalk — Android forbids reading another app's chats).
+    AsyncFunction("getSms") { sinceMs: Double, limit: Int ->
+      if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+        throw SecurityException("문자 권한이 없어요.")
+      }
+      val list = mutableListOf<Map<String, Any>>()
+      context.contentResolver.query(
+        Telephony.Sms.CONTENT_URI,
+        arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE, Telephony.Sms.TYPE),
+        "${Telephony.Sms.DATE} >= ?",
+        arrayOf(sinceMs.toLong().toString()),
+        "${Telephony.Sms.DATE} DESC",
+      )?.use { c ->
+        while (c.moveToNext() && list.size < limit) {
+          list += mapOf(
+            "address" to (c.getString(0) ?: ""),
+            "body" to (c.getString(1) ?: ""),
+            "time" to c.getLong(2).toDouble(),
+            "type" to when (c.getInt(3)) {
+              Telephony.Sms.MESSAGE_TYPE_INBOX -> "received"
+              Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
+              else -> "other"
+            },
+          )
+        }
+      }
+      list
     }
   }
 }

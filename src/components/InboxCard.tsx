@@ -15,6 +15,7 @@ import {
   openAppDetails,
   openNotificationAccess,
   requestCallLog,
+  requestSms,
 } from '../lib/inbox';
 import { cancelNightlyPlan, scheduleNightlyPlan } from '../lib/notifications';
 import { useStore } from '../lib/store';
@@ -126,6 +127,19 @@ export function InboxCard() {
           }}
         />
       )}
+
+      <Body>💬 문자(SMS): {status.sms ? '✅ 허용됨 · 전체 문자 읽음' : '꺼짐'}</Body>
+      {!status.sms && (
+        <Button
+          label="문자 읽기 허용하기"
+          variant="ghost"
+          onPress={async () => {
+            if (!(await requestSms())) Alert.alert('권한이 꺼져 있어요', '앱 정보 → 권한 → SMS에서 허용할 수 있어요.', [{ text: '닫기' }, { text: '앱 정보 열기', onPress: openAppDetails }]);
+            refresh();
+          }}
+        />
+      )}
+      <Body muted>문자는 전체를 읽을 수 있어요. 카카오톡은 안드로이드가 막아 알림/내보내기로만 돼요.</Body>
 
       <Body>🌙 매일 밤 &quot;내일 할 일&quot; 알림</Body>
       <View style={styles.row}>
