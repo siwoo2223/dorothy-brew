@@ -38,6 +38,25 @@ export async function cancelReminder(id?: string): Promise<void> {
   await Notifications.cancelScheduledNotificationAsync(id);
 }
 
+/**
+ * Schedules a repeating reminder. weekday (expo: 1=Sun … 7=Sat) makes it weekly; omit it for daily.
+ * Returns the scheduled id (cancel it with cancelReminder), or undefined if denied / on web.
+ */
+export async function scheduleRepeatingReminder(
+  title: string,
+  body: string,
+  hour: number,
+  minute: number,
+  weekday?: number,
+): Promise<string | undefined> {
+  if (Platform.OS === 'web') return undefined;
+  if (!(await ensureNotificationPermission())) return undefined;
+  const trigger = weekday
+    ? { type: Notifications.SchedulableTriggerInputTypes.WEEKLY as const, weekday, hour, minute, channelId: 'reminders' }
+    : { type: Notifications.SchedulableTriggerInputTypes.DAILY as const, hour, minute, channelId: 'reminders' };
+  return Notifications.scheduleNotificationAsync({ content: { title, body }, trigger });
+}
+
 const BRIEFING_ID = 'daily-briefing';
 
 /** Repeats every day at the given hour to nudge the user to open their morning briefing. */

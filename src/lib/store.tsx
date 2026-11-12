@@ -3,11 +3,11 @@ import * as SecureStore from 'expo-secure-store';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { cancelReminder, scheduleReminder } from './notifications';
+import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './notifications';
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Followup, Memory, Profile, Task } from './types';
+import type { ChatTurn, Followup, Memory, Profile, Routine, Task } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -25,6 +25,7 @@ const KEYS = {
   companyUrl: 'dorothy.companyUrl',
   weeklyReportDay: 'dorothy.weeklyReportDay',
   speechRate: 'dorothy.speechRate',
+  routines: 'dorothy.routines',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -39,6 +40,8 @@ export type AppState = {
   tasks: Task[];
   /** Replies to send / requests to handle, tracked from messages & calls. */
   followups: Followup[];
+  /** Recurring reminders (daily/weekly) the owner set, e.g. "매일 저녁 8시 개인톡 미회신 확인". */
+  routines: Routine[];
   memories: Memory[];
   profile: Profile;
   chat: ChatTurn[];
@@ -72,6 +75,7 @@ export type VoiceOnOpen = 'off' | 'listen' | 'standby';
 const initialState: AppState = {
   tasks: [],
   followups: [],
+  routines: [],
   memories: [],
   profile: { name: '', about: '' },
   chat: [],
@@ -105,7 +109,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -123,6 +127,7 @@ function useStoreValue() {
         secret.get(COMPANY_TOKEN),
         AsyncStorage.getItem(KEYS.weeklyReportDay),
         AsyncStorage.getItem(KEYS.speechRate),
+        AsyncStorage.getItem(KEYS.routines),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -142,6 +147,7 @@ function useStoreValue() {
         companyToken: companyToken ?? '',
         weeklyReportDay: weeklyReportDay ? JSON.parse(weeklyReportDay) : null,
         speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
+        routines: routines ? JSON.parse(routines) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -230,6 +236,27 @@ function useStoreValue() {
         return next;
       },
 
+      /** Creates a recurring reminder (daily, or weekly when weekday is set) and schedules it. */
+      async addRoutine(input: { title: string; hour: number; minute: number; repeat: 'daily' | 'weekly'; weekday?: number }): Promise<Routine> {
+        const routine: Routine = { id: newId(), createdAt: new Date().toISOString(), ...input };
+        routine.notificationId = await scheduleRepeatingReminder(
+          '🔁 ' + routine.title,
+          '도로시가 챙겨 드려요',
+          routine.hour,
+          routine.minute,
+          routine.repeat === 'weekly' ? routine.weekday : undefined,
+        );
+        update('routines', [...ref.current.routines, routine]);
+        return routine;
+      },
+      async deleteRoutine(id: string): Promise<boolean> {
+        const routine = ref.current.routines.find((r) => r.id === id);
+        if (!routine) return false;
+        await cancelReminder(routine.notificationId);
+        update('routines', ref.current.routines.filter((r) => r.id !== id));
+        return true;
+      },
+
       addMemory(category: string, content: string): Memory {
         const memory: Memory = { id: newId(), category, content, createdAt: new Date().toISOString() };
         update('memories', [...ref.current.memories, memory]);
@@ -239,6 +266,14 @@ function useStoreValue() {
         const exists = ref.current.memories.some((m) => m.id === id);
         update('memories', ref.current.memories.filter((m) => m.id !== id));
         return exists;
+      },
+      /** Fixes a memory in place (wrong fact or category) instead of deleting and re-adding it. */
+      updateMemory(id: string, patch: { category?: string; content?: string }): boolean {
+        const m = ref.current.memories.find((x) => x.id === id);
+        if (!m) return false;
+        const next: Memory = { ...m, category: patch.category ?? m.category, content: patch.content ?? m.content };
+        update('memories', ref.current.memories.map((x) => (x.id === id ? next : x)));
+        return true;
       },
 
       addFollowup(input: { who: string; what: string; source?: string }): Followup {

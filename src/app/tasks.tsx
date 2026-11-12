@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { useStore } from '../lib/store';
-import type { Followup, Task } from '../lib/types';
+import type { Followup, Routine, Task } from '../lib/types';
 import { useTheme } from '../lib/theme';
 
 type Preset = { label: string; at: () => Date | undefined };
@@ -39,6 +39,7 @@ export default function Tasks() {
   const open = state.tasks.filter((x) => !x.done).sort(byDue);
   const done = state.tasks.filter((x) => x.done).reverse();
   const openFollowups = (state.followups ?? []).filter((f) => !f.done).reverse();
+  const routines = state.routines ?? [];
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
@@ -64,6 +65,15 @@ export default function Tasks() {
           <Title>✉️ 회신·부탁 ({openFollowups.length})</Title>
           {openFollowups.map((f) => (
             <FollowupRow key={f.id} followup={f} onToggle={() => actions.completeFollowup(f.id)} onDelete={() => actions.deleteFollowup(f.id)} />
+          ))}
+        </>
+      )}
+
+      {routines.length > 0 && (
+        <>
+          <Title>🔁 반복 알림 ({routines.length})</Title>
+          {routines.map((r) => (
+            <RoutineRow key={r.id} routine={r} onDelete={() => actions.deleteRoutine(r.id)} />
           ))}
         </>
       )}
@@ -99,6 +109,26 @@ function TaskRow({ task, onToggle, onDelete }: { task: Task; onToggle: () => voi
           </Text>
         )}
         {task.notes ? <Text style={{ color: t.subtext, fontSize: 12 }}>{task.notes}</Text> : null}
+      </View>
+      <Pressable onPress={onDelete} hitSlop={8}>
+        <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const WEEKDAY_KR = ['', '일', '월', '화', '수', '목', '금', '토']; // expo weekday 1=Sun … 7=Sat
+function RoutineRow({ routine, onDelete }: { routine: Routine; onDelete: () => void }) {
+  const t = useTheme();
+  const when =
+    (routine.repeat === 'weekly' ? `매주 ${WEEKDAY_KR[routine.weekday ?? 1]}요일` : '매일') +
+    ` ${String(routine.hour).padStart(2, '0')}:${String(routine.minute).padStart(2, '0')}`;
+  return (
+    <View style={[styles.row, { backgroundColor: t.card, borderColor: t.border }]}>
+      <Text style={{ fontSize: 16 }}>🔁</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: t.text, fontSize: 15 }}>{routine.title}</Text>
+        <Text style={{ color: t.subtext, fontSize: 12 }}>{when}{routine.notificationId ? ' · 🔔' : ' · 알림 꺼짐'}</Text>
       </View>
       <Pressable onPress={onDelete} hitSlop={8}>
         <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>

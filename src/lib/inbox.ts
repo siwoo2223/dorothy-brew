@@ -80,7 +80,33 @@ const CALL_TYPE: Record<CallEntry['type'], string> = { incoming: '받은 전화'
 const when = (ms: number) =>
   new Date(ms).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
-/** Messages grouped by app and chat, oldest first, as compact lines for the model. */
+/**
+ * Fetches messages and filters them in JS: by keyword (native search), a time window (since/until),
+ * and/or a room/sender name. Captured from notifications, so it is what arrived while the app had
+ * notification access — not the full chat history, and it cannot tell whether the owner replied.
+ */
+export async function collectMessages(opts: {
+  keyword?: string;
+  sinceMs: number;
+  untilMs?: number;
+  room?: string;
+  limit?: number;
+}): Promise<InboxMessage[]> {
+  if (!native) return [];
+  const limit = opts.limit ?? 500;
+  const base = opts.keyword ? await native.searchMessages(opts.keyword, opts.sinceMs, limit) : await native.getMessages(opts.sinceMs, limit);
+  const until = opts.untilMs ?? Infinity;
+  const room = opts.room?.trim().toLowerCase();
+  return base.filter(
+    (m) => m.time <= until && (!room || (m.conversation || '').toLowerCase().includes(room) || (m.sender || '').toLowerCase().includes(room)),
+  );
+}
+
+/**
+ * Messages grouped by app and chat, oldest first, as compact lines for the model. Each group header
+ * notes the message count and tags a chat as "단체방(추정)" when more than one person sent in it
+ * (a reliable-enough group signal), else "개인/미상".
+ */
 export function formatMessages(messages: InboxMessage[], maxChars = Infinity): string {
   const groups = new Map<string, InboxMessage[]>();
   for (const m of messages) {
@@ -89,7 +115,9 @@ export function formatMessages(messages: InboxMessage[], maxChars = Infinity): s
   }
   let out = '';
   for (const [key, list] of groups) {
-    out += `\n[${key}]\n` + list.map((m) => `- ${when(m.time)} ${m.sender}: ${m.text.slice(0, 400)}`).join('\n') + '\n';
+    const senders = new Set(list.map((m) => m.sender).filter(Boolean));
+    const kind = senders.size > 1 ? '단체방(추정)' : '개인/미상';
+    out += `\n[${key}] (${list.length}건, ${kind})\n` + list.map((m) => `- ${when(m.time)} ${m.sender}: ${m.text.slice(0, 400)}`).join('\n') + '\n';
   }
   // Keep the newest part when it has to be cut.
   return out.length > maxChars ? '…(앞부분 생략)\n' + out.slice(-maxChars) : out.trim();
