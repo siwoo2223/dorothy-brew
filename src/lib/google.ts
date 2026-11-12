@@ -24,6 +24,9 @@ export const SCOPES = [
   // Lets Dorothy upload call recordings to Drive. drive.file only grants access to files the app
   // itself creates (not the user's other Drive files), so it is the least-privilege choice.
   'https://www.googleapis.com/auth/drive.file',
+  // Read-only access to Google Sheets the user points Dorothy at (by pasting the link in Settings),
+  // so she can read tables like the owner's '2026 리스트' / '지출' sheets.
+  'https://www.googleapis.com/auth/spreadsheets.readonly',
 ];
 
 export const discovery: AuthSession.DiscoveryDocument = {
@@ -176,6 +179,11 @@ async function tokenForEmail(email: string): Promise<string> {
 
 // ---------- Calendar ----------
 
+// The owner lives/works on Philippine time; his Google calendar's own default is Europe/London,
+// which made event times read wrong. Pin all calendar reads/writes to Manila so times are
+// consistent regardless of the calendar's or the phone's timezone setting.
+export const BIZ_TIMEZONE = 'Asia/Manila';
+
 export type CalendarEvent = {
   id: string;
   title: string;
@@ -207,6 +215,7 @@ export async function listEvents(timeMin: Date, timeMax: Date, max = 50): Promis
     singleEvents: 'true',
     orderBy: 'startTime',
     maxResults: String(max),
+    timeZone: BIZ_TIMEZONE,
   });
   const events = await perAccount(async (a, token) => {
     const data = await api<{ items?: RawEvent[] }>(token, `${CAL}?${params}`);
@@ -226,7 +235,7 @@ export async function listEvents(timeMin: Date, timeMax: Date, max = 50): Promis
 
 /** Creates an event. `account` picks the calendar; without it, the first connected account is used. */
 export async function createEvent(input: { title: string; start: string; end: string; location?: string; description?: string; account?: string }) {
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = BIZ_TIMEZONE;
   const token = await tokenForEmail(input.account ?? '');
   const e = await api<RawEvent & { htmlLink: string }>(token, CAL, {
     method: 'POST',
@@ -421,4 +430,36 @@ export async function uploadToDrive(input: {
   if (!res.ok) throw new Error(`드라이브 업로드 오류 ${res.status}: ${text.slice(0, 200)}`);
   const json = JSON.parse(text) as { id: string; size?: string; name: string };
   return { id: json.id, size: Number(json.size ?? 0), name: json.name };
+}
+
+// ---------- Sheets (read-only) ----------
+const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+/** Pulls the spreadsheet id out of a full Google Sheets link (or returns the input if it is already an id). */
+export function parseSpreadsheetId(link: string): string {
+  const m = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(link || '');
+  return (m ? m[1] : (link || '').trim());
+}
+
+/** Spreadsheet title and the names of its tabs (sheets). */
+export async function getSpreadsheetMeta(id: string): Promise<{ title: string; tabs: string[] }> {
+  const token = await tokenForEmail('');
+  const data = await api<{ properties?: { title?: string }; sheets?: { properties?: { title?: string } }[] }>(
+    token,
+    `${SHEETS}/${encodeURIComponent(id)}?fields=${encodeURIComponent('properties.title,sheets.properties.title')}`,
+  );
+  return {
+    title: data.properties?.title ?? '(제목 없음)',
+    tabs: (data.sheets ?? []).map((s) => s.properties?.title ?? '').filter(Boolean),
+  };
+}
+
+/** Reads the cell values of one tab, capped to maxRows. */
+export async function readSheetValues(id: string, tab: string, maxRows = 200): Promise<string[][]> {
+  const token = await tokenForEmail('');
+  const data = await api<{ values?: string[][] }>(
+    token,
+    `${SHEETS}/${encodeURIComponent(id)}/values/${encodeURIComponent(tab)}?majorDimension=ROWS`,
+  );
+  return (data.values ?? []).slice(0, maxRows);
 }
