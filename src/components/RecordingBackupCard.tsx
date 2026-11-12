@@ -27,6 +27,9 @@ export function RecordingBackupCard() {
   const [progress, setProgress] = useState<recordings.Progress | null>(null);
   const [result, setResult] = useState<recordings.BackupResult | null>(null);
   const [error, setError] = useState('');
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveProgress, setDriveProgress] = useState<recordings.DriveSummaryProgress | null>(null);
+  const [driveResult, setDriveResult] = useState<recordings.DriveSummaryResult | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -78,6 +81,20 @@ export function RecordingBackupCard() {
     await gemini.setGeminiKey(geminiInput);
     setGeminiHint(await gemini.geminiKeyHint());
     setGeminiInput('');
+  };
+  const summarizeDrive = async () => {
+    setDriveBusy(true);
+    setError('');
+    setDriveResult(null);
+    setDriveProgress(null);
+    try {
+      setDriveResult(await recordings.summarizeDriveFolder(setDriveProgress));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '드라이브 요약에 실패했어요.');
+    } finally {
+      setDriveBusy(false);
+      setDriveProgress(null);
+    }
   };
 
   const backup = async () => {
@@ -139,6 +156,24 @@ export function RecordingBackupCard() {
         <Switch value={summarize} onValueChange={toggleSummarize} trackColor={{ true: t.accent }} />
       </View>
       {summarize && !geminiHint && <Body muted>먼저 Gemini 키를 저장해 주세요.</Body>}
+      {driveBusy && driveProgress && (
+        <Body muted>요약 중… ({driveProgress.index}/{driveProgress.total}) {driveProgress.name}</Body>
+      )}
+      <Button
+        label={driveBusy ? '요약 중…' : '드라이브에 있는 녹음 전부 요약'}
+        variant="ghost"
+        onPress={summarizeDrive}
+        disabled={driveBusy || !geminiHint || !email}
+      />
+      {driveResult && (
+        <Body>
+          ✅ 요약 {driveResult.summarized}개
+          {driveResult.skipped ? ` · 건너뜀 ${driveResult.skipped}(이미 요약/큼)` : ''}
+          {driveResult.failed ? ` · 실패 ${driveResult.failed}` : ''}
+          {driveResult.total === 0 ? ' — 드라이브에 녹음이 없어요.' : ''}
+        </Body>
+      )}
+      <Body muted>이미 드라이브에 올라간 녹음까지 한 번에 훑어 요약해요(이미 한 건 건너뜀).</Body>
       <View style={styles.hr} />
 
       {busy && progress && (

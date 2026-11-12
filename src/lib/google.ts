@@ -1,4 +1,5 @@
 import * as AuthSession from 'expo-auth-session';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
@@ -471,4 +472,30 @@ export async function readSheetValues(id: string, tab: string, maxRows = 200): P
     `${SHEETS}/${encodeURIComponent(id)}/values/${encodeURIComponent(tab)}?majorDimension=ROWS`,
   );
   return (data.values ?? []).slice(0, maxRows);
+}
+
+/** Lists audio files inside a Drive folder the app owns (drive.file sees files the app created). */
+export async function listDriveFolderAudio(folderId: string): Promise<{ id: string; name: string; size: number; mimeType: string }[]> {
+  const token = await tokenForEmail('');
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and mimeType contains 'audio/'`);
+  const out: { id: string; name: string; size: number; mimeType: string }[] = [];
+  let pageToken = '';
+  do {
+    const url = `${DRIVE}/files?q=${q}&spaces=drive&fields=nextPageToken,files(id,name,size,mimeType)&pageSize=200${pageToken ? `&pageToken=${pageToken}` : ''}`;
+    const data = await api<{ nextPageToken?: string; files?: { id: string; name: string; size?: string; mimeType: string }[] }>(token, url);
+    for (const f of data.files ?? []) out.push({ id: f.id, name: f.name, size: Number(f.size ?? 0), mimeType: f.mimeType });
+    pageToken = data.nextPageToken ?? '';
+  } while (pageToken);
+  return out;
+}
+
+/** Downloads a Drive file to a temp path and returns its base64 (used to feed audio to Gemini). */
+export async function downloadDriveFileBase64(fileId: string): Promise<string> {
+  const token = await tokenForEmail('');
+  const dest = `${FileSystem.cacheDirectory}drive-dl.tmp`;
+  const r = await FileSystem.downloadAsync(`${DRIVE}/files/${fileId}?alt=media`, dest, { headers: { Authorization: `Bearer ${token}` } });
+  if (r.status !== 200) throw new Error(`드라이브 다운로드 오류 ${r.status}`);
+  const b64 = await FileSystem.readAsStringAsync(dest, { encoding: FileSystem.EncodingType.Base64 });
+  await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
+  return b64;
 }

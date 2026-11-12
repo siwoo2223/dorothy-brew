@@ -19,6 +19,7 @@ const KEYS = {
   lastRun: 'dorothy.rec.lastRun',
   summarize: 'dorothy.rec.summarize',
   summaries: 'dorothy.callSummaries',
+  driveSummarized: 'dorothy.rec.driveSummarized',
 };
 
 // Gemini inline audio has to fit in one request; keep well under its ~20MB cap (base64 is ~1.33x).
@@ -224,4 +225,51 @@ export async function autoBackupIfDue(): Promise<void> {
   } catch {
     // silent — the Settings card is where errors are shown
   }
+}
+
+export type DriveSummaryProgress = { index: number; total: number; name: string };
+export type DriveSummaryResult = { total: number; summarized: number; skipped: number; failed: number };
+
+async function loadDriveSummarized(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.driveSummarized);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+async function saveDriveSummarized(ids: Set<string>) {
+  await AsyncStorage.setItem(KEYS.driveSummarized, JSON.stringify([...ids].slice(-5000)));
+}
+
+/**
+ * Goes through recordings already in the Drive "도로시 통화녹음" folder, summarizes any not yet
+ * summarized with Gemini, and saves them so Dorothy remembers past calls too. Idempotent: a file
+ * summarized before is skipped next time.
+ */
+export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress) => void): Promise<DriveSummaryResult> {
+  if (!(await gemini.geminiConfigured())) throw new Error('먼저 Gemini 키를 넣어 주세요 (설정 → 통화 녹음 백업).');
+  if (!(await google.driveReady())) throw new Error('먼저 구글을 연결해 주세요.');
+  const folderId = await google.ensureDriveFolder(DRIVE_FOLDER);
+  const files = await google.listDriveFolderAudio(folderId);
+  const done = await loadDriveSummarized();
+  const res: DriveSummaryResult = { total: files.length, summarized: 0, skipped: 0, failed: 0 };
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    if (done.has(f.id)) { res.skipped++; continue; }
+    if (f.size > SUMMARIZE_MAX_BYTES) { res.skipped++; done.add(f.id); continue; }
+    onProgress?.({ index: i + 1, total: files.length, name: f.name });
+    try {
+      const base64 = await google.downloadDriveFileBase64(f.id);
+      const summary = await gemini.summarizeCallAudio(base64, f.mimeType || mimeOf(f.name));
+      await appendSummary({ id: `drive-${f.id}`, name: f.name, at: new Date().toISOString(), summary });
+      done.add(f.id);
+      res.summarized++;
+    } catch {
+      res.failed++;
+    }
+  }
+  await saveDriveSummarized(done);
+  return res;
 }
