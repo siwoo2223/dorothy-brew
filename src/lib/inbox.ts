@@ -1,6 +1,8 @@
 import { requireOptionalNativeModule } from 'expo';
 import { PermissionsAndroid, Platform } from 'react-native';
 
+import * as contacts from './contacts';
+
 /**
  * Messenger notifications and the call log, read through the local `dorothy-inbox` native module
  * (modules/dorothy-inbox). Android only; everything here reports "unavailable" elsewhere.
@@ -150,7 +152,8 @@ export function formatMessages(messages: InboxMessage[], maxChars = Infinity): s
 export function formatCalls(calls: CallEntry[]): string {
   return calls
     .map((c) => {
-      const who = c.name ? `${c.name} (${c.number})` : c.number || '알 수 없는 번호';
+      const name = c.name || contacts.nameFor(c.number);
+      const who = name ? `${name} (${c.number})` : c.number || '알 수 없는 번호';
       const length = c.durationSec > 0 ? `, ${Math.round(c.durationSec / 60) || 1}분` : '';
       return `- ${when(c.time)} ${CALL_TYPE[c.type]} — ${who}${length}`;
     })
@@ -159,10 +162,10 @@ export function formatCalls(calls: CallEntry[]): string {
 
 const SMS_TYPE: Record<SmsEntry['type'], string> = { received: '받음', sent: '보냄', other: '기타' };
 
-/** SMS messages as compact lines for the model, newest first. */
+/** SMS messages as compact lines for the model, newest first. Numbers become names when known. */
 export function formatSms(list: SmsEntry[]): string {
   return list
-    .map((s) => `- ${when(s.time)} [${SMS_TYPE[s.type]}] ${s.address || '번호 없음'}: ${s.body.slice(0, 400)}`)
+    .map((s) => `- ${when(s.time)} [${SMS_TYPE[s.type]}] ${contacts.label(s.address)}: ${s.body.slice(0, 400)}`)
     .join('\n');
 }
 
@@ -180,6 +183,8 @@ export async function planData(maxChars = 12000): Promise<string | null> {
   const status = await inboxStatus();
   if (!status.messages && !status.calls && !status.sms) return null;
   const since = Date.now() - 24 * 60 * 60 * 1000;
+  // Load contacts first so numbers in calls/SMS below show as names.
+  await contacts.loadContacts().catch(() => {});
   const [messages, calls, sms] = await Promise.all([
     status.messages ? getMessages(since) : [],
     status.calls ? getCalls(since) : [],
