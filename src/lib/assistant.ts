@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Anthropic from '@anthropic-ai/sdk';
 
+import * as calls from './calls';
 import * as company from './company';
 import * as contacts from './contacts';
 import * as google from './google';
@@ -431,6 +432,22 @@ const CALL_TOOL: Anthropic.Beta.BetaToolUnion = {
   },
 };
 
+/** Added with read_calls. The app's own saved call archive — searchable by name/number over a long period. */
+const CALL_HISTORY_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'call_history',
+  description:
+    '앱에 저장해 둔 통화 기록(이름 포함)에서 특정 사람·번호를 찾거나 기간별로 본다. 휴대폰 통화목록이 지워져도 남아 있어, "지난주에 노력 사장님이랑 통화했어?", "이 번호랑 언제 통화했지?", "최근 2주 부재중 누구누구?" 같은 질문에 쓴다. keyword에 이름·번호 일부, days에 최근 며칠(기본 14)을 준다. 통화 내용(녹음 요약)은 read_call_summaries로 따로 본다.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      keyword: { type: ['string', 'null'], description: '찾을 이름·번호 일부(없으면 null로 최근 전체)' },
+      days: { type: ['integer', 'null'], description: '최근 며칠을 볼지(기본 14)' },
+    },
+    required: ['keyword', 'days'],
+    additionalProperties: false,
+  },
+};
+
 /** Added once the user granted contacts access. Number ↔ name lookups. */
 const CONTACTS_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'read_contacts',
@@ -623,8 +640,17 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     }
     case 'read_calls': {
       await contacts.loadContacts().catch(() => {}); // so numbers show as names
-      const calls = await inbox.getCalls(hoursAgo(input.hours), 200);
-      return calls.length ? inbox.formatCalls(calls) : '해당 기간에 통화 기록이 없음';
+      const list = await inbox.getCalls(hoursAgo(input.hours), 200);
+      return list.length ? inbox.formatCalls(list) : '해당 기간에 통화 기록이 없음';
+    }
+    case 'call_history': {
+      await calls.syncCalls().catch(() => {}); // fold in the newest calls before searching
+      const found = await calls.query({
+        keyword: str(input.keyword),
+        days: Number(input.days) || 14,
+        limit: 100,
+      });
+      return found.length ? calls.format(found) : '저장된 통화 기록에서 찾지 못함';
     }
     case 'read_contacts': {
       const found = await contacts.searchContacts(str(input.query) ?? '', 25);
@@ -735,7 +761,7 @@ export async function chat(
     webSearchTool(state.model, 5),
     ...(googleEmails.length ? GOOGLE_TOOLS : []),
     ...(phone.messages ? [MESSAGE_TOOL] : []),
-    ...(phone.calls ? [CALL_TOOL] : []),
+    ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
     ...(phone.sms ? [SMS_TOOL] : []),
     ...(contactsOn ? [CONTACTS_TOOL] : []),
     ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_PATTERN_TOOL] : []),

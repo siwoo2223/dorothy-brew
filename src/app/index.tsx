@@ -1,9 +1,10 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Title } from '../components/ui';
 import { briefing, describeError } from '../lib/assistant';
+import { CallRecord, isMissed, syncCalls, todaysCalls, who as callWho } from '../lib/calls';
 import { CalendarEvent, connectedEmails, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -21,13 +22,14 @@ function greeting(hour: number) {
 export default function Today() {
   const t = useTheme();
   const router = useRouter();
-  const { state, loaded, getState } = useStore();
+  const { state, loaded, getState, actions } = useStore();
   const params = useLocalSearchParams<{ brief?: string }>();
   const [brief, setBrief] = useState('');
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [updateBuild, setUpdateBuild] = useState<number | null>(null);
   const [autoBriefed, setAutoBriefed] = useState(false);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
 
   // Opened from the morning briefing notification (/?brief=1): build the briefing right away,
   // so tapping it is enough — Dorothy already "checked the phone" overnight.
@@ -50,6 +52,11 @@ export default function Today() {
         .catch(() => {});
       // Back up any new call recordings in the background (no-op unless set up and enabled).
       autoBackupIfDue().catch(() => {});
+      // Archive the phone's recent call log into the app (no-op without the call-log permission).
+      syncCalls()
+        .then(() => todaysCalls())
+        .then(setCalls)
+        .catch(() => {});
     }, []),
   );
 
@@ -76,6 +83,12 @@ export default function Today() {
   const today = open.filter((x) => x.dueAt && new Date(x.dueAt) >= now && new Date(x.dueAt) <= endOfToday);
   const undated = open.filter((x) => !x.dueAt);
   const openFollowups = (state.followups ?? []).filter((x) => !x.done);
+  const missedToday = calls.filter(isMissed);
+
+  const addCallback = (c: CallRecord) => {
+    actions.addFollowup({ who: c.name || c.number || '모르는 번호', what: '전화 회신', source: '부재중 전화' });
+    Alert.alert('회신 대기 등록', `${c.name || c.number || '모르는 번호'}에게 전화 회신을 '할 일'에 넣었어요.`);
+  };
 
   const runBriefing = async () => {
     setLoading(true);
@@ -159,6 +172,31 @@ export default function Today() {
         </Card>
       )}
 
+      {calls.length > 0 && (
+        <Card>
+          <Title>📞 오늘 통화 ({calls.length})</Title>
+          {missedToday.length > 0 && (
+            <Text style={[styles.callText, { color: t.danger }]}>부재중·거절 {missedToday.length}건 — 회신 챙기세요</Text>
+          )}
+          {calls.slice(0, 8).map((c) => (
+            <View key={c.id} style={styles.callRow}>
+              <Text style={[styles.callText, { flex: 1, color: t.text }]}>
+                {isMissed(c) ? '⚠️' : '•'} {callWho(c)}{' '}
+                <Text style={{ color: t.subtext }}>
+                  {new Date(c.time).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}
+                </Text>
+              </Text>
+              {isMissed(c) && (
+                <Text style={{ color: t.accent, fontWeight: '600' }} onPress={() => addCallback(c)}>
+                  회신 등록
+                </Text>
+              )}
+            </View>
+          ))}
+          {calls.length > 8 && <Body muted>외 {calls.length - 8}건 · 도로시에게 &quot;오늘 통화 누구누구?&quot;로 물어보세요</Body>}
+        </Card>
+      )}
+
       <Card>
         <Title>오늘의 브리핑</Title>
         {loading ? <ActivityIndicator /> : brief ? <Body>{brief}</Body> : <Body muted>밤사이 온 메시지·문자·부재중 전화와 오늘 일정, 회사 현황, 할 일, 날씨를 모아 하루를 정리해 드려요.</Body>}
@@ -202,4 +240,6 @@ const styles = StyleSheet.create({
   stat: { flex: 1, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14, alignItems: 'center' },
   statValue: { fontSize: 24, fontWeight: '800' },
   talkRow: { flexDirection: 'row', gap: 10 },
+  callRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  callText: { fontSize: 15, lineHeight: 22 },
 });
