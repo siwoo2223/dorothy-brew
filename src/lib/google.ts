@@ -127,7 +127,16 @@ async function accessTokenFor(account: StoredToken): Promise<string> {
     await disconnect(account.email);
     throw new Error(`Google 로그인이 만료됐어요 (${account.email}). 설정에서 다시 연결해 주세요.`);
   }
-  const refreshed = await AuthSession.refreshAsync({ clientId: googleClientId(), refreshToken: account.refreshToken }, discovery);
+  let refreshed: AuthSession.TokenResponse;
+  try {
+    refreshed = await AuthSession.refreshAsync({ clientId: googleClientId(), refreshToken: account.refreshToken }, discovery);
+  } catch {
+    // A stale/invalid refresh token (e.g. carried over from an older build or a different client,
+    // or a revoked grant) fails here as "invalid_grant". Clear it so the next connect starts clean,
+    // and tell the user plainly instead of surfacing Google's raw OAuth error.
+    await disconnect(account.email);
+    throw new Error(`Google 연결이 만료됐어요 (${account.email}). 설정 → 구글 연결에서 "연결 해제" 후 다시 연결해 주세요.`);
+  }
   const updated: StoredToken = {
     ...account,
     accessToken: refreshed.accessToken,
