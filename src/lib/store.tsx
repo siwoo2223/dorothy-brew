@@ -267,6 +267,14 @@ function useStoreValue() {
         update('memories', ref.current.memories.filter((m) => m.id !== id));
         return exists;
       },
+      /** Fixes a memory in place (wrong fact or category) instead of deleting and re-adding it. */
+      updateMemory(id: string, patch: { category?: string; content?: string }): boolean {
+        const m = ref.current.memories.find((x) => x.id === id);
+        if (!m) return false;
+        const next: Memory = { ...m, category: patch.category ?? m.category, content: patch.content ?? m.content };
+        update('memories', ref.current.memories.map((x) => (x.id === id ? next : x)));
+        return true;
+      },
 
       addFollowup(input: { who: string; what: string; source?: string }): Followup {
         // Skip an obvious duplicate (same person + same thing still open).

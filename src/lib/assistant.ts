@@ -61,7 +61,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 
 원칙:
 - 한국어로, 따뜻하지만 간결하게 답합니다. 모바일 화면이니 핵심부터 말하고 긴 서론은 생략합니다.
-- 사용자가 자신에 대해 오래 유효한 사실(가족, 건강, 취향, 일, 목표, 중요한 날짜 등)을 말하면 remember 도구로 저장합니다. 이미 기억 목록에 있는 내용은 다시 저장하지 않습니다. 사실이 바뀌면 이전 기억을 forget으로 지우고 새로 저장합니다.
+- 사용자가 자신에 대해 오래 유효한 사실(가족, 건강, 취향, 일, 목표, 중요한 날짜 등)을 말하면 remember 도구로 저장합니다. 이미 기억 목록에 있는 내용은 다시 저장하지 않습니다. 사실이 바뀌면 update_memory로 그 기억을 고칩니다(지웠다 다시 만들 필요 없음). 사용자가 "기억 정리해줘"라고 하면, 기억 목록을 훑어 같은 내용의 중복은 하나만 남기고 나머지를 forget으로 지우고, 서로 어긋나거나 오래된 사실은 어느 쪽이 맞는지 물어 update_memory로 바로잡습니다(예: 업무용 메일이 kf21@gmail.com과 kflogi21@gmail.com으로 섞여 있으면 어느 것이 맞는지 확인해 하나로 정리). 중요한 것을 지우기 전에는 사용자에게 먼저 확인합니다.
 - 해야 할 일이나 약속이 언급되면 add_task로 등록합니다. 시각이 정해져 있으면 due_at을 넣어 알림이 울리게 합니다. "내일 아침" 같은 표현은 아래 현재 시각 기준으로 해석하고, 애매하면 합리적으로 정한 뒤 정한 시각을 알려 줍니다.
 - 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다. 매일·매주처럼 "반복해서" 챙길 일을 요청하면 add_routine으로 반복 알림을 만들고(예: 매일 저녁 8시 개인톡 미회신 확인), 필요 없어지면 delete_routine으로 지웁니다. 한 번만 할 일은 add_task를 씁니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
@@ -91,8 +91,23 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     },
   },
   {
+    name: 'update_memory',
+    description: '기존 기억의 내용이나 분류를 고친다(틀린 사실 수정, 중복을 하나로 합칠 때 남길 항목 다듬기). 바꾸지 않을 칸은 null.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: {
+        memory_id: { type: 'string', description: '기억 목록에 표시된 id' },
+        content: { type: ['string', 'null'], description: '새 내용(안 바꾸면 null)' },
+        category: { type: ['string', 'null'], description: '새 분류(안 바꾸면 null)' },
+      },
+      required: ['memory_id', 'content', 'category'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'forget',
-    description: '더 이상 맞지 않거나 사용자가 지우길 원하는 기억을 삭제한다.',
+    description: '더 이상 맞지 않거나 사용자가 지우길 원하는 기억을 삭제한다(중복 정리 때 남길 하나만 두고 나머지를 지울 때도 쓴다).',
     strict: true,
     input_schema: {
       type: 'object',
@@ -488,6 +503,12 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     case 'remember': {
       const m = actions.addMemory(String(input.category), String(input.content));
       return `저장됨 (id ${m.id})`;
+    }
+    case 'update_memory': {
+      const patch: { category?: string; content?: string } = {};
+      if (typeof input.content === 'string') patch.content = input.content;
+      if (typeof input.category === 'string') patch.category = input.category;
+      return actions.updateMemory(String(input.memory_id), patch) ? '기억 수정됨' : '해당 id의 기억이 없음';
     }
     case 'forget':
       return actions.deleteMemory(String(input.memory_id)) ? '삭제됨' : '해당 id의 기억이 없음';
