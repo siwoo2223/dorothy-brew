@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { parseChatExport } from '../lib/chatExport';
+import { contactsGranted, requestContacts } from '../lib/contacts';
 import {
   clearMessages,
   historyCount,
@@ -15,7 +16,9 @@ import {
   openAppDetails,
   openNotificationAccess,
   requestCallLog,
+  requestSms,
 } from '../lib/inbox';
+import { locationGranted, requestLocation } from '../lib/location';
 import { cancelNightlyPlan, scheduleNightlyPlan } from '../lib/notifications';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -31,11 +34,15 @@ export function InboxCard() {
   const [count, setCount] = useState(0);
   const [history, setHistory] = useState(0);
   const [importing, setImporting] = useState(false);
+  const [contactsOn, setContactsOn] = useState(false);
+  const [locationOn, setLocationOn] = useState(false);
 
   const refresh = useCallback(() => {
     inboxStatus().then(setStatus);
     setCount(messageCount());
     setHistory(historyCount());
+    contactsGranted().then(setContactsOn);
+    locationGranted().then(setLocationOn);
   }, []);
 
   const importExports = async () => {
@@ -126,6 +133,45 @@ export function InboxCard() {
           }}
         />
       )}
+
+      <Body>💬 문자(SMS): {status.sms ? '✅ 허용됨 · 전체 문자 읽음' : '꺼짐'}</Body>
+      {!status.sms && (
+        <Button
+          label="문자 읽기 허용하기"
+          variant="ghost"
+          onPress={async () => {
+            if (!(await requestSms())) Alert.alert('권한이 꺼져 있어요', '앱 정보 → 권한 → SMS에서 허용할 수 있어요.', [{ text: '닫기' }, { text: '앱 정보 열기', onPress: openAppDetails }]);
+            refresh();
+          }}
+        />
+      )}
+      <Body muted>문자는 전체를 읽을 수 있어요. 카카오톡은 안드로이드가 막아 알림/내보내기로만 돼요.</Body>
+
+      <Body>📇 연락처: {contactsOn ? '✅ 허용됨 · 번호를 이름으로' : '꺼짐'}</Body>
+      {!contactsOn && (
+        <Button
+          label="연락처 허용하기"
+          variant="ghost"
+          onPress={async () => {
+            if (!(await requestContacts())) Alert.alert('권한이 꺼져 있어요', '앱 정보 → 권한 → 연락처에서 허용할 수 있어요.', [{ text: '닫기' }, { text: '앱 정보 열기', onPress: openAppDetails }]);
+            refresh();
+          }}
+        />
+      )}
+      <Body muted>허용하면 문자·통화에서 아는 번호가 이름으로 보여요(예: &quot;김부장님한테 부재중&quot;).</Body>
+
+      <Body>📍 위치: {locationOn ? '✅ 허용됨 · 지금 있는 곳 날씨' : '꺼짐'}</Body>
+      {!locationOn && (
+        <Button
+          label="위치 허용하기"
+          variant="ghost"
+          onPress={async () => {
+            if (!(await requestLocation())) Alert.alert('권한이 꺼져 있어요', '앱 정보 → 권한 → 위치에서 허용할 수 있어요.', [{ text: '닫기' }, { text: '앱 정보 열기', onPress: openAppDetails }]);
+            refresh();
+          }}
+        />
+      )}
+      <Body muted>허용하면 지금 계신 곳 기준으로 날씨를 챙겨요.</Body>
 
       <Body>🌙 매일 밤 &quot;내일 할 일&quot; 알림</Body>
       <View style={styles.row}>

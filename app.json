@@ -53,7 +53,19 @@
           "enableOpenCLAndHexagon": true
         }
       ],
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "전화·문자 온 번호를 이름으로 알려드리려면 연락처가 필요해요. 연락처는 휴대폰 밖으로 저장되지 않아요."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "지금 계신 곳 기준으로 날씨와 이동을 챙겨드리려면 위치가 필요해요. 위치는 휴대폰 밖으로 저장되지 않아요."
+        }
+      ]
     ]
   }
 }

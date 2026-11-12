@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -22,10 +22,26 @@ export default function Today() {
   const t = useTheme();
   const router = useRouter();
   const { state, loaded, getState } = useStore();
+  const params = useLocalSearchParams<{ brief?: string }>();
   const [brief, setBrief] = useState('');
   const [loading, setLoading] = useState(false);
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [updateBuild, setUpdateBuild] = useState<number | null>(null);
+  const [autoBriefed, setAutoBriefed] = useState(false);
+
+  // Opened from the morning briefing notification (/?brief=1): build the briefing right away,
+  // so tapping it is enough — Dorothy already "checked the phone" overnight.
+  useFocusEffect(
+    useCallback(() => {
+      if (params.brief !== '1' || autoBriefed || !state.apiKey) return;
+      setAutoBriefed(true);
+      setLoading(true);
+      briefing(getState())
+        .then(setBrief)
+        .catch((e) => setBrief(describeError(e)))
+        .finally(() => setLoading(false));
+    }, [params.brief, autoBriefed, state.apiKey, getState]),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -145,7 +161,7 @@ export default function Today() {
 
       <Card>
         <Title>오늘의 브리핑</Title>
-        {loading ? <ActivityIndicator /> : brief ? <Body>{brief}</Body> : <Body muted>할 일, 기억, 날씨를 모아 오늘 하루를 정리해 드려요.</Body>}
+        {loading ? <ActivityIndicator /> : brief ? <Body>{brief}</Body> : <Body muted>밤사이 온 메시지·문자·부재중 전화와 오늘 일정, 회사 현황, 할 일, 날씨를 모아 하루를 정리해 드려요.</Body>}
         <Button label={brief ? '다시 브리핑 받기' : '브리핑 받기'} onPress={runBriefing} disabled={loading || !state.apiKey} />
       </Card>
 
