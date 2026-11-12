@@ -63,7 +63,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 한국어로, 따뜻하지만 간결하게 답합니다. 모바일 화면이니 핵심부터 말하고 긴 서론은 생략합니다.
 - 사용자가 자신에 대해 오래 유효한 사실(가족, 건강, 취향, 일, 목표, 중요한 날짜 등)을 말하면 remember 도구로 저장합니다. 이미 기억 목록에 있는 내용은 다시 저장하지 않습니다. 사실이 바뀌면 이전 기억을 forget으로 지우고 새로 저장합니다.
 - 해야 할 일이나 약속이 언급되면 add_task로 등록합니다. 시각이 정해져 있으면 due_at을 넣어 알림이 울리게 합니다. "내일 아침" 같은 표현은 아래 현재 시각 기준으로 해석하고, 애매하면 합리적으로 정한 뒤 정한 시각을 알려 줍니다.
-- 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다.
+- 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다. 매일·매주처럼 "반복해서" 챙길 일을 요청하면 add_routine으로 반복 알림을 만들고(예: 매일 저녁 8시 개인톡 미회신 확인), 필요 없어지면 delete_routine으로 지웁니다. 한 번만 할 일은 add_task를 씁니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
 - Google 계정이 연결되어 있으면 일정은 calendar_list_events / calendar_create_event로, 메일은 gmail_search / gmail_read로 직접 확인합니다. 시간이 정해진 약속은 할 일 대신 캘린더에 넣는 것을 우선합니다.
@@ -158,6 +158,35 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       type: 'object',
       properties: { task_id: { type: 'string', description: '할 일 목록에 표시된 id' } },
       required: ['task_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_routine',
+    description:
+      '반복해서 챙길 일을 매일 또는 매주 특정 요일·시각에 울리는 반복 알림으로 만든다. 예: "매일 저녁 8시 개인톡 미회신 확인", "매주 금요일 오전 9시 다음 주 부킹 정리". 한 번만 할 일은 add_task를 쓴다.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '알림에 뜰 내용(예: 개인톡 미회신 확인)' },
+        hour: { type: 'integer', description: '시(0-23), 현지(필리핀) 시간' },
+        minute: { type: 'integer', description: '분(0-59)' },
+        repeat: { type: 'string', enum: ['daily', 'weekly'], description: '매일이면 daily, 매주면 weekly' },
+        weekday: { type: ['integer', 'null'], description: '주간일 때 요일: 일=1,월=2,화=3,수=4,목=5,금=6,토=7. 매일이면 null.' },
+      },
+      required: ['title', 'hour', 'minute', 'repeat', 'weekday'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_routine',
+    description: '반복 알림을 삭제한다(그 뒤로 울리지 않음).',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: { routine_id: { type: 'string', description: '반복 알림 목록에 표시된 id' } },
+      required: ['routine_id'],
       additionalProperties: false,
     },
   },
@@ -418,10 +447,14 @@ function formatNow(): string {
 
 /** Everything Dorothy knows right now. Sent as a second system block so the persona block stays cacheable. */
 export function buildContext(state: AppState, googleEmails: string[] = []): string {
-  const { profile, memories, tasks, followups } = state;
+  const { profile, memories, tasks, followups, routines } = state;
   const now = Date.now();
   const open = tasks.filter((t) => !t.done);
   const openFollowups = (followups ?? []).filter((f) => !f.done);
+  const WD = ['', '일', '월', '화', '수', '목', '금', '토']; // expo weekday 1=Sun … 7=Sat
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const routineLine = (r: (typeof routines)[number]) =>
+    `- [${r.id}] ${r.repeat === 'weekly' ? `매주 ${WD[r.weekday ?? 1]}요일` : '매일'} ${pad2(r.hour)}:${pad2(r.minute)} — ${r.title}`;
   const taskLine = (t: (typeof tasks)[number]) => {
     const due = t.dueAt ? ` (기한 ${new Date(t.dueAt).toLocaleString('ko-KR')}${new Date(t.dueAt).getTime() < now ? ', 지남' : ''})` : '';
     return `- [${t.id}] ${t.title}${due}${t.notes ? ` — ${t.notes}` : ''}`;
@@ -438,6 +471,7 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
     `기억 목록 (${memories.length}개):\n${memories.map((m) => `- [${m.id}] (${m.category}) ${m.content}`).join('\n') || '(없음)'}`,
     `진행 중인 할 일 (${open.length}개):\n${open.map(taskLine).join('\n') || '(없음)'}`,
     `회신·부탁 대기 (${openFollowups.length}개):\n${openFollowups.map((f) => `- [${f.id}] ${f.who} — ${f.what}${f.source ? ` (${f.source})` : ''}`).join('\n') || '(없음)'}`,
+    `반복 알림 (${(routines ?? []).length}개):\n${(routines ?? []).map(routineLine).join('\n') || '(없음)'}`,
     recentlyDone.length ? `최근 완료한 일:\n${recentlyDone.map(taskLine).join('\n')}` : '',
   ]
     .filter(Boolean)
@@ -478,6 +512,16 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     case 'delete_task':
       await actions.deleteTask(String(input.task_id));
       return '삭제됨';
+    case 'add_routine': {
+      const hour = Math.min(Math.max(Math.trunc(Number(input.hour) || 0), 0), 23);
+      const minute = Math.min(Math.max(Math.trunc(Number(input.minute) || 0), 0), 59);
+      const repeat = input.repeat === 'weekly' ? 'weekly' : 'daily';
+      const weekday = repeat === 'weekly' ? Math.min(Math.max(Math.trunc(Number(input.weekday) || 1), 1), 7) : undefined;
+      const r = await actions.addRoutine({ title: String(input.title), hour, minute, repeat, weekday });
+      return r.notificationId ? `반복 알림 등록됨 (id ${r.id})` : '반복 알림을 예약하지 못했어요(알림 권한이 꺼져 있을 수 있어요).';
+    }
+    case 'delete_routine':
+      return (await actions.deleteRoutine(String(input.routine_id))) ? '반복 알림 삭제됨' : '해당 id의 반복 알림이 없음';
     case 'add_followup': {
       const f = actions.addFollowup({ who: String(input.who), what: String(input.what), source: str(input.source) });
       return `회신 대기에 등록됨 (id ${f.id})`;

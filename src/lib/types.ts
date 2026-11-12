@@ -23,6 +23,21 @@ export type Followup = {
   source?: string;
 };
 
+/** A recurring reminder: fires every day, or every week on `weekday`, at hour:minute. */
+export type Routine = {
+  id: string;
+  /** What to be reminded of, e.g. "개인톡 미회신 확인". */
+  title: string;
+  hour: number;
+  minute: number;
+  repeat: 'daily' | 'weekly';
+  /** expo weekday 1=Sun … 7=Sat, for weekly routines. */
+  weekday?: number;
+  /** expo-notifications id, used to cancel it. */
+  notificationId?: string;
+  createdAt: string;
+};
+
 export type Memory = {
   id: string;
   /** e.g. "가족", "건강", "취향", "일" */
