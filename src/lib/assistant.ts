@@ -80,7 +80,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'remember',
     description: '사용자에 대해 오래 기억할 사실을 저장한다. 한 번에 하나의 사실만 짧은 문장으로 저장한다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -94,7 +93,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'update_memory',
     description: '기존 기억의 내용이나 분류를 고친다(틀린 사실 수정, 중복을 하나로 합칠 때 남길 항목 다듬기). 바꾸지 않을 칸은 null.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -109,7 +107,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'forget',
     description: '더 이상 맞지 않거나 사용자가 지우길 원하는 기억을 삭제한다(중복 정리 때 남길 하나만 두고 나머지를 지울 때도 쓴다).',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { memory_id: { type: 'string', description: '기억 목록에 표시된 id' } },
@@ -120,7 +117,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'add_task',
     description: '할 일 또는 일정을 등록한다. due_at이 있으면 그 시각에 휴대폰 알림이 울린다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -138,7 +134,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'complete_task',
     description: '할 일을 완료 처리한다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { task_id: { type: 'string', description: '할 일 목록에 표시된 id' } },
@@ -150,7 +145,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     name: 'update_task',
     description:
       '이미 등록된 할 일을 수정하거나 미룬다(기한이 지난 것도 가능). 제목·메모를 바꾸거나, due_at으로 기한/알림 시각을 새로 정한다(미루기 = due_at을 뒤로). 바꾸지 않을 칸은 null로 둔다. due_at에 "none"을 주면 기한과 알림을 없앤다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -169,7 +163,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'delete_task',
     description: '필요 없어진 할 일을 목록에서 삭제한다(완료가 아니라 아예 지움). 예약된 알림도 함께 취소된다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { task_id: { type: 'string', description: '할 일 목록에 표시된 id' } },
@@ -181,7 +174,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     name: 'add_routine',
     description:
       '반복해서 챙길 일을 매일 또는 매주 특정 요일·시각에 울리는 반복 알림으로 만든다. 예: "매일 저녁 8시 개인톡 미회신 확인", "매주 금요일 오전 9시 다음 주 부킹 정리". 한 번만 할 일은 add_task를 쓴다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -198,7 +190,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'delete_routine',
     description: '반복 알림을 삭제한다(그 뒤로 울리지 않음).',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { routine_id: { type: 'string', description: '반복 알림 목록에 표시된 id' } },
@@ -210,7 +201,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     name: 'add_followup',
     description:
       '사용자가 누군가에게 "답장하거나 처리해 줘야 할 것"을 회신 대기 목록에 등록한다. 메시지·부재중 전화·통화에서 회신·부탁이 보이면 사용한다(시각이 정해진 약속은 add_task를 쓴다). 이미 같은 사람·같은 내용이 열려 있으면 중복 등록하지 않는다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -225,7 +215,6 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'complete_followup',
     description: '회신 대기 항목을 처리 완료로 체크한다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { followup_id: { type: 'string', description: '회신 대기 목록에 표시된 id' } },
@@ -243,7 +232,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     name: 'read_sheet',
     description:
       '사용자가 설정 → "구글 시트"에 등록한 구글 시트를 읽는다(읽기 전용). name으로 어느 스프레드시트인지(제목 일부, 예: "2026 리스트", "지출"), tab으로 어느 탭인지 고른다. tab을 null로 두면 그 시트의 탭 목록을 돌려준다(어느 탭인지 모를 때 먼저 확인). 입고·컨테이너·지출 등 표로 관리하는 내용을 물으면 쓴다. 등록된 시트가 하나뿐이면 name은 null이어도 된다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -257,7 +245,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'calendar_list_events',
     description: '연결된 모든 Google 계정의 캘린더에서 기간 내 일정을 시작 시각 순으로 가져온다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { start: { type: 'string', description: ISO_DESC }, end: { type: 'string', description: ISO_DESC } },
@@ -268,7 +255,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'calendar_create_event',
     description: 'Google 캘린더에 일정을 만든다. 끝나는 시각을 모르면 시작 1시간 뒤로 한다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -285,7 +271,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'gmail_search',
     description: 'Gmail 검색 문법(예: "is:unread newer_than:2d", "from:kim subject:견적")으로 메일을 찾아 보낸 사람·제목·미리보기를 돌려준다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { query: { type: 'string' }, max_results: { type: 'integer', description: '1~20' } },
@@ -296,7 +281,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'gmail_read',
     description: 'gmail_search로 찾은 메일 하나의 본문을 읽는다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { message_id: { type: 'string' } },
@@ -307,7 +291,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'gmail_create_draft',
     description: 'Gmail 임시보관함에 메일 초안을 저장한다. 보내지는 않는다. 답장이면 원래 메일의 thread_id를 넣는다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -324,7 +307,6 @@ const GOOGLE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     name: 'gmail_send',
     description:
       '메일을 실제로 전송한다. 되돌릴 수 없으므로, 사용자에게 받는 사람·제목·내용을 보여주고 "보내 줘" 같은 명확한 동의를 받은 뒤에만 호출한다. 답장이면 thread_id를 넣는다.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -346,7 +328,6 @@ const MESSAGE_TOOL: Anthropic.Beta.BetaToolUnion = {
     '휴대폰의 메신저(카카오톡, Messenger, Viber, WhatsApp, Telegram, 문자 등) 메시지를 가져온다. 알림으로 받은 메시지와, 사용자가 가져온 예전 대화(카톡 대화 내보내기 등)가 있다. ' +
     'room으로 특정 방·사람만, since/until로 날짜 범위(ISO 8601)를, keyword로 내용 검색을 할 수 있다. 한 방의 대화를 쭉 보려면 room을 넣고 hours를 크게(또는 since를 과거로) 준다. ' +
     '각 방 머리글에 건수와 "단체방(추정)/개인/미상"이 붙고, 각 줄에 보낸 시각과 보낸 사람이 있다. 주의: 알림으로 받은 것만 있어 전체 기록이 아닐 수 있고, 내가 답장했는지는 알 수 없다.',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: {
@@ -385,7 +366,6 @@ const COMPANY_LOOKUP_TOOL: Anthropic.Beta.BetaToolUnion = {
     'type="voyage"면 그 항차의 단계(입고/출항/통관/입항/배송 등)·경로·출항일·입항일·MICT도착·세부 날짜를 주고(어디까지 왔는지 확인용), query에는 항차코드를 넣는다(냉동=FROZEN, 드라이=DRY, 항공=AIR, 숫자와 붙여서. 예: "17차 냉동"→"FROZEN17", "35차 드라이"→"DRY35"). ' +
     'type="customer"면 고객을 이름으로 찾아 화물 건수·진행중 건수를 준다(query=이름 일부). ' +
     'type="tracking"면 조회번호(tracking_no)로 그 화물의 현재 단계와 이력을 준다(query=조회번호, 예: "DRY23-C002").',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: {
@@ -402,7 +382,6 @@ const COMPANY_PATTERN_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'company_pattern',
   description:
     '사장(사용자) 본인의 업무 패턴을 회사 시스템 활동 기록에서 분석해 온다(읽기 전용). 주로 몇 시에 일하는지(시간대별), 어떤 요일이 바쁜지, 주로 하는 일(화물 입력·상태 변경·예약·고객 등), 최근 기간 총 작업량·일한 날 수를 담은 요약과 수치를 준다. "나 보통 언제 바빠?", "내 업무 패턴 어때?", "요즘 뭐 많이 해?", "몇 시에 일 몰려?", "무슨 요일이 바빠?" 같은 자기 업무 리듬 질문에 쓴다. 전화·카톡 등 시스템 밖 활동은 포함되지 않는다(서버 시계 기준).',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: { days: { type: ['integer', 'null'], description: '최근 며칠을 볼지(기본 90). 30/90/180/365 중 하나.' } },
@@ -415,7 +394,6 @@ const CALL_SUMMARY_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'read_call_summaries',
   description:
     '통화 녹음을 Gemini가 요약해 둔 기록을 가져온다(설정에서 녹음 백업+요약을 켠 경우). "저번 통화 뭐였어?", "누구랑 통화에서 뭐 하기로 했지?", "지난주 통화들 요약" 같은 질문에 쓴다. keyword로 특정 이름·내용을 찾는다.',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: {
@@ -430,7 +408,6 @@ const CALL_SUMMARY_TOOL: Anthropic.Beta.BetaToolUnion = {
 const CALL_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'read_calls',
   description: '휴대폰 통화 기록(받은 전화, 건 전화, 부재중, 거절)을 최근 것부터 가져온다. 통화 내용은 없다.',
-  strict: true,
   input_schema: {
     type: 'object',
     properties: { hours: { type: 'integer', description: '몇 시간 전까지 볼지 (1~336)' } },
