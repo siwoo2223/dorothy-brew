@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, View } from 'react-native';
 
-import { Body, Button, Card, Title } from './ui';
+import { Body, Button, Card, Input, Title } from './ui';
 import { connectedEmails } from '../lib/google';
+import * as gemini from '../lib/gemini';
 import * as recordings from '../lib/recordings';
 import { useTheme } from '../lib/theme';
 
@@ -19,6 +20,9 @@ export function RecordingBackupCard() {
   const [deleteAfter, setDeleteAfter] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [lastRun, setLastRun] = useState('');
+  const [summarize, setSummarize] = useState(false);
+  const [geminiHint, setGeminiHint] = useState('');
+  const [geminiInput, setGeminiInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<recordings.Progress | null>(null);
   const [result, setResult] = useState<recordings.BackupResult | null>(null);
@@ -27,11 +31,12 @@ export function RecordingBackupCard() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [emails, cfg, label, last] = await Promise.all([
+      const [emails, cfg, label, last, hint] = await Promise.all([
         connectedEmails(),
         recordings.getConfig(),
         recordings.folderLabel(),
         recordings.getLastRun(),
+        gemini.geminiKeyHint(),
       ]);
       if (!alive) return;
       setEmail(emails[0] ?? null);
@@ -39,6 +44,8 @@ export function RecordingBackupCard() {
       setEnabled(cfg.enabled);
       setFolder(label);
       setLastRun(last);
+      setSummarize(cfg.summarize);
+      setGeminiHint(hint);
     })();
     return () => {
       alive = false;
@@ -62,6 +69,15 @@ export function RecordingBackupCard() {
   const toggleEnabled = async (v: boolean) => {
     setEnabled(v);
     await recordings.setEnabled(v);
+  };
+  const toggleSummarize = async (v: boolean) => {
+    setSummarize(v);
+    await recordings.setSummarize(v);
+  };
+  const saveGeminiKey = async () => {
+    await gemini.setGeminiKey(geminiInput);
+    setGeminiHint(await gemini.geminiKeyHint());
+    setGeminiInput('');
   };
 
   const backup = async () => {
@@ -108,6 +124,23 @@ export function RecordingBackupCard() {
         <Switch value={enabled} onValueChange={toggleEnabled} trackColor={{ true: t.accent }} />
       </View>
 
+      <View style={styles.hr} />
+      <Body>🧠 녹음 내용 요약 (Gemini)</Body>
+      <Body muted>
+        켜면 녹음을 올릴 때 Gemini가 통화 내용을 요약해 도로시가 기억해요. 그 뒤 &quot;저번 통화 뭐였어?&quot;라고 물으면 알려줘요. Gemini 무료 키가 필요해요(ai.google.dev에서 발급).
+      </Body>
+      <Body>
+        Gemini 키: <Text style={{ color: geminiHint ? t.accent : t.subtext, fontWeight: '600' }}>{geminiHint ? `저장됨 (…${geminiHint})` : '아직 없음'}</Text>
+      </Body>
+      <Input value={geminiInput} onChangeText={setGeminiInput} placeholder="Gemini API 키 붙여넣기 (AIza…)" autoCapitalize="none" autoCorrect={false} secureTextEntry />
+      <Button label="Gemini 키 저장" variant="ghost" onPress={saveGeminiKey} disabled={!geminiInput.trim()} />
+      <View style={styles.row}>
+        <Body>녹음 내용 요약·기억</Body>
+        <Switch value={summarize} onValueChange={toggleSummarize} trackColor={{ true: t.accent }} />
+      </View>
+      {summarize && !geminiHint && <Body muted>먼저 Gemini 키를 저장해 주세요.</Body>}
+      <View style={styles.hr} />
+
       {busy && progress && (
         <Body muted>올리는 중… ({progress.index}/{progress.total}) {progress.name}</Body>
       )}
@@ -117,6 +150,7 @@ export function RecordingBackupCard() {
         <Body>
           ✅ 올림 {result.uploaded}개
           {result.deleted ? ` · 폰에서 삭제 ${result.deleted}개 (${fmtBytes(result.freedBytes)} 확보)` : ''}
+          {result.summarized ? ` · 요약 ${result.summarized}개` : ''}
           {result.skipped ? ` · 건너뜀 ${result.skipped}` : ''}
           {result.failed ? ` · 실패 ${result.failed}` : ''}
           {result.total === 0 ? ' — 새 녹음이 없어요.' : ''}
@@ -130,4 +164,5 @@ export function RecordingBackupCard() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  hr: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.25)', marginVertical: 4 },
 });

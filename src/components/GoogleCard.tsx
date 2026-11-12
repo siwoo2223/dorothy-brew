@@ -64,7 +64,7 @@ export function GoogleCard() {
 
   return (
     <Card>
-      <Title>Google 캘린더 · Gmail</Title>
+      <Title>구글 연결 (캘린더·Gmail·드라이브·시트)</Title>
       {emails.length > 0 ? (
         <>
           <Body muted>도로시가 연결된 모든 계정의 일정을 확인·등록하고, 메일을 찾아 읽고, 답장 초안을 임시보관함에 써 둬요. 메일을 직접 보내지는 않아요.</Body>

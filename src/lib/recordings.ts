@@ -5,6 +5,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
+import * as gemini from './gemini';
 import * as google from './google';
 
 const SAF = FileSystem.StorageAccessFramework;
@@ -16,31 +17,57 @@ const KEYS = {
   enabled: 'dorothy.rec.enabled',
   done: 'dorothy.rec.done',
   lastRun: 'dorothy.rec.lastRun',
+  summarize: 'dorothy.rec.summarize',
+  summaries: 'dorothy.callSummaries',
 };
+
+// Gemini inline audio has to fit in one request; keep well under its ~20MB cap (base64 is ~1.33x).
+const SUMMARIZE_MAX_BYTES = 12 * 1024 * 1024;
 
 const AUDIO_EXT: Record<string, string> = {
   m4a: 'audio/mp4', mp3: 'audio/mpeg', amr: 'audio/amr', '3gp': 'audio/3gpp',
   '3ga': 'audio/3gpp', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac', opus: 'audio/opus',
 };
 
-export type RecordingConfig = { folderUri: string; deleteAfter: boolean; enabled: boolean };
+export type RecordingConfig = { folderUri: string; deleteAfter: boolean; enabled: boolean; summarize: boolean };
 
 export async function getConfig(): Promise<RecordingConfig> {
-  const [folderUri, del, en] = await Promise.all([
+  const [folderUri, del, en, sum] = await Promise.all([
     AsyncStorage.getItem(KEYS.folder),
     AsyncStorage.getItem(KEYS.delete),
     AsyncStorage.getItem(KEYS.enabled),
+    AsyncStorage.getItem(KEYS.summarize),
   ]);
   return {
     folderUri: folderUri ?? '',
     deleteAfter: del == null ? true : del === 'true', // 사용자 선택: 올리고 삭제가 기본
     enabled: en === 'true',
+    summarize: sum === 'true',
   };
 }
 
 export async function setDeleteAfter(v: boolean) { await AsyncStorage.setItem(KEYS.delete, String(v)); }
 export async function setEnabled(v: boolean) { await AsyncStorage.setItem(KEYS.enabled, String(v)); }
+export async function setSummarize(v: boolean) { await AsyncStorage.setItem(KEYS.summarize, String(v)); }
 export async function getLastRun(): Promise<string> { return (await AsyncStorage.getItem(KEYS.lastRun)) ?? ''; }
+
+/** A Gemini-made summary of one call recording, kept so Dorothy can recall what a call was about. */
+export type CallSummary = { id: string; name: string; at: string; summary: string };
+
+export async function getCallSummaries(): Promise<CallSummary[]> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.summaries);
+    return raw ? (JSON.parse(raw) as CallSummary[]) : [];
+  } catch {
+    return [];
+  }
+}
+async function appendSummary(entry: CallSummary) {
+  const list = await getCallSummaries();
+  list.push(entry);
+  await AsyncStorage.setItem(KEYS.summaries, JSON.stringify(list.slice(-200)));
+}
+export async function clearCallSummaries() { await AsyncStorage.removeItem(KEYS.summaries); }
 
 /** Opens the system folder picker; on success saves and returns the granted folder URI. */
 export async function pickFolder(): Promise<string | null> {
@@ -103,6 +130,7 @@ export type BackupResult = {
   skipped: number;
   failed: number;
   freedBytes: number;
+  summarized: number;
 };
 
 export type Progress = { index: number; total: number; name: string };
@@ -128,7 +156,8 @@ export async function backupNow(onProgress?: (p: Progress) => void): Promise<Bac
   const files = entries.filter(isAudio);
   const done = await loadDone();
 
-  const res: BackupResult = { total: files.length, uploaded: 0, deleted: 0, skipped: 0, failed: 0, freedBytes: 0 };
+  const res: BackupResult = { total: files.length, uploaded: 0, deleted: 0, skipped: 0, failed: 0, freedBytes: 0, summarized: 0 };
+  const wantSummary = cfg.summarize && (await gemini.geminiConfigured());
 
   for (let i = 0; i < files.length; i++) {
     const uri = files[i];
@@ -147,6 +176,19 @@ export async function backupNow(onProgress?: (p: Progress) => void): Promise<Bac
       if (size > MAX_BYTES) { res.skipped++; done.add(name); continue; }
 
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+
+      // Summarize with Gemini before uploading/deleting, so Dorothy remembers what the call was about.
+      // A summary failure never blocks the backup.
+      if (wantSummary && size > 0 && size <= SUMMARIZE_MAX_BYTES) {
+        try {
+          const summary = await gemini.summarizeCallAudio(base64, mimeOf(name));
+          await appendSummary({ id: `${Date.now()}-${i}`, name, at: new Date().toISOString(), summary });
+          res.summarized++;
+        } catch {
+          // leave it; the audio still gets backed up and the user can retry later
+        }
+      }
+
       const up = await google.uploadToDrive({ folderId, name, mimeType: mimeOf(name), base64 });
       res.uploaded++;
 
