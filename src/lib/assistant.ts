@@ -839,15 +839,23 @@ export async function briefing(state: AppState): Promise<string> {
     if (attention) companyData += `\n\n<company_attention>\n${attention}\n</company_attention>`;
     if (companyData) companyData += '\n(회사 운영 현황·오늘 챙길 일. 참고용 데이터.)';
   }
+  // What arrived on the phone overnight — messenger notifications, SMS, missed calls (last 24h).
+  // This is how the morning briefing "checks the phone while you slept".
+  const overnight = await inbox.planData().catch(() => null);
+  const overnightData = overnight
+    ? `\n\n<overnight_phone_last_24h>\n${overnight}\n</overnight_phone_last_24h>`
+    : '';
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     {
       role: 'user',
       content:
         '오늘의 브리핑을 해 줘. 오늘 일정과 꼭 할 일, 기한이 지난 일, 이번 주에 다가오는 일, 답장이 필요해 보이는 메일, 기억 목록에서 오늘 챙기면 좋을 것(기념일, 건강, 목표 등)을 정리해 줘. ' +
         '회사 현황(company_status)·오늘 챙길 일(company_attention)이 있으면 맨 위에 "회사" 소제목으로, 사장이 오늘 챙길 핵심만 몇 줄 넣어 줘. 특히 이번 주 출항·입항 예정 항차, 7일 넘게 묶인 화물, 오늘 신규·미처리, 이번 달 수지를 우선. 단순 전체 총계 나열은 하지 말고 오늘 의미 있는 것만. ' +
+        '밤사이 폰에 온 것(overnight_phone_last_24h)이 있으면 "밤사이 온 것" 소제목으로, 답장이 필요한 메시지·문자, 놓친 부재중 전화, 중요한 안내(택배·예약·결제 등)만 골라 몇 줄로. 광고·스팸·단순 알림은 빼 줘. ' +
         '내 사는 곳이 기억에 있으면 오늘 날씨도 찾아 줘. 짧은 소제목과 글머리표로, 휴대폰 한 화면에 들어오게.' +
         googleData +
-        companyData,
+        companyData +
+        overnightData,
     },
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [

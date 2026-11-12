@@ -66,7 +66,11 @@ export async function scheduleDailyBriefing(hour: number): Promise<boolean> {
   await Notifications.cancelScheduledNotificationAsync(BRIEFING_ID).catch(() => {});
   await Notifications.scheduleNotificationAsync({
     identifier: BRIEFING_ID,
-    content: { title: '좋은 아침이에요 ☀️', body: '도로시가 오늘의 브리핑을 준비했어요.' },
+    content: {
+      title: '좋은 아침이에요 ☀️',
+      body: '밤사이 온 메시지·문자·부재중 전화와 오늘 일정·회사 현황을 정리했어요. 눌러서 확인하세요.',
+      data: { url: '/?brief=1' },
+    },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0, channelId: 'reminders' },
   });
   return true;
