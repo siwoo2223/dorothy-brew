@@ -176,6 +176,11 @@ async function tokenForEmail(email: string): Promise<string> {
 
 // ---------- Calendar ----------
 
+// The owner lives/works on Philippine time; his Google calendar's own default is Europe/London,
+// which made event times read wrong. Pin all calendar reads/writes to Manila so times are
+// consistent regardless of the calendar's or the phone's timezone setting.
+export const BIZ_TIMEZONE = 'Asia/Manila';
+
 export type CalendarEvent = {
   id: string;
   title: string;
@@ -207,6 +212,7 @@ export async function listEvents(timeMin: Date, timeMax: Date, max = 50): Promis
     singleEvents: 'true',
     orderBy: 'startTime',
     maxResults: String(max),
+    timeZone: BIZ_TIMEZONE,
   });
   const events = await perAccount(async (a, token) => {
     const data = await api<{ items?: RawEvent[] }>(token, `${CAL}?${params}`);
@@ -226,7 +232,7 @@ export async function listEvents(timeMin: Date, timeMax: Date, max = 50): Promis
 
 /** Creates an event. `account` picks the calendar; without it, the first connected account is used. */
 export async function createEvent(input: { title: string; start: string; end: string; location?: string; description?: string; account?: string }) {
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = BIZ_TIMEZONE;
   const token = await tokenForEmail(input.account ?? '');
   const e = await api<RawEvent & { htmlLink: string }>(token, CAL, {
     method: 'POST',

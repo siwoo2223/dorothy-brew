@@ -205,6 +205,30 @@ function useStoreValue() {
         await cancelReminder(ref.current.tasks.find((t) => t.id === id)?.notificationId);
         update('tasks', ref.current.tasks.filter((t) => t.id !== id));
       },
+      /** Edits a task and, when dueAt changes (including snoozing it later or clearing it), reschedules the reminder. */
+      async updateTask(id: string, patch: { title?: string; notes?: string; dueAt?: string | null }): Promise<Task | undefined> {
+        const task = ref.current.tasks.find((t) => t.id === id);
+        if (!task) return undefined;
+        let notificationId = task.notificationId;
+        let dueAt = task.dueAt;
+        if (patch.dueAt !== undefined) {
+          await cancelReminder(task.notificationId);
+          notificationId = undefined;
+          dueAt = patch.dueAt ?? undefined;
+          if (dueAt && new Date(dueAt).getTime() > Date.now()) {
+            notificationId = await scheduleReminder('⏰ ' + (patch.title ?? task.title), (patch.notes ?? task.notes) ?? '도로시가 알려드려요', new Date(dueAt));
+          }
+        }
+        const next: Task = {
+          ...task,
+          title: patch.title ?? task.title,
+          notes: patch.notes !== undefined ? patch.notes : task.notes,
+          dueAt,
+          notificationId,
+        };
+        update('tasks', ref.current.tasks.map((t) => (t.id === id ? next : t)));
+        return next;
+      },
 
       addMemory(category: string, content: string): Memory {
         const memory: Memory = { id: newId(), category, content, createdAt: new Date().toISOString() };

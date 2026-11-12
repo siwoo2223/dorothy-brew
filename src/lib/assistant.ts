@@ -62,7 +62,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 한국어로, 따뜻하지만 간결하게 답합니다. 모바일 화면이니 핵심부터 말하고 긴 서론은 생략합니다.
 - 사용자가 자신에 대해 오래 유효한 사실(가족, 건강, 취향, 일, 목표, 중요한 날짜 등)을 말하면 remember 도구로 저장합니다. 이미 기억 목록에 있는 내용은 다시 저장하지 않습니다. 사실이 바뀌면 이전 기억을 forget으로 지우고 새로 저장합니다.
 - 해야 할 일이나 약속이 언급되면 add_task로 등록합니다. 시각이 정해져 있으면 due_at을 넣어 알림이 울리게 합니다. "내일 아침" 같은 표현은 아래 현재 시각 기준으로 해석하고, 애매하면 합리적으로 정한 뒤 정한 시각을 알려 줍니다.
-- 완료했다고 하면 complete_task로 체크합니다.
+- 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
 - Google 계정이 연결되어 있으면 일정은 calendar_list_events / calendar_create_event로, 메일은 gmail_search / gmail_read로 직접 확인합니다. 시간이 정해진 약속은 할 일 대신 캘린더에 넣는 것을 우선합니다.
@@ -120,6 +120,37 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: 'complete_task',
     description: '할 일을 완료 처리한다.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: { task_id: { type: 'string', description: '할 일 목록에 표시된 id' } },
+      required: ['task_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_task',
+    description:
+      '이미 등록된 할 일을 수정하거나 미룬다(기한이 지난 것도 가능). 제목·메모를 바꾸거나, due_at으로 기한/알림 시각을 새로 정한다(미루기 = due_at을 뒤로). 바꾸지 않을 칸은 null로 둔다. due_at에 "none"을 주면 기한과 알림을 없앤다.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: '할 일 목록에 표시된 id' },
+        title: { type: ['string', 'null'], description: '새 제목(안 바꾸면 null)' },
+        notes: { type: ['string', 'null'], description: '새 메모(안 바꾸면 null)' },
+        due_at: {
+          type: ['string', 'null'],
+          description: '새 기한: 오프셋 포함 ISO 8601(예: 2026-10-10T08:00:00+08:00). 안 바꾸면 null, 기한을 없애려면 "none".',
+        },
+      },
+      required: ['task_id', 'title', 'notes', 'due_at'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_task',
+    description: '필요 없어진 할 일을 목록에서 삭제한다(완료가 아니라 아예 지움). 예약된 알림도 함께 취소된다.',
     strict: true,
     input_schema: {
       type: 'object',
@@ -333,14 +364,39 @@ export const PLAN_REQUEST = '오늘 받은 메시지와 통화, 일정을 보고
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 const json = (v: unknown) => JSON.stringify(v);
 
+/**
+ * Removes characters that make the API reject the request body as invalid JSON ("hex escape"
+ * 400s seen on long pasted/collected text): lone surrogates (from split emoji or bad copy-paste)
+ * and control characters other than tab / newline / carriage return.
+ */
+function clean(s: string | undefined): string {
+  if (!s) return '';
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const n = s.charCodeAt(i + 1);
+      if (n >= 0xdc00 && n <= 0xdfff) { out += s[i] + s[i + 1]; i++; continue; }
+      continue; // lone high surrogate
+    }
+    if (c >= 0xdc00 && c <= 0xdfff) continue; // lone low surrogate
+    if (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) continue; // control chars
+    if (c === 0x7f) continue;
+    out += s[i];
+  }
+  return out;
+}
+
+/** "YYYY-MM-DD (요일)" for a date, read in Philippine time so relative dates never drift. */
+function ymdLabel(d: Date): string {
+  const iso = d.toLocaleDateString('en-CA', { timeZone: google.BIZ_TIMEZONE });
+  const wd = d.toLocaleDateString('ko-KR', { weekday: 'short', timeZone: google.BIZ_TIMEZONE });
+  return `${iso} (${wd})`;
+}
+
 function formatNow(): string {
-  const now = new Date();
-  const offsetMin = -now.getTimezoneOffset();
-  const sign = offsetMin >= 0 ? '+' : '-';
-  const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
-  const offset = `${sign}${pad(Math.trunc(offsetMin / 60))}:${pad(offsetMin % 60)}`;
-  const local = now.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' });
-  return `${local} (UTC${offset}, 시간대 ${Intl.DateTimeFormat().resolvedOptions().timeZone})`;
+  const local = new Date().toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short', timeZone: google.BIZ_TIMEZONE });
+  return `${local} (필리핀 시간, Asia/Manila, UTC+08:00)`;
 }
 
 /** Everything Dorothy knows right now. Sent as a second system block so the persona block stays cacheable. */
@@ -355,8 +411,10 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
   };
   const recentlyDone = tasks.filter((t) => t.done).slice(-5);
 
-  return [
+  return clean([
     `현재 시각: ${formatNow()}`,
+    `오늘: ${ymdLabel(new Date())} · 내일: ${ymdLabel(new Date(Date.now() + 86400000))}`,
+    `('오늘·내일·이번 주' 같은 상대 날짜는 반드시 위 '오늘'을 기준으로 계산하고, 메시지·메일에 적힌 시각을 현재로 혼동하지 않습니다. 모든 시각은 필리핀 시간 기준입니다.)`,
     `사용자 이름: ${profile.name || '(아직 모름)'}`,
     `Google 계정: ${googleEmails.length ? `${googleEmails.join(', ')} 연결됨 (캘린더·Gmail 도구는 연결된 모든 계정을 함께 봅니다)` : '연결 안 됨'}`,
     profile.about ? `사용자 자기소개:\n${profile.about}` : '',
@@ -366,7 +424,7 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
     recentlyDone.length ? `최근 완료한 일:\n${recentlyDone.map(taskLine).join('\n')}` : '',
   ]
     .filter(Boolean)
-    .join('\n\n');
+    .join('\n\n'));
 }
 
 async function runTool(name: string, input: Record<string, unknown>, actions: StoreActions): Promise<string> {
@@ -389,6 +447,20 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     }
     case 'complete_task':
       return (await actions.setTaskDone(String(input.task_id), true)) ? '완료 처리됨' : '해당 id의 할 일이 없음';
+    case 'update_task': {
+      const patch: { title?: string; notes?: string; dueAt?: string | null } = {};
+      if (typeof input.title === 'string') patch.title = input.title;
+      if (typeof input.notes === 'string') patch.notes = input.notes;
+      if (input.due_at === 'none') patch.dueAt = null;
+      else if (typeof input.due_at === 'string' && !Number.isNaN(Date.parse(input.due_at))) patch.dueAt = new Date(input.due_at).toISOString();
+      const t = await actions.updateTask(String(input.task_id), patch);
+      if (!t) return '해당 id의 할 일이 없음';
+      const alarm = t.dueAt ? (t.notificationId ? ', 알림 재예약됨' : ', 알림은 예약하지 못함(과거 시각이거나 권한 없음)') : ', 기한 없음';
+      return `수정됨 (id ${t.id}${alarm})`;
+    }
+    case 'delete_task':
+      await actions.deleteTask(String(input.task_id));
+      return '삭제됨';
     case 'add_followup': {
       const f = actions.addFollowup({ who: String(input.who), what: String(input.what), source: str(input.source) });
       return `회신 대기에 등록됨 (id ${f.id})`;
@@ -506,13 +578,13 @@ export async function chat(
   while (history.length && history[0].role !== 'user') history.shift();
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [
-    ...history.map((t) => ({ role: t.role, content: t.text })),
+    ...history.map((t) => ({ role: t.role, content: clean(t.text) })),
     {
       role: 'user',
       // Only on the live turn; history keeps the plain text.
       content: [
-        { type: 'text', text: userText },
-        ...(opts.extra ? [{ type: 'text' as const, text: opts.extra }] : []),
+        { type: 'text', text: clean(userText) },
+        ...(opts.extra ? [{ type: 'text' as const, text: clean(opts.extra) }] : []),
         ...(opts.spoken
           ? [{ type: 'text' as const, text: '(음성으로 말한 메시지. 답은 소리 내어 읽히니 2~4문장 구어체로, 목록·표·이모지·링크 없이 답해 줘. 음성 인식 오타가 있을 수 있으니 뜻을 헤아려 줘.)' }]
           : []),
@@ -559,7 +631,7 @@ export async function chat(
     for (const block of response.content) {
       if (block.type !== 'tool_use') continue;
       try {
-        const content = await runTool(block.name, block.input as Record<string, unknown>, actions);
+        const content = clean(await runTool(block.name, block.input as Record<string, unknown>, actions));
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content });
       } catch (e) {
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: describeError(e), is_error: true });
