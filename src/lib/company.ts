@@ -89,6 +89,28 @@ export async function fetchCompanyLookup(type: 'voyage' | 'customer' | 'tracking
 }
 
 /**
+ * The full shipment list (조회번호·항차·고객·품목·부피·중량·상태·날짜), with optional filters and
+ * pagination (50 per page). All fields optional; empty returns the most recent page.
+ */
+export async function fetchCompanyShipments(opts: {
+  status?: string;
+  code?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+}): Promise<string> {
+  const p: Record<string, string> = { mode: 'shipments' };
+  if (opts.status) p.status = opts.status;
+  if (opts.code) p.code = opts.code.toUpperCase();
+  if (opts.q) p.q = opts.q;
+  if (opts.from) p.from = opts.from;
+  if (opts.to) p.to = opts.to;
+  if (opts.page && opts.page > 1) p.page = String(opts.page);
+  return get(p);
+}
+
+/**
  * The owner's own work-pattern analysis lives in a separate endpoint (dorothy_pattern.php)
  * that sits next to the report endpoint and takes the same token. Derive its URL from the
  * configured report URL so the user doesn't have to enter a second address.

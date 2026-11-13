@@ -393,6 +393,28 @@ const COMPANY_LOOKUP_TOOL: Anthropic.Beta.BetaToolUnion = {
   },
 };
 
+/** Added with company_report. The full shipment list — filterable, paginated — for "전체" reads. */
+const COMPANY_SHIPMENTS_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'company_shipments',
+  description:
+    '회사(KF LOGISTICS) 화물 목록을 조건으로 조회한다(읽기 전용, 한 번에 50건). 각 건에 조회번호·항차·고객명·품목·박스수·부피(cbm)·중량(weight_kg)·상태·입고시각·출항/입항일이 들어 있다. ' +
+    '"이번 달 출항 화물 전부", "배송중인 화물 목록", "둘둘 고객 화물 다 보여줘", "DRY35 화물 목록", "11월 출항한 거 부피·중량 합" 같은 질문에 쓴다. ' +
+    'status(상태 정확히: 입고/출항/입항/통관/배송준비중/배송중/배송완료/하역/환적입고/환적출항/환적입항), code(항차코드 예 FROZEN17/DRY35), q(고객명 일부), from·to(출항일 범위 YYYY-MM-DD), page(2쪽부터)로 거른다. total·has_more로 더 있는지 안다. 많으면 조건을 좁히거나 page를 넘겨 가며 본다.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: { type: ['string', 'null'], description: '상태 정확히(없으면 null)' },
+      code: { type: ['string', 'null'], description: '항차코드(예 FROZEN17, DRY35). 없으면 null' },
+      q: { type: ['string', 'null'], description: '고객명 일부. 없으면 null' },
+      from: { type: ['string', 'null'], description: '출항일 시작 YYYY-MM-DD. 없으면 null' },
+      to: { type: ['string', 'null'], description: '출항일 끝 YYYY-MM-DD. 없으면 null' },
+      page: { type: ['integer', 'null'], description: '페이지(1부터, 50건씩). 없으면 1' },
+    },
+    required: ['status', 'code', 'q', 'from', 'to', 'page'],
+    additionalProperties: false,
+  },
+};
+
 /** Added alongside company_report. The owner's own work rhythm from the company activity log. */
 const COMPANY_PATTERN_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'company_pattern',
@@ -665,6 +687,15 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
         input.type as 'voyage' | 'customer' | 'tracking',
         String(input.query),
       );
+    case 'company_shipments':
+      return await company.fetchCompanyShipments({
+        status: str(input.status),
+        code: str(input.code),
+        q: str(input.q),
+        from: str(input.from),
+        to: str(input.to),
+        page: Number(input.page) || 1,
+      });
     case 'company_pattern':
       return await company.fetchCompanyPattern(Number(input.days) || 90);
     case 'gmail_create_draft': {
@@ -764,7 +795,7 @@ export async function chat(
     ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
     ...(phone.sms ? [SMS_TOOL] : []),
     ...(contactsOn ? [CONTACTS_TOOL] : []),
-    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_PATTERN_TOOL] : []),
+    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_SHIPMENTS_TOOL, COMPANY_PATTERN_TOOL] : []),
     CALL_SUMMARY_TOOL,
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
