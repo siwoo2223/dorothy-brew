@@ -122,8 +122,10 @@ export async function disconnect(email?: string): Promise<void> {
   await saveAccounts(email ? list.filter((a) => a.email !== email) : []);
 }
 
-async function accessTokenFor(account: StoredToken): Promise<string> {
-  if (AuthSession.TokenResponse.isTokenFresh(account, 60)) return account.accessToken;
+async function accessTokenFor(account: StoredToken, force = false): Promise<string> {
+  // Refresh ~5 min before expiry so a long batch never carries a token that dies mid-run; `force`
+  // skips the cache entirely, used to recover from a 401 (a token Google rejects though not yet expired).
+  if (!force && AuthSession.TokenResponse.isTokenFresh(account, 300)) return account.accessToken;
   if (!account.refreshToken) {
     await disconnect(account.email);
     throw new Error(`Google 로그인이 만료됐어요 (${account.email}). 설정에서 다시 연결해 주세요.`);
@@ -149,13 +151,22 @@ async function accessTokenFor(account: StoredToken): Promise<string> {
   return refreshed.accessToken;
 }
 
-async function api<T>(token: string, url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...init.headers },
-  });
+async function api<T>(token: string, url: string, init: RequestInit = {}, reauthEmail = ''): Promise<T> {
+  const call = (t: string) =>
+    fetch(url, { ...init, headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json', ...init.headers } });
+  let res = await call(token);
+  // A token Google rejects (401) though our clock thinks it is fresh — force a new one and retry once.
+  if (res.status === 401) res = await call(await freshToken(reauthEmail, true));
   if (!res.ok) throw new Error(`Google API 오류 ${res.status}: ${(await res.text()).slice(0, 300)}`);
   return res.json() as Promise<T>;
+}
+
+/** The token for an account email (blank = first account), optionally forcing a refresh (401 recovery). */
+async function freshToken(email: string, force = false): Promise<string> {
+  const accounts = await loadAccounts();
+  const account = accounts.find((a) => a.email === email) ?? accounts[0];
+  if (!account) throw new Error('Google 계정이 연결되어 있지 않아요. 설정에서 연결해 주세요.');
+  return accessTokenFor(account, force);
 }
 
 /** Runs `fn` for every connected account (each with a fresh token) and flattens the results; an account that errors contributes nothing. */
@@ -181,10 +192,7 @@ function routeId(id: string): { email: string; realId: string } {
 
 /** The token for a specific account email, falling back to the first connected account. */
 async function tokenForEmail(email: string): Promise<string> {
-  const accounts = await loadAccounts();
-  const account = accounts.find((a) => a.email === email) ?? accounts[0];
-  if (!account) throw new Error('Google 계정이 연결되어 있지 않아요. 설정에서 연결해 주세요.');
-  return accessTokenFor(account);
+  return freshToken(email);
 }
 
 // ---------- Calendar ----------
@@ -421,18 +429,21 @@ export async function uploadToDrive(input: {
   mimeType: string;
   base64: string;
 }): Promise<{ id: string; size: number; name: string }> {
-  const token = await tokenForEmail('');
   const boundary = 'dorothy-' + Math.random().toString(36).slice(2);
   const metadata = { name: input.name, parents: [input.folderId] };
   const body =
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
     `--${boundary}\r\nContent-Type: ${input.mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${input.base64}\r\n` +
     `--${boundary}--`;
-  const res = await fetch(DRIVE_UPLOAD, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
-    body,
-  });
+  const send = (t: string) =>
+    fetch(DRIVE_UPLOAD, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${t}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    });
+  let res = await send(await tokenForEmail(''));
+  // Token rejected mid-backup (e.g. expired after an earlier file) → refresh once and retry.
+  if (res.status === 401) res = await send(await freshToken('', true));
   const text = await res.text();
   if (res.status === 403) {
     throw new Error('구글 드라이브 권한이 없어요. 설정에서 구글을 다시 연결해 드라이브 권한을 허용해 주세요.');
@@ -491,9 +502,11 @@ export async function listDriveFolderAudio(folderId: string): Promise<{ id: stri
 
 /** Downloads a Drive file to a temp path and returns its base64 (used to feed audio to Gemini). */
 export async function downloadDriveFileBase64(fileId: string): Promise<string> {
-  const token = await tokenForEmail('');
   const dest = `${FileSystem.cacheDirectory}drive-dl.tmp`;
-  const r = await FileSystem.downloadAsync(`${DRIVE}/files/${fileId}?alt=media`, dest, { headers: { Authorization: `Bearer ${token}` } });
+  const dl = (t: string) =>
+    FileSystem.downloadAsync(`${DRIVE}/files/${fileId}?alt=media`, dest, { headers: { Authorization: `Bearer ${t}` } });
+  let r = await dl(await tokenForEmail(''));
+  if (r.status === 401) r = await dl(await freshToken('', true)); // refresh once and retry
   if (r.status !== 200) throw new Error(`드라이브 다운로드 오류 ${r.status}`);
   const b64 = await FileSystem.readAsStringAsync(dest, { encoding: FileSystem.EncodingType.Base64 });
   await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
