@@ -12,6 +12,8 @@ export type CallEntry = { time: number; number: string; name: string; type: 'inc
 export type SmsEntry = { time: number; address: string; body: string; type: 'received' | 'sent' | 'other' };
 /** An outgoing messenger reply the accessibility watcher noticed: when, which app, and top-of-screen room hints. */
 export type SentReply = { time: number; app: string; hints: string[] };
+/** A raw signal the accessibility watcher received, shown only in debug mode to tune detection. */
+export type ReplyDebugEntry = { time: number; kind: string; text: string };
 
 type NativeInbox = {
   isNotificationAccessGranted(): boolean;
@@ -21,6 +23,9 @@ type NativeInbox = {
   openAccessibilitySettings(): void;
   getSentReplies(sinceMs: number, limit: number): Promise<SentReply[]>;
   clearSentReplies(): void;
+  setReplyDebug(on: boolean): void;
+  isReplyDebug(): boolean;
+  getReplyDebug(limit: number): Promise<ReplyDebugEntry[]>;
   getMessages(sinceMs: number, limit: number): Promise<InboxMessage[]>;
   messageCount(): number;
   historyCount(): number;
@@ -46,6 +51,12 @@ export const openAccessibilitySettings = () => native?.openAccessibilitySettings
 export const clearSentReplies = () => native?.clearSentReplies?.();
 export async function getSentReplies(sinceMs = 0, limit = 200): Promise<SentReply[]> {
   return native?.getSentReplies ? native.getSentReplies(sinceMs, limit) : [];
+}
+export const replyDebugSupported = () => !!native && typeof native.setReplyDebug === 'function';
+export const setReplyDebug = (on: boolean) => native?.setReplyDebug?.(on);
+export const isReplyDebug = () => native?.isReplyDebug?.() ?? false;
+export async function getReplyDebug(limit = 60): Promise<ReplyDebugEntry[]> {
+  return native?.getReplyDebug ? native.getReplyDebug(limit) : [];
 }
 export const messageCount = () => native?.messageCount() ?? 0;
 export const historyCount = () => native?.historyCount() ?? 0;

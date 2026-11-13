@@ -62,4 +62,41 @@ object SentStore {
   fun clear(context: Context) {
     file(context).delete()
   }
+
+  // --- Diagnostics: a short ring of what the accessibility service actually receives, so a phone
+  // where detection misses can be tuned from real data. Off by default; includes short text snippets
+  // only while the owner turns it on to troubleshoot. ---
+  private const val DEBUG_FILE = "dorothy-sent-debug.jsonl"
+  private const val DEBUG_PREF = "dorothy_sent"
+  private const val DEBUG_KEY = "debug"
+  private const val DEBUG_MAX = 60
+
+  fun setDebug(context: Context, on: Boolean) {
+    context.getSharedPreferences(DEBUG_PREF, Context.MODE_PRIVATE).edit().putBoolean(DEBUG_KEY, on).apply()
+    if (!on) File(context.filesDir, DEBUG_FILE).delete()
+  }
+
+  fun debugEnabled(context: Context): Boolean =
+    context.getSharedPreferences(DEBUG_PREF, Context.MODE_PRIVATE).getBoolean(DEBUG_KEY, false)
+
+  @Synchronized
+  fun debug(context: Context, kind: String, text: String) {
+    val f = File(context.filesDir, DEBUG_FILE)
+    val o = JSONObject().put("time", System.currentTimeMillis()).put("kind", kind).put("text", text.take(40))
+    f.appendText(o.toString() + "\n")
+    val lines = f.readLines()
+    if (lines.size > DEBUG_MAX) f.writeText(lines.takeLast(DEBUG_MAX).joinToString("") { "$it\n" })
+  }
+
+  @Synchronized
+  fun readDebug(context: Context, limit: Int): List<Map<String, Any>> {
+    val f = File(context.filesDir, DEBUG_FILE)
+    if (!f.exists()) return emptyList()
+    return f.readLines().mapNotNull { line ->
+      runCatching {
+        val o = JSONObject(line)
+        mapOf("time" to o.getLong("time").toDouble(), "kind" to o.optString("kind"), "text" to o.optString("text"))
+      }.getOrNull()
+    }.takeLast(limit)
+  }
 }
