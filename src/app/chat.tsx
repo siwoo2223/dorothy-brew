@@ -114,10 +114,10 @@ export default function Chat() {
   function listenForWake() {
     if (phase.current !== 'wake') return;
     listeningFor.current = 'wake';
-    // With voice-match on, each utterance is recorded one at a time (so it can be verified);
-    // continuous recognition would merge everyone's speech into one file.
-    const record = voiceMatch.current;
-    voice.start({ continuous: continuousOk.current && !record, quiet: true, record });
+    // The wake word ("도로시야") is NOT voice-matched: it is too short to verify reliably, and
+    // gating it made standby look dead (every call was rejected). We keep continuous listening for
+    // the wake word; the actual command is what gets voice-verified (see listenForCommand).
+    voice.start({ continuous: continuousOk.current, quiet: true });
   }
 
   function listenForCommand() {
