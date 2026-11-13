@@ -17,7 +17,7 @@ const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch((
 const smooth = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
 import { Input } from '../components/ui';
-import { Markdown } from '../components/Markdown';
+import { RichMessage } from '../components/RichMessage';
 import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
@@ -356,7 +356,7 @@ export default function Chat() {
                   {item.text}
                 </Text>
               ) : (
-                <Markdown text={item.text} color={t.text} />
+                <RichMessage text={item.text} color={t.text} />
               )}
             </View>
           );
@@ -364,7 +364,7 @@ export default function Chat() {
         ListFooterComponent={
           streaming ? (
             <View style={[styles.bubble, { alignSelf: 'flex-start', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
-              <Markdown text={`${streaming} ▍`} color={t.text} />
+              <RichMessage text={`${streaming} ▍`} color={t.text} streaming />
             </View>
           ) : busy ? (
             <ActivityIndicator style={{ alignSelf: 'flex-start', margin: 8 }} />
