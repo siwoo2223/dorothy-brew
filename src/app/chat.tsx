@@ -1,10 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
+
+// Android needs this opt-in for LayoutAnimation (smooth attach/remove of the photo preview).
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+/** Light tactile tap so buttons feel responsive; silently ignored where haptics aren't available. */
+const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+/** Smoothly animates the next layout change (e.g. the photo preview sliding in/out). */
+const smooth = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
 import { Input } from '../components/ui';
 import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
@@ -239,6 +249,7 @@ export default function Chat() {
         Alert.alert('사진을 읽지 못했어요', '다시 시도해 주세요.');
         return;
       }
+      smooth();
       setImage({ uri: a.uri, base64: a.base64, mediaType: a.mimeType ?? 'image/jpeg' });
     } catch (e) {
       Alert.alert('사진 오류', e instanceof Error ? e.message : String(e));
@@ -266,6 +277,7 @@ export default function Chat() {
       return;
     }
     setDraft('');
+    if (img) smooth();
     setImage(null);
     setBusy(true);
     // Sending my own message always jumps to the newest, even if I had scrolled up.
@@ -321,7 +333,7 @@ export default function Chat() {
             <Text style={[styles.emptyTitle, { color: t.text }]}>무엇을 도와드릴까요?</Text>
             <Text style={{ color: t.subtext, textAlign: 'center' }}>나에 대해 이야기해 주시면 기억해 두고, 할 일은 알림으로 챙겨 드려요.</Text>
             {SUGGESTIONS.map((s) => (
-              <Pressable key={s} onPress={() => send(s)} style={[styles.chip, { borderColor: t.border, backgroundColor: t.card }]}>
+              <Pressable key={s} onPress={() => { tap(); send(s); }} style={[styles.chip, { borderColor: t.border, backgroundColor: t.card }]}>
                 <Text style={{ color: t.text }}>{s}</Text>
               </Pressable>
             ))}
@@ -373,7 +385,7 @@ export default function Chat() {
           )}
           {canListen && (
             <Pressable
-              onPress={() => setStandby(!standby)}
+              onPress={() => { tap(); setStandby(!standby); }}
               style={[styles.modePill, { borderColor: standby ? t.accent : t.border, backgroundColor: standby ? t.accent : 'transparent' }]}
             >
               <Text style={{ color: standby ? t.accentText : t.text, fontSize: 12 }}>👂 대기 모드</Text>
@@ -385,14 +397,14 @@ export default function Chat() {
         <View style={[styles.imagePreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
           <Image source={{ uri: image.uri }} style={styles.thumb} />
           <Text style={{ color: t.subtext, flex: 1 }}>사진 1장 · 전송하면 도로시가 읽어요</Text>
-          <Pressable onPress={() => setImage(null)} hitSlop={8}>
+          <Pressable onPress={() => { tap(); smooth(); setImage(null); }} hitSlop={8}>
             <Text style={{ color: t.danger, fontSize: 18 }}>✕</Text>
           </Pressable>
         </View>
       )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
         <Pressable
-          onPress={chooseImage}
+          onPress={() => { tap(); chooseImage(); }}
           disabled={busy || listening}
           accessibilityLabel="사진 보여주기"
           style={[styles.mic, { backgroundColor: t.card, borderColor: t.border, opacity: busy || listening ? 0.4 : 1 }]}
@@ -401,7 +413,7 @@ export default function Chat() {
         </Pressable>
         {canListen && (
           <Pressable
-            onPress={() => (listening ? voice.stop() : voice.start())}
+            onPress={() => { tap(); if (listening) voice.stop(); else voice.start(); }}
             disabled={busy || standby}
             accessibilityLabel={listening ? '말하기 끝내기' : '음성으로 말하기'}
             style={[styles.mic, { backgroundColor: listening ? t.danger : t.card, borderColor: listening ? t.danger : t.border, opacity: busy || standby ? 0.4 : 1 }]}
@@ -418,7 +430,7 @@ export default function Chat() {
           multiline
           onSubmitEditing={() => send(draft)}
         />
-        <Pressable onPress={() => send(draft)} disabled={busy || (!draft.trim() && !image)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && !image) ? 0.4 : 1 }]}>
+        <Pressable onPress={() => { tap(); send(draft); }} disabled={busy || (!draft.trim() && !image)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && !image) ? 0.4 : 1 }]}>
           <Text style={{ color: '#fff', fontWeight: '700' }}>전송</Text>
         </Pressable>
       </View>
