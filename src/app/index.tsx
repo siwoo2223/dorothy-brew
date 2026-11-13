@@ -219,6 +219,7 @@ export default function Today() {
           </View>
         )}
       </View>
+      <Button label="📸 카메라로 보여주며 묻기" onPress={() => router.navigate('/camera')} disabled={!state.apiKey} />
     </ScrollView>
   );
 }

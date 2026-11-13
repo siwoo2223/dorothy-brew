@@ -214,3 +214,30 @@ export async function fetchCompanyRows(opts: {
   if (opts.order) { p.order = opts.order; if (opts.dir) p.dir = opts.dir; }
   return getData(p);
 }
+
+/**
+ * Intake photos for one shipment (조회번호), as ready-to-display absolute image URLs. The endpoint
+ * (dorothy_photos.php) is a sibling of the report endpoint and takes the same token.
+ */
+export async function fetchCompanyPhotos(trackingNo: string): Promise<string> {
+  const no = (trackingNo || '').trim();
+  if (!no) throw new Error('조회번호가 비어 있어요.');
+  if (!endpointUrl || !token) {
+    throw new Error('회사 현황이 아직 연결되지 않았어요. 설정 → "회사 현황 연결"에서 주소와 토큰을 넣어 주세요.');
+  }
+  const base = endpointUrl.includes('dorothy_report.php')
+    ? endpointUrl.replace('dorothy_report.php', 'dorothy_photos.php')
+    : endpointUrl.replace(/[^/]*(\?.*)?$/, 'dorothy_photos.php');
+  const url = `${base}${base.includes('?') ? '&' : '?'}no=${encodeURIComponent(no)}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
+  } catch {
+    throw new Error('회사 서버에 연결할 수 없어요. 주소가 맞는지, 인터넷이 되는지 확인해 주세요.');
+  }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw new Error('회사 서버가 접근을 거부했어요(토큰 불일치). 설정의 토큰을 확인해 주세요.');
+  if (res.status === 404) throw new Error('사진 조회 API(dorothy_photos.php)가 서버에 아직 없어요. 회사 서버 배포를 확인해 주세요.');
+  if (!res.ok) throw new Error(`회사 서버 오류 (${res.status}): ${text.slice(0, 300)}`);
+  return text;
+}

@@ -50,6 +50,8 @@ export default function RootLayout() {
             <Tabs.Screen name="tasks" options={{ title: '할 일', tabBarIcon: icon('✅') }} />
             <Tabs.Screen name="memory" options={{ title: '기억', tabBarIcon: icon('🧠') }} />
             <Tabs.Screen name="settings" options={{ title: '설정', tabBarIcon: icon('⚙️') }} />
+            {/* Full-screen camera mode: not a tab (href: null), no header, no tab bar. */}
+            <Tabs.Screen name="camera" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
           </Tabs>
         </StoreProvider>
       </KeyboardProvider>
