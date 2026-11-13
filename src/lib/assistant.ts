@@ -778,9 +778,18 @@ export async function chat(
   state: AppState,
   actions: StoreActions,
   /** extra: data for this turn only (e.g. the day's messages for a plan); not kept in the history. */
-  opts: { spoken?: boolean; onToken?: (token: string) => void; extra?: string } = {},
+  opts: {
+    spoken?: boolean;
+    onToken?: (token: string) => void;
+    extra?: string;
+    /** A photo/screenshot the user attached to this turn (Claude can see it; the local model cannot). */
+    image?: { base64: string; mediaType: string };
+  } = {},
 ): Promise<string> {
-  if (state.model === 'local') return localChat(userText, state, opts);
+  if (state.model === 'local') {
+    if (opts.image) return '사진은 폰 안의 두뇌로는 못 봐요. 설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.';
+    return localChat(userText, state, opts);
+  }
   const client = createClient(state);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
@@ -791,6 +800,12 @@ export async function chat(
       role: 'user',
       // Only on the live turn; history keeps the plain text.
       content: [
+        ...(opts.image
+          ? [{
+              type: 'image' as const,
+              source: { type: 'base64' as const, media_type: opts.image.mediaType as 'image/jpeg', data: opts.image.base64 },
+            }]
+          : []),
         { type: 'text', text: clean(userText) },
         ...(opts.extra ? [{ type: 'text' as const, text: clean(opts.extra) }] : []),
         ...(opts.spoken

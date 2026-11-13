@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import * as ImagePicker from 'expo-image-picker';
 
 import { Input } from '../components/ui';
 import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
@@ -22,6 +23,8 @@ export default function Chat() {
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // A photo/screenshot attached to the next message (Claude can read it).
+  const [image, setImage] = useState<{ uri: string; base64: string; mediaType: string } | null>(null);
   // The phone brain streams its reply; show it as it is written.
   const [streaming, setStreaming] = useState('');
   const list = useRef<FlatList>(null);
@@ -218,25 +221,64 @@ export default function Chat() {
     listenForCommand();
   };
 
+  const pickImage = async (camera: boolean) => {
+    try {
+      const perm = camera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('권한 필요', camera ? '카메라 권한을 허용해 주세요.' : '사진 접근 권한을 허용해 주세요.');
+        return;
+      }
+      const res = camera
+        ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.5 })
+        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.5, mediaTypes: ['images'] });
+      if (res.canceled || !res.assets?.length) return;
+      const a = res.assets[0];
+      if (!a.base64) {
+        Alert.alert('사진을 읽지 못했어요', '다시 시도해 주세요.');
+        return;
+      }
+      setImage({ uri: a.uri, base64: a.base64, mediaType: a.mimeType ?? 'image/jpeg' });
+    } catch (e) {
+      Alert.alert('사진 오류', e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const chooseImage = () => {
+    if (state.model === 'local') {
+      Alert.alert('사진은 Claude 두뇌에서', '설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.');
+      return;
+    }
+    Alert.alert('사진 보여주기', '영수증·입고표·화면 캡처 등을 도로시에게 보여줘요.', [
+      { text: '카메라로 찍기', onPress: () => pickImage(true) },
+      { text: '사진첩에서 고르기', onPress: () => pickImage(false) },
+      { text: '취소', style: 'cancel' },
+    ]);
+  };
+
   const send = async (text: string, spoken = false, extra?: string) => {
     const message = text.trim();
-    if (!message || busy) return;
+    const img = image;
+    if ((!message && !img) || busy) return;
     if (state.model !== 'local' && !state.apiKey) {
       Alert.alert('API 키 필요', '설정 탭에서 Claude API 키를 먼저 입력해 주세요.');
       return;
     }
     setDraft('');
+    setImage(null);
     setBusy(true);
     // Sending my own message always jumps to the newest, even if I had scrolled up.
     atBottom.current = true;
     // Snapshot before appending so the new message is not sent twice.
     const snapshot = getState();
-    actions.appendChat({ role: 'user', text: message });
+    actions.appendChat({ role: 'user', text: img ? `📷 ${message || '사진'}` : message });
     const voiceReply = spoken || phase.current !== 'off';
     try {
-      const reply = await chat(message, snapshot, actions, {
+      const reply = await chat(message || '이 사진에서 중요한 내용을 읽어서 정리해 줘.', snapshot, actions, {
         spoken: voiceReply,
         extra,
+        image: img ?? undefined,
         onToken: (token) => setStreaming((s) => s + token),
       });
       setStreaming('');
@@ -339,7 +381,24 @@ export default function Chat() {
           )}
         </View>
       )}
+      {image && (
+        <View style={[styles.imagePreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
+          <Image source={{ uri: image.uri }} style={styles.thumb} />
+          <Text style={{ color: t.subtext, flex: 1 }}>사진 1장 · 전송하면 도로시가 읽어요</Text>
+          <Pressable onPress={() => setImage(null)} hitSlop={8}>
+            <Text style={{ color: t.danger, fontSize: 18 }}>✕</Text>
+          </Pressable>
+        </View>
+      )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
+        <Pressable
+          onPress={chooseImage}
+          disabled={busy || listening}
+          accessibilityLabel="사진 보여주기"
+          style={[styles.mic, { backgroundColor: t.card, borderColor: t.border, opacity: busy || listening ? 0.4 : 1 }]}
+        >
+          <Text style={{ fontSize: 18 }}>📷</Text>
+        </Pressable>
         {canListen && (
           <Pressable
             onPress={() => (listening ? voice.stop() : voice.start())}
@@ -359,7 +418,7 @@ export default function Chat() {
           multiline
           onSubmitEditing={() => send(draft)}
         />
-        <Pressable onPress={() => send(draft)} disabled={busy || !draft.trim()} style={[styles.send, { backgroundColor: t.accent, opacity: busy || !draft.trim() ? 0.4 : 1 }]}>
+        <Pressable onPress={() => send(draft)} disabled={busy || (!draft.trim() && !image)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && !image) ? 0.4 : 1 }]}>
           <Text style={{ color: '#fff', fontWeight: '700' }}>전송</Text>
         </Pressable>
       </View>
@@ -384,6 +443,8 @@ const styles = StyleSheet.create({
   composer: { flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end' },
   send: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13 },
   mic: { borderRadius: 12, borderWidth: 1, width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  imagePreview: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  thumb: { width: 44, height: 44, borderRadius: 8 },
   voiceBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   modePill: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   clear: { position: 'absolute', top: 6, right: 12 },
