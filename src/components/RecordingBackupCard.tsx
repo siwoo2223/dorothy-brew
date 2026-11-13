@@ -166,12 +166,20 @@ export function RecordingBackupCard() {
         disabled={driveBusy || !geminiHint || !email}
       />
       {driveResult && (
-        <Body>
-          ✅ 요약 {driveResult.summarized}개
-          {driveResult.skipped ? ` · 건너뜀 ${driveResult.skipped}(이미 요약/큼)` : ''}
-          {driveResult.failed ? ` · 실패 ${driveResult.failed}` : ''}
-          {driveResult.total === 0 ? ' — 드라이브에 녹음이 없어요.' : ''}
-        </Body>
+        <>
+          <Body>
+            ✅ 요약 {driveResult.summarized}개
+            {driveResult.skipped ? ` · 건너뜀 ${driveResult.skipped}(이미 요약/큼)` : ''}
+            {driveResult.failed ? ` · 실패 ${driveResult.failed}` : ''}
+            {driveResult.total === 0 ? ' — 드라이브에 녹음이 없어요.' : ''}
+          </Body>
+          {driveResult.lastError && driveResult.summarized === 0 && (
+            <Text style={{ color: t.danger, fontSize: 14, lineHeight: 20 }}>
+              {driveResult.stopped ? '계속 실패해서 멈췄어요. ' : ''}사유: {driveResult.lastError}
+              {'\n'}• &quot;형식&quot; 오류면 Gemini가 못 읽는 녹음 형식이에요. • &quot;한도/429&quot;면 무료 한도 초과라 잠시 뒤 다시. • &quot;키&quot;면 Gemini 키를 다시 넣어 주세요.
+            </Text>
+          )}
+        </>
       )}
       <Body muted>이미 드라이브에 올라간 녹음까지 한 번에 훑어 요약해요(이미 한 건 건너뜀).</Body>
       <View style={styles.hr} />
