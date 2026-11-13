@@ -1,5 +1,6 @@
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { hideStandbyShortcut, showStandbyShortcut } from '../lib/notifications';
 import { useStore, VoiceOnOpen } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { voiceInputAvailable } from '../lib/voice';
@@ -42,6 +43,25 @@ export function VoiceCard() {
       </View>
       {Platform.OS === 'android' && (
         <>
+          <View style={styles.hr} />
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Body>🔒 잠금화면에 대기 바로가기</Body>
+              <Body muted>
+                잠금화면·알림창에 &quot;👂 도로시 대기&quot; 알림을 상시 띄워요. 한 번 누르면 화면이 켜지며 바로 대기 모드로 들어가요. (화면 꺼진 채 앱이 혼자 듣는 건 안드로이드가 막아요.)
+              </Body>
+            </View>
+            <Switch
+              value={state.standbyShortcut}
+              onValueChange={async (on) => {
+                actions.setStandbyShortcut(on);
+                if (on) await showStandbyShortcut();
+                else await hideStandbyShortcut();
+              }}
+              trackColor={{ true: t.accent }}
+            />
+          </View>
+          <View style={styles.hr} />
           <Body>빅스비처럼 바로 부르기 (갤럭시)</Body>
           <Body muted>
             • 측면 버튼 두 번 누르기: 설정 → 유용한 기능 → 측면 버튼 → 두 번 누르기 → 앱 열기 → 도로시{'\n'}
@@ -58,4 +78,6 @@ export function VoiceCard() {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hr: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.25)', marginVertical: 4 },
 });

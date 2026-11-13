@@ -123,3 +123,39 @@ export async function cancelWeeklyReport(): Promise<void> {
   if (Platform.OS === 'web') return;
   await Notifications.cancelScheduledNotificationAsync(WEEKLY_ID).catch(() => {});
 }
+
+const STANDBY_SHORTCUT_ID = 'standby-shortcut';
+
+/**
+ * Shows a persistent ("sticky") lock-screen notification. One tap opens Dorothy straight into
+ * standby ("대기 모드"). Android forbids a third-party app from keeping the mic open while the
+ * screen is off, so this is the reliable one-tap way back in from a locked phone. It sits on a
+ * silent, low-importance channel (a shortcut, not an alert) and does not auto-dismiss.
+ * Re-called on every app start (so it survives reboots/updates); the fixed id replaces, never stacks.
+ */
+export async function showStandbyShortcut(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  if (!(await ensureNotificationPermission())) return false;
+  await Notifications.setNotificationChannelAsync('standby', {
+    name: '대기 바로가기',
+    importance: Notifications.AndroidImportance.LOW, // no sound, no heads-up pop
+  });
+  await Notifications.scheduleNotificationAsync({
+    identifier: STANDBY_SHORTCUT_ID,
+    content: {
+      title: '👂 도로시 대기',
+      body: '여기를 누르면 바로 "도로시야"를 들을 준비를 해요.',
+      data: { url: '/chat?voice=standby' },
+      sticky: true, // Android ongoing: stays put, can't be swiped away
+      autoDismiss: false,
+    },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 1, channelId: 'standby' },
+  });
+  return true;
+}
+
+export async function hideStandbyShortcut(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.dismissNotificationAsync(STANDBY_SHORTCUT_ID).catch(() => {});
+  await Notifications.cancelScheduledNotificationAsync(STANDBY_SHORTCUT_ID).catch(() => {});
+}
