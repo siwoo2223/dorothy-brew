@@ -40,6 +40,8 @@ export default function RootLayout() {
               tabBarStyle: { backgroundColor: theme.card, borderTopColor: theme.border },
               tabBarActiveTintColor: theme.accent,
               tabBarInactiveTintColor: theme.subtext,
+              // Hide the bottom tab bar while typing, so the keyboard doesn't cover the chat input.
+              tabBarHideOnKeyboard: true,
               sceneStyle: { backgroundColor: theme.bg },
             }}
           >
