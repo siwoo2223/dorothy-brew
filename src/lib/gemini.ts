@@ -7,7 +7,8 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const KEY = 'dorothy.geminiApiKey';
-const MODEL = 'gemini-2.0-flash';
+// gemini-2.0-flash was retired (404); Google's own error points to the current flash model.
+const MODEL = 'gemini-3.8-flash';
 const ENDPOINT = (model: string, key: string) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
 
