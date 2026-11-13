@@ -8,6 +8,7 @@ import { GoogleCard } from '../components/GoogleCard';
 import { SheetsCard } from '../components/SheetsCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
+import { ReplyWatchCard } from '../components/ReplyWatchCard';
 import { RecordingBackupCard } from '../components/RecordingBackupCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
@@ -72,6 +73,7 @@ export default function Settings() {
       <Section icon="📱" title="내 폰 연결 (메시지·통화·녹음)" />
       <InboxCard />
       <CallCard />
+      <ReplyWatchCard />
       <RecordingBackupCard />
 
       <Section icon="🏢" title="회사·구글" />

@@ -10,11 +10,17 @@ import * as contacts from './contacts';
 export type InboxMessage = { time: number; app: string; conversation: string; sender: string; text: string };
 export type CallEntry = { time: number; number: string; name: string; type: 'incoming' | 'outgoing' | 'missed' | 'rejected' | 'other'; durationSec: number };
 export type SmsEntry = { time: number; address: string; body: string; type: 'received' | 'sent' | 'other' };
+/** An outgoing messenger reply the accessibility watcher noticed: when, which app, and top-of-screen room hints. */
+export type SentReply = { time: number; app: string; hints: string[] };
 
 type NativeInbox = {
   isNotificationAccessGranted(): boolean;
   openNotificationAccessSettings(): void;
   openAppDetails(): void;
+  isReplyWatchGranted(): boolean;
+  openAccessibilitySettings(): void;
+  getSentReplies(sinceMs: number, limit: number): Promise<SentReply[]>;
+  clearSentReplies(): void;
   getMessages(sinceMs: number, limit: number): Promise<InboxMessage[]>;
   messageCount(): number;
   historyCount(): number;
@@ -32,6 +38,15 @@ export const inboxSupported = () => !!native;
 export const notificationAccessGranted = () => native?.isNotificationAccessGranted() ?? false;
 export const openNotificationAccess = () => native?.openNotificationAccessSettings();
 export const openAppDetails = () => native?.openAppDetails();
+
+/** KakaoTalk/messenger reply auto-detection (accessibility). Android only. */
+export const replyWatchSupported = () => !!native && typeof native.isReplyWatchGranted === 'function';
+export const replyWatchGranted = () => native?.isReplyWatchGranted?.() ?? false;
+export const openAccessibilitySettings = () => native?.openAccessibilitySettings?.();
+export const clearSentReplies = () => native?.clearSentReplies?.();
+export async function getSentReplies(sinceMs = 0, limit = 200): Promise<SentReply[]> {
+  return native?.getSentReplies ? native.getSentReplies(sinceMs, limit) : [];
+}
 export const messageCount = () => native?.messageCount() ?? 0;
 export const historyCount = () => native?.historyCount() ?? 0;
 export const clearMessages = () => native?.clearMessages();

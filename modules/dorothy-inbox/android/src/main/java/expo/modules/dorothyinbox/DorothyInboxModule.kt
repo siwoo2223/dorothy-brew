@@ -29,6 +29,23 @@ class DorothyInboxModule : Module() {
       context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // --- KakaoTalk reply auto-detection (accessibility) ---
+    Function("isReplyWatchGranted") {
+      val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+      val me = ComponentName(context, DorothyReplyListener::class.java)
+      enabled.split(":").any { ComponentName.unflattenFromString(it) == me }
+    }
+
+    Function("openAccessibilitySettings") {
+      context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    AsyncFunction("getSentReplies") { sinceMs: Double, limit: Int ->
+      SentStore.read(context, sinceMs.toLong(), limit)
+    }
+
+    Function("clearSentReplies") { SentStore.clear(context) }
+
     // Sideloaded apps on Android 13+ must first be allowed "restricted settings" from their App info page.
     Function("openAppDetails") {
       context.startActivity(

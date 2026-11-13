@@ -9,6 +9,7 @@ import '../lib/notifications';
 import { ensureProactiveRegistered } from '../lib/proactive';
 import { NotificationRouter } from '../components/NotificationRouter';
 import { VoiceLauncher } from '../components/VoiceLauncher';
+import { FollowupSync } from '../components/FollowupSync';
 import { StoreProvider } from '../lib/store';
 import { useTheme } from '../lib/theme';
 
@@ -30,6 +31,7 @@ export default function RootLayout() {
           <StatusBar style="auto" />
           <VoiceLauncher />
           <NotificationRouter />
+          <FollowupSync />
           <Tabs
             screenOptions={{
               headerStyle: { backgroundColor: theme.bg },
