@@ -2,6 +2,7 @@ import { router, useRootNavigationState } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 
+import { showStandbyShortcut } from '../lib/notifications';
 import { useStore } from '../lib/store';
 import { voiceInputAvailable } from '../lib/voice';
 
@@ -15,6 +16,12 @@ export function VoiceLauncher() {
   const mode = state.voiceOnOpen;
   const launchedOnce = useRef(false);
   const backgroundAt = useRef(0);
+
+  // Re-assert the persistent lock-screen standby shortcut on every app start, so it survives
+  // reboots and updates (the fixed id replaces, never stacks).
+  useEffect(() => {
+    if (loaded && state.standbyShortcut) showStandbyShortcut();
+  }, [loaded, state.standbyShortcut]);
 
   useEffect(() => {
     if (!loaded || !navReady || mode === 'off' || !voiceInputAvailable() || !state.apiKey) return;

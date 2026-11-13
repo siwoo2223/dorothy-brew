@@ -26,6 +26,7 @@ const KEYS = {
   weeklyReportDay: 'dorothy.weeklyReportDay',
   speechRate: 'dorothy.speechRate',
   routines: 'dorothy.routines',
+  standbyShortcut: 'dorothy.standbyShortcut',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -68,6 +69,8 @@ export type AppState = {
   companyToken: string;
   /** Weekday (expo: 1=Sun … 7=Sat) for the weekly business report, or null when off. */
   weeklyReportDay: number | null;
+  /** Keep a persistent lock-screen notification that opens straight into standby. Android only. */
+  standbyShortcut: boolean;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -91,6 +94,7 @@ const initialState: AppState = {
   companyUrl: '',
   companyToken: '',
   weeklyReportDay: null,
+  standbyShortcut: false,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -109,7 +113,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -128,6 +132,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.weeklyReportDay),
         AsyncStorage.getItem(KEYS.speechRate),
         AsyncStorage.getItem(KEYS.routines),
+        AsyncStorage.getItem(KEYS.standbyShortcut),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -148,6 +153,7 @@ function useStoreValue() {
         weeklyReportDay: weeklyReportDay ? JSON.parse(weeklyReportDay) : null,
         speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
         routines: routines ? JSON.parse(routines) : [],
+        standbyShortcut: standbyShortcut ? JSON.parse(standbyShortcut) : false,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -190,6 +196,7 @@ function useStoreValue() {
       setCompanyUrl: (url: string) => update('companyUrl', url.trim()),
       setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),
       setWeeklyReportDay: (day: number | null) => update('weeklyReportDay', day),
+      setStandbyShortcut: (on: boolean) => update('standbyShortcut', on),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
