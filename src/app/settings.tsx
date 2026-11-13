@@ -1,5 +1,9 @@
-import { useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ReactNode, useState } from 'react';
+import { Alert, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, View } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { CompanyCard } from '../components/CompanyCard';
@@ -48,85 +52,101 @@ export default function Settings() {
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <UpdateCard />
 
-      <Section icon="🙂" title="나에 대해" />
-      {loaded && (
-        // Re-mount when the stored profile changes (e.g. after an import) so the form never saves stale text over it.
-        <ProfileCard key={`${state.profile.name}|${state.profile.about}`} />
-      )}
+      <Section icon="🙂" title="나에 대해" defaultOpen>
+        {loaded && (
+          // Re-mount when the stored profile changes (e.g. after an import) so the form never saves stale text over it.
+          <ProfileCard key={`${state.profile.name}|${state.profile.about}`} />
+        )}
+      </Section>
 
-      <Section icon="🧠" title="도로시 두뇌" />
-      <Card>
-        <Title>Claude API 키</Title>
-        <Body muted>{state.apiKey ? `저장됨 (…${state.apiKey.slice(-4)})` : '아직 없어요. Anthropic 콘솔에서 발급받을 수 있어요.'}</Body>
-        <Input value={key} onChangeText={setKey} placeholder="sk-ant-…" autoCapitalize="none" autoCorrect={false} secureTextEntry />
-        <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
-        <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
-        <WorkspaceField />
-      </Card>
-      <ModelCard />
+      <Section icon="🧠" title="도로시 두뇌">
+        <Card>
+          <Title>Claude API 키</Title>
+          <Body muted>{state.apiKey ? `저장됨 (…${state.apiKey.slice(-4)})` : '아직 없어요. Anthropic 콘솔에서 발급받을 수 있어요.'}</Body>
+          <Input value={key} onChangeText={setKey} placeholder="sk-ant-…" autoCapitalize="none" autoCorrect={false} secureTextEntry />
+          <Button label="키 저장" onPress={saveKey} disabled={!key.trim()} />
+          <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
+          <WorkspaceField />
+        </Card>
+        <ModelCard />
+      </Section>
 
-      <Section icon="🎙️" title="음성" />
-      <VoiceCard />
-      <VoicePickerCard />
-      <VoiceMatchCard />
+      <Section icon="🎙️" title="음성">
+        <VoiceCard />
+        <VoicePickerCard />
+        <VoiceMatchCard />
+      </Section>
 
-      <Section icon="📱" title="내 폰 연결 (메시지·통화·녹음)" />
-      <InboxCard />
-      <CallCard />
-      <ReplyWatchCard />
-      <RecordingBackupCard />
+      <Section icon="📱" title="내 폰 연결 (메시지·통화·녹음)">
+        <InboxCard />
+        <CallCard />
+        <ReplyWatchCard />
+        <RecordingBackupCard />
+      </Section>
 
-      <Section icon="🏢" title="회사·구글" />
-      <GoogleCard />
-      <SheetsCard />
-      <CompanyCard />
-      <WeeklyReportCard />
+      <Section icon="🏢" title="회사·구글">
+        <GoogleCard />
+        <SheetsCard />
+        <CompanyCard />
+        <WeeklyReportCard />
+      </Section>
 
-      <Section icon="🔔" title="알림·자동 챙김" />
-      <Card>
-        <Title>☀️ 아침 브리핑 알림</Title>
-        <Body muted>매일 정해진 시간에 오늘의 브리핑을 확인하라고 알려 드려요.</Body>
-        <View style={styles.hours}>
-          {[null, ...HOURS].map((h) => {
-            const active = state.briefingHour === h;
-            return (
-              <Pressable
-                key={String(h)}
-                onPress={() => setBriefing(h)}
-                style={[styles.hour, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : 'transparent' }]}
-              >
-                <Text style={{ color: active ? t.accentText : t.text }}>{h === null ? '끄기' : `${h}시`}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Card>
-      <ProactiveCard />
+      <Section icon="🔔" title="알림·자동 챙김">
+        <Card>
+          <Title>☀️ 아침 브리핑 알림</Title>
+          <Body muted>매일 정해진 시간에 오늘의 브리핑을 확인하라고 알려 드려요.</Body>
+          <View style={styles.hours}>
+            {[null, ...HOURS].map((h) => {
+              const active = state.briefingHour === h;
+              return (
+                <Pressable
+                  key={String(h)}
+                  onPress={() => setBriefing(h)}
+                  style={[styles.hour, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : 'transparent' }]}
+                >
+                  <Text style={{ color: active ? t.accentText : t.text }}>{h === null ? '끄기' : `${h}시`}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
+        <ProactiveCard />
+      </Section>
 
-      <Section icon="📂" title="데이터" />
-      <ImportCard />
-      <Card>
-        <Title>내 데이터</Title>
-        <Body muted>
-          기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
-        </Body>
-        <Button
-          label="대화 기록 지우기"
-          variant="danger"
-          onPress={() => Alert.alert('대화 기록 지우기', '기억과 할 일은 유지돼요.', [{ text: '취소' }, { text: '지우기', style: 'destructive', onPress: actions.clearChat }])}
-        />
-      </Card>
+      <Section icon="📂" title="데이터">
+        <ImportCard />
+        <Card>
+          <Title>내 데이터</Title>
+          <Body muted>
+            기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
+          </Body>
+          <Button
+            label="대화 기록 지우기"
+            variant="danger"
+            onPress={() => Alert.alert('대화 기록 지우기', '기억과 할 일은 유지돼요.', [{ text: '취소' }, { text: '지우기', style: 'destructive', onPress: actions.clearChat }])}
+          />
+        </Card>
+      </Section>
     </ScrollView>
   );
 }
 
-/** A small, cute category header that groups the setting cards below it. */
-function Section({ icon, title }: { icon: string; title: string }) {
+/** A collapsible category: tap the header to show/hide its cards. Collapsed by default keeps the
+ * settings screen short; the most-used group ("나에 대해") starts open. */
+function Section({ icon, title, defaultOpen = false, children }: { icon: string; title: string; defaultOpen?: boolean; children: ReactNode }) {
   const t = useTheme();
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionIcon}>{icon}</Text>
-      <Text style={[styles.sectionText, { color: t.subtext }]}>{title}</Text>
+    <View>
+      <Pressable
+        onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setOpen((o) => !o); }}
+        style={styles.section}
+      >
+        <Text style={styles.sectionIcon}>{icon}</Text>
+        <Text style={[styles.sectionText, { color: t.subtext, flex: 1 }]}>{title}</Text>
+        <Text style={{ color: t.subtext, fontSize: 14 }}>{open ? '▾' : '▸'}</Text>
+      </Pressable>
+      {open && <View style={styles.sectionBody}>{children}</View>}
     </View>
   );
 }
@@ -217,9 +237,10 @@ function ProfileCard() {
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12 },
-  section: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 20, marginBottom: 0, paddingHorizontal: 6 },
+  section: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 18, marginBottom: 2, paddingHorizontal: 6, paddingVertical: 6 },
   sectionIcon: { fontSize: 16 },
   sectionText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.6 },
+  sectionBody: { gap: 12 },
   hours: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   hour: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8 },
 });

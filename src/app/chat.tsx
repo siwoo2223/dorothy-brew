@@ -17,6 +17,7 @@ const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch((
 const smooth = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
 import { Input } from '../components/ui';
+import { Markdown } from '../components/Markdown';
 import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
@@ -350,16 +351,20 @@ export default function Chat() {
                   : { alignSelf: 'flex-start', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth },
               ]}
             >
-              <Text selectable style={{ color: mine ? '#fff' : t.text, fontSize: 15, lineHeight: 22 }}>
-                {item.text}
-              </Text>
+              {mine ? (
+                <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>
+                  {item.text}
+                </Text>
+              ) : (
+                <Markdown text={item.text} color={t.text} />
+              )}
             </View>
           );
         }}
         ListFooterComponent={
           streaming ? (
             <View style={[styles.bubble, { alignSelf: 'flex-start', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
-              <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>{streaming}▍</Text>
+              <Markdown text={`${streaming} ▍`} color={t.text} />
             </View>
           ) : busy ? (
             <ActivityIndicator style={{ alignSelf: 'flex-start', margin: 8 }} />
