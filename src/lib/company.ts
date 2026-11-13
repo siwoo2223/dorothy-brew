@@ -110,6 +110,13 @@ export async function fetchCompanyShipments(opts: {
   return get(p);
 }
 
+/** The computed receipt amount for one shipment (real receipt logic): total, basis, outstanding. */
+export async function fetchCompanyQuote(trackingNo: string): Promise<string> {
+  const no = (trackingNo || '').trim();
+  if (!no) throw new Error('조회번호가 비어 있어요.');
+  return get({ mode: 'quote', no });
+}
+
 /**
  * The owner's own work-pattern analysis lives in a separate endpoint (dorothy_pattern.php)
  * that sits next to the report endpoint and takes the same token. Derive its URL from the
