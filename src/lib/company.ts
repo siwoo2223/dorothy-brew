@@ -147,3 +147,70 @@ export async function fetchCompanyPattern(days = 90): Promise<string> {
   if (!res.ok) throw new Error(`회사 서버 오류 (${res.status}): ${text.slice(0, 300)}`);
   return text;
 }
+
+/**
+ * The generic read-only data endpoint (dorothy_data.php) sits next to the report endpoint and takes
+ * the same token — so the owner doesn't enter a second address. It lets the assistant read ANY table
+ * on the site (SELECT only; sensitive tables/columns are blocked/redacted server-side).
+ */
+function dataUrl(): string {
+  if (!endpointUrl) return '';
+  if (endpointUrl.includes('dorothy_report.php')) return endpointUrl.replace('dorothy_report.php', 'dorothy_data.php');
+  return endpointUrl.replace(/[^/]*(\?.*)?$/, 'dorothy_data.php');
+}
+
+async function getData(params: Record<string, string>): Promise<string> {
+  const base = dataUrl();
+  if (!base || !token) {
+    throw new Error('회사 현황이 아직 연결되지 않았어요. 설정 → "회사 현황 연결"에서 주소와 토큰을 넣어 주세요.');
+  }
+  const qs = Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+  const url = `${base}${base.includes('?') ? '&' : '?'}${qs}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
+  } catch {
+    throw new Error('회사 서버에 연결할 수 없어요. 주소가 맞는지, 인터넷이 되는지 확인해 주세요.');
+  }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw new Error('회사 서버가 접근을 거부했어요(토큰 불일치). 설정의 토큰을 확인해 주세요.');
+  if (res.status === 404) throw new Error('범용 읽기 API(dorothy_data.php)가 서버에 아직 없어요. 회사 서버 배포를 확인해 주세요.');
+  if (!res.ok) throw new Error(`회사 서버 오류 (${res.status}): ${text.slice(0, 300)}`);
+  return text;
+}
+
+/** Lists the tables Dorothy may read on the company site (+ row counts). */
+export async function fetchCompanyTables(): Promise<string> {
+  return getData({ mode: 'tables' });
+}
+
+/** Lists one table's columns (name/type). */
+export async function fetchCompanyColumns(table: string): Promise<string> {
+  const t = (table || '').trim();
+  if (!t) throw new Error('테이블 이름이 비어 있어요.');
+  return getData({ mode: 'columns', table: t });
+}
+
+/** Reads rows from one table, with optional text search / exact filter / order / paging. */
+export async function fetchCompanyRows(opts: {
+  table: string;
+  limit?: number;
+  offset?: number;
+  q?: string;
+  whereCol?: string;
+  whereVal?: string;
+  order?: string;
+  dir?: 'asc' | 'desc';
+}): Promise<string> {
+  const t = (opts.table || '').trim();
+  if (!t) throw new Error('테이블 이름이 비어 있어요.');
+  const p: Record<string, string> = { mode: 'rows', table: t };
+  if (opts.limit) p.limit = String(opts.limit);
+  if (opts.offset) p.offset = String(opts.offset);
+  if (opts.q) p.q = opts.q;
+  if (opts.whereCol) { p.where_col = opts.whereCol; p.where_val = opts.whereVal ?? ''; }
+  if (opts.order) { p.order = opts.order; if (opts.dir) p.dir = opts.dir; }
+  return getData(p);
+}
