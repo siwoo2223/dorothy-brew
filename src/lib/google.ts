@@ -512,3 +512,17 @@ export async function downloadDriveFileBase64(fileId: string): Promise<string> {
   await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
   return b64;
 }
+
+/**
+ * Downloads a Drive file to a temp path and returns its local URI (caller deletes it when done).
+ * Used to transcribe a Drive recording on-device without keeping it on the phone.
+ */
+export async function downloadDriveFileToTemp(fileId: string, ext = 'm4a'): Promise<string> {
+  const dest = `${FileSystem.cacheDirectory}drive-rec.${ext}`;
+  const dl = (t: string) =>
+    FileSystem.downloadAsync(`${DRIVE}/files/${fileId}?alt=media`, dest, { headers: { Authorization: `Bearer ${t}` } });
+  let r = await dl(await tokenForEmail(''));
+  if (r.status === 401) r = await dl(await freshToken('', true));
+  if (r.status !== 200) throw new Error(`드라이브 다운로드 오류 ${r.status}`);
+  return dest;
+}

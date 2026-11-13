@@ -7,6 +7,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import * as gemini from './gemini';
 import * as google from './google';
+import * as inbox from './inbox';
+import * as voice from './voice';
 
 const SAF = FileSystem.StorageAccessFramework;
 const DRIVE_FOLDER = '도로시 통화녹음';
@@ -110,6 +112,27 @@ function mimeOf(name: string): string {
   return AUDIO_EXT[ext] ?? 'application/octet-stream';
 }
 
+/**
+ * Summarizes one LOCAL recording. First transcribes it on-device (the phone decodes m4a/amr that
+ * Gemini can't read directly) and summarizes that text; if transcription yields nothing usable,
+ * falls back to sending the audio straight to Gemini (works for mp3/wav/etc.).
+ */
+/** Transcribes a local audio file on-device and summarizes the text. Throws if nothing usable. */
+async function summarizeByTranscript(uri: string): Promise<string> {
+  const info = await inbox.audioInfo(uri);
+  const transcript = await voice.transcribeAudioFile(uri, { sampleRate: info.sampleRate, channels: info.channels });
+  if (!transcript || transcript.trim().length <= 10) throw new Error('전사 결과가 비었어요.');
+  return gemini.summarizeCallText(transcript);
+}
+
+async function summarizeLocalRecording(uri: string, base64: string, name: string): Promise<string> {
+  try {
+    return await summarizeByTranscript(uri);
+  } catch {
+    return gemini.summarizeCallAudio(base64, mimeOf(name));
+  }
+}
+
 async function loadDone(): Promise<Set<string>> {
   try {
     const raw = await AsyncStorage.getItem(KEYS.done);
@@ -182,7 +205,7 @@ export async function backupNow(onProgress?: (p: Progress) => void): Promise<Bac
       // A summary failure never blocks the backup.
       if (wantSummary && size > 0 && size <= SUMMARIZE_MAX_BYTES) {
         try {
-          const summary = await gemini.summarizeCallAudio(base64, mimeOf(name));
+          const summary = await summarizeLocalRecording(uri, base64, name);
           await appendSummary({ id: `${Date.now()}-${i}`, name, at: new Date().toISOString(), summary });
           res.summarized++;
         } catch {
@@ -261,9 +284,19 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
     if (done.has(f.id)) { res.skipped++; continue; }
     if (f.size > SUMMARIZE_MAX_BYTES) { res.skipped++; done.add(f.id); continue; }
     onProgress?.({ index: i + 1, total: files.length, name: f.name });
+    let tmp: string | null = null;
     try {
-      const base64 = await google.downloadDriveFileBase64(f.id);
-      const summary = await gemini.summarizeCallAudio(base64, f.mimeType || mimeOf(f.name));
+      // Download from Drive to a temp file, transcribe on-device (handles m4a), summarize the text.
+      // The temp file is deleted right after — the recording is never kept on the phone.
+      const ext = f.name.toLowerCase().includes('.') ? f.name.toLowerCase().split('.').pop()! : 'm4a';
+      tmp = await google.downloadDriveFileToTemp(f.id, ext);
+      let summary: string;
+      try {
+        summary = await summarizeByTranscript(tmp);
+      } catch {
+        const base64 = await FileSystem.readAsStringAsync(tmp, { encoding: FileSystem.EncodingType.Base64 });
+        summary = await gemini.summarizeCallAudio(base64, f.mimeType || mimeOf(f.name));
+      }
       await appendSummary({ id: `drive-${f.id}`, name: f.name, at: new Date().toISOString(), summary });
       done.add(f.id);
       res.summarized++;
@@ -275,6 +308,8 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
       // Don't churn through thousands of recordings when they all fail the same way (bad format,
       // rate limit, wrong key) — stop early and surface the reason so the user can fix it.
       if (consecutiveFails >= 8 && res.summarized === 0) { res.stopped = true; break; }
+    } finally {
+      if (tmp) await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
     }
   }
   await saveDriveSummarized(done);
