@@ -117,15 +117,20 @@ function mimeOf(name: string): string {
  * Gemini can't read directly) and summarizes that text; if transcription yields nothing usable,
  * falls back to sending the audio straight to Gemini (works for mp3/wav/etc.).
  */
+/** Transcribes a local audio file on-device and summarizes the text. Throws if nothing usable. */
+async function summarizeByTranscript(uri: string): Promise<string> {
+  const info = await inbox.audioInfo(uri);
+  const transcript = await voice.transcribeAudioFile(uri, { sampleRate: info.sampleRate, channels: info.channels });
+  if (!transcript || transcript.trim().length <= 10) throw new Error('전사 결과가 비었어요.');
+  return gemini.summarizeCallText(transcript);
+}
+
 async function summarizeLocalRecording(uri: string, base64: string, name: string): Promise<string> {
   try {
-    const info = await inbox.audioInfo(uri);
-    const transcript = await voice.transcribeAudioFile(uri, { sampleRate: info.sampleRate, channels: info.channels });
-    if (transcript && transcript.trim().length > 10) return await gemini.summarizeCallText(transcript);
+    return await summarizeByTranscript(uri);
   } catch {
-    // transcription or text summary failed — try the audio path below
+    return gemini.summarizeCallAudio(base64, mimeOf(name));
   }
-  return gemini.summarizeCallAudio(base64, mimeOf(name));
 }
 
 async function loadDone(): Promise<Set<string>> {
@@ -279,9 +284,19 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
     if (done.has(f.id)) { res.skipped++; continue; }
     if (f.size > SUMMARIZE_MAX_BYTES) { res.skipped++; done.add(f.id); continue; }
     onProgress?.({ index: i + 1, total: files.length, name: f.name });
+    let tmp: string | null = null;
     try {
-      const base64 = await google.downloadDriveFileBase64(f.id);
-      const summary = await gemini.summarizeCallAudio(base64, f.mimeType || mimeOf(f.name));
+      // Download from Drive to a temp file, transcribe on-device (handles m4a), summarize the text.
+      // The temp file is deleted right after — the recording is never kept on the phone.
+      const ext = f.name.toLowerCase().includes('.') ? f.name.toLowerCase().split('.').pop()! : 'm4a';
+      tmp = await google.downloadDriveFileToTemp(f.id, ext);
+      let summary: string;
+      try {
+        summary = await summarizeByTranscript(tmp);
+      } catch {
+        const base64 = await FileSystem.readAsStringAsync(tmp, { encoding: FileSystem.EncodingType.Base64 });
+        summary = await gemini.summarizeCallAudio(base64, f.mimeType || mimeOf(f.name));
+      }
       await appendSummary({ id: `drive-${f.id}`, name: f.name, at: new Date().toISOString(), summary });
       done.add(f.id);
       res.summarized++;
@@ -293,6 +308,8 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
       // Don't churn through thousands of recordings when they all fail the same way (bad format,
       // rate limit, wrong key) — stop early and surface the reason so the user can fix it.
       if (consecutiveFails >= 8 && res.summarized === 0) { res.stopped = true; break; }
+    } finally {
+      if (tmp) await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
     }
   }
   await saveDriveSummarized(done);
