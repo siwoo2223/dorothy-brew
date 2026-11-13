@@ -228,7 +228,7 @@ export async function autoBackupIfDue(): Promise<void> {
 }
 
 export type DriveSummaryProgress = { index: number; total: number; name: string };
-export type DriveSummaryResult = { total: number; summarized: number; skipped: number; failed: number };
+export type DriveSummaryResult = { total: number; summarized: number; skipped: number; failed: number; lastError?: string; stopped?: boolean };
 
 async function loadDriveSummarized(): Promise<Set<string>> {
   try {
@@ -255,6 +255,7 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
   const done = await loadDriveSummarized();
   const res: DriveSummaryResult = { total: files.length, summarized: 0, skipped: 0, failed: 0 };
 
+  let consecutiveFails = 0;
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
     if (done.has(f.id)) { res.skipped++; continue; }
@@ -266,8 +267,14 @@ export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress
       await appendSummary({ id: `drive-${f.id}`, name: f.name, at: new Date().toISOString(), summary });
       done.add(f.id);
       res.summarized++;
-    } catch {
+      consecutiveFails = 0;
+    } catch (e) {
       res.failed++;
+      res.lastError = e instanceof Error ? e.message : String(e);
+      consecutiveFails++;
+      // Don't churn through thousands of recordings when they all fail the same way (bad format,
+      // rate limit, wrong key) — stop early and surface the reason so the user can fix it.
+      if (consecutiveFails >= 8 && res.summarized === 0) { res.stopped = true; break; }
     }
   }
   await saveDriveSummarized(done);

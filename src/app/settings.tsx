@@ -45,13 +45,15 @@ export default function Settings() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <UpdateCard />
+
+      <Section icon="🙂" title="나에 대해" />
       {loaded && (
         // Re-mount when the stored profile changes (e.g. after an import) so the form never saves stale text over it.
         <ProfileCard key={`${state.profile.name}|${state.profile.about}`} />
       )}
 
-      <UpdateCard />
-
+      <Section icon="🧠" title="도로시 두뇌" />
       <Card>
         <Title>Claude API 키</Title>
         <Body muted>{state.apiKey ? `저장됨 (…${state.apiKey.slice(-4)})` : '아직 없어요. Anthropic 콘솔에서 발급받을 수 있어요.'}</Body>
@@ -60,35 +62,27 @@ export default function Settings() {
         <Button label="API 키 발급받기" variant="ghost" onPress={() => Linking.openURL('https://platform.claude.com/settings/keys')} />
         <WorkspaceField />
       </Card>
-
       <ModelCard />
 
+      <Section icon="🎙️" title="음성" />
       <VoiceCard />
-
       <VoicePickerCard />
-
       <VoiceMatchCard />
 
-      <GoogleCard />
-
-      <SheetsCard />
-
-      <CompanyCard />
-
-      <WeeklyReportCard />
-
+      <Section icon="📱" title="내 폰 연결 (메시지·통화·녹음)" />
       <InboxCard />
-
-      <ProactiveCard />
-
       <CallCard />
-
       <RecordingBackupCard />
 
-      <ImportCard />
+      <Section icon="🏢" title="회사·구글" />
+      <GoogleCard />
+      <SheetsCard />
+      <CompanyCard />
+      <WeeklyReportCard />
 
+      <Section icon="🔔" title="알림·자동 챙김" />
       <Card>
-        <Title>아침 브리핑 알림</Title>
+        <Title>☀️ 아침 브리핑 알림</Title>
         <Body muted>매일 정해진 시간에 오늘의 브리핑을 확인하라고 알려 드려요.</Body>
         <View style={styles.hours}>
           {[null, ...HOURS].map((h) => {
@@ -105,9 +99,12 @@ export default function Settings() {
           })}
         </View>
       </Card>
+      <ProactiveCard />
 
+      <Section icon="📂" title="데이터" />
+      <ImportCard />
       <Card>
-        <Title>데이터</Title>
+        <Title>내 데이터</Title>
         <Body muted>
           기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
         </Body>
@@ -118,6 +115,17 @@ export default function Settings() {
         />
       </Card>
     </ScrollView>
+  );
+}
+
+/** A small, cute category header that groups the setting cards below it. */
+function Section({ icon, title }: { icon: string; title: string }) {
+  const t = useTheme();
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionIcon}>{icon}</Text>
+      <Text style={[styles.sectionText, { color: t.subtext }]}>{title}</Text>
+    </View>
   );
 }
 
@@ -207,6 +215,9 @@ function ProfileCard() {
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12 },
+  section: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 20, marginBottom: 0, paddingHorizontal: 6 },
+  sectionIcon: { fontSize: 16 },
+  sectionText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.6 },
   hours: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   hour: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8 },
 });
