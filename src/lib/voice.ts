@@ -236,7 +236,16 @@ export function useVoiceInput(
           setState('idle');
           return;
         }
-        setError(event.error === 'not-allowed' ? '마이크와 음성 인식 권한을 허용해 주세요.' : `음성 인식 오류: ${event.message || event.error}`);
+        const permission = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+        // In standby (quiet) the loop silently restarts on every ending, so a transient recognizer
+        // glitch (busy/client/network/server) must NOT flash a red error — only a hard permission
+        // problem is worth surfacing. A phone that keeps failing is still caught by the standby
+        // failure counter, which turns standby off with a clear message after a few tries.
+        if (session.current.quiet && !permission) {
+          setState('idle');
+          return;
+        }
+        setError(permission ? '마이크와 음성 인식 권한을 허용해 주세요.' : `음성 인식 오류: ${event.message || event.error}`);
         setState('error');
       }),
     ];
