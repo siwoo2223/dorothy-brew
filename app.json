@@ -72,6 +72,13 @@
           "photosPermission": "영수증·입고표·화면 캡처 같은 사진을 도로시에게 보여주려면 사진 접근이 필요해요.",
           "cameraPermission": "서류나 화물을 바로 찍어 도로시에게 보여주려면 카메라가 필요해요."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "카메라로 보여주며 도로시와 대화하려면 카메라가 필요해요.",
+          "recordAudioAndroid": false
+        }
       ]
     ]
   }
