@@ -65,6 +65,13 @@
         {
           "locationWhenInUsePermission": "지금 계신 곳 기준으로 날씨와 이동을 챙겨드리려면 위치가 필요해요. 위치는 휴대폰 밖으로 저장되지 않아요."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "영수증·입고표·화면 캡처 같은 사진을 도로시에게 보여주려면 사진 접근이 필요해요.",
+          "cameraPermission": "서류나 화물을 바로 찍어 도로시에게 보여주려면 카메라가 필요해요."
+        }
       ]
     ]
   }

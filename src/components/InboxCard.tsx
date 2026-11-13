@@ -46,7 +46,7 @@ export function InboxCard() {
   }, []);
 
   const importExports = async () => {
-    const picked = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'application/octet-stream'], multiple: true, copyToCacheDirectory: true });
+    const picked = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'application/json', 'application/octet-stream'], multiple: true, copyToCacheDirectory: true });
     if (picked.canceled) return;
     setImporting(true);
     try {
@@ -118,7 +118,11 @@ export function InboxCard() {
 
       <Body>💬 예전 대화 가져오기{history ? ` · 저장된 예전 메시지 ${history}개` : ''}</Body>
       <Body muted>
-        카카오톡 채팅방 → 오른쪽 위 ≡ → ⚙️ 설정 → &quot;대화 내용 내보내기&quot; → &quot;텍스트만 보내기&quot; → 내 휴대폰(내 파일)에 저장한 뒤, 아래 버튼으로 그 파일들을 골라 주세요. 여러 개를 한 번에 고를 수 있어요. WhatsApp &quot;채팅 내보내기&quot; 파일도 돼요.
+        과거 대화는 각 앱의 &quot;내보내기&quot; 파일로 가져와요. 여러 개 한 번에 고를 수 있어요.{'\n'}
+        • 카카오톡: 채팅방 → ≡ → ⚙️ → &quot;대화 내용 내보내기&quot; → &quot;텍스트만 보내기&quot; → 내 파일에 저장{'\n'}
+        • 텔레그램: PC(데스크톱) 앱 → 채팅 → ⋮ → &quot;Export chat history&quot; → 형식 &quot;JSON&quot; → 나온 result.json{'\n'}
+        • WhatsApp: 채팅 → ⋮ → &quot;더보기&quot; → &quot;채팅 내보내기&quot;{'\n'}
+        • 바이버: 과거 대화를 파일로 내보내는 기능이 없어요. 대신 위 &quot;알림 읽기&quot;를 켜두면 앞으로 오는 바이버 메시지는 자동으로 모아요.
       </Body>
       <Button label={importing ? '가져오는 중…' : '대화 파일 가져오기'} variant="ghost" onPress={importExports} disabled={importing} />
 

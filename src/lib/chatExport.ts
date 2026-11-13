@@ -1,10 +1,41 @@
 import type { InboxMessage } from './inbox';
 
+/** Telegram Desktop "Export chat history" in JSON format: { name, messages: [{type,date,from,text}] }. */
+function parseTelegramJson(data: Record<string, unknown>, fileName: string): { app: string; conversation: string; messages: InboxMessage[] } {
+  const app = '텔레그램';
+  const conversation = String(data.name || fileName.replace(/\.json$/i, '') || '텔레그램 대화');
+  const textOf = (t: unknown): string => {
+    if (Array.isArray(t)) return t.map((p) => (typeof p === 'string' ? p : String((p as { text?: unknown })?.text ?? ''))).join('');
+    return typeof t === 'string' ? t : '';
+  };
+  const messages: InboxMessage[] = [];
+  const list = Array.isArray(data.messages) ? (data.messages as Record<string, unknown>[]) : [];
+  for (const m of list) {
+    if (m.type !== 'message') continue; // skip service/join/call events
+    const body = textOf(m.text ?? m.text_entities);
+    if (!body.trim()) continue;
+    const t = m.date_unixtime ? Number(m.date_unixtime) * 1000 : m.date ? new Date(String(m.date)).getTime() : NaN;
+    if (Number.isNaN(t)) continue;
+    messages.push({ time: t, app, conversation, sender: String(m.from ?? '').trim(), text: body });
+  }
+  return { app, conversation, messages };
+}
+
 /**
- * Parses chat export files: KakaoTalk "대화 내용 내보내기" (mobile and PC formats) and WhatsApp
- * "Export chat". Lines that don't start a new message continue the previous one.
+ * Parses chat export files: KakaoTalk "대화 내용 내보내기" (mobile and PC formats), WhatsApp
+ * "Export chat", and Telegram Desktop JSON export. Lines that don't start a new message continue the previous one.
  */
 export function parseChatExport(text: string, fileName = ''): { app: string; conversation: string; messages: InboxMessage[] } {
+  // Telegram export is JSON; detect and parse it before the line-based formats.
+  const head = text.trimStart();
+  if (head.startsWith('{')) {
+    try {
+      const data = JSON.parse(text) as Record<string, unknown>;
+      if (Array.isArray(data?.messages)) return parseTelegramJson(data, fileName);
+    } catch {
+      // not valid JSON — fall through to the text parsers
+    }
+  }
   const lines = text.replace(/\r/g, '').split('\n');
   const title = /^(.+?)(?: \d+)? 님과 카카오톡 대화/.exec(lines[0] ?? '')?.[1];
   const conversation = title ?? fileName.replace(/\.(txt|csv)$/i, '').replace(/^KakaoTalk_(Chat_)?/i, '');
