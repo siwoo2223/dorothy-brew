@@ -46,6 +46,10 @@ class DorothyInboxModule : Module() {
 
     Function("clearSentReplies") { SentStore.clear(context) }
 
+    Function("setReplyDebug") { on: Boolean -> SentStore.setDebug(context, on) }
+    Function("isReplyDebug") { SentStore.debugEnabled(context) }
+    AsyncFunction("getReplyDebug") { limit: Int -> SentStore.readDebug(context, limit) }
+
     // Sideloaded apps on Android 13+ must first be allowed "restricted settings" from their App info page.
     Function("openAppDetails") {
       context.startActivity(

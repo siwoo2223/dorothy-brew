@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { Body, Button, Card, Title } from './ui';
 import {
   clearSentReplies,
+  getReplyDebug,
   getSentReplies,
+  isReplyDebug,
   openAccessibilitySettings,
   openAppDetails,
+  replyDebugSupported,
   replyWatchGranted,
   replyWatchSupported,
+  setReplyDebug,
+  type ReplyDebugEntry,
   type SentReply,
 } from '../lib/inbox';
 import { useTheme } from '../lib/theme';
@@ -22,12 +27,18 @@ export function ReplyWatchCard() {
   const t = useTheme();
   const [granted, setGranted] = useState(false);
   const [recent, setRecent] = useState<SentReply[]>([]);
+  const [debug, setDebug] = useState(false);
+  const [debugLog, setDebugLog] = useState<ReplyDebugEntry[]>([]);
 
   const refresh = useCallback(async () => {
     const g = replyWatchGranted();
     const list = await getSentReplies(Date.now() - 7 * 24 * 60 * 60 * 1000, 8).catch(() => []);
+    const d = isReplyDebug();
+    const dlog = d ? await getReplyDebug(60).catch(() => []) : [];
     setGranted(g);
     setRecent(list);
+    setDebug(d);
+    setDebugLog(dlog);
   }, []);
 
   useEffect(() => {
@@ -76,6 +87,40 @@ export function ReplyWatchCard() {
               ))
           )}
           {recent.length > 0 && <Button label="감지 기록 지우기" variant="ghost" onPress={async () => { clearSentReplies?.(); await refresh(); }} />}
+
+          {replyDebugSupported() && (
+            <>
+              <View style={styles.hr} />
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Body>🔧 감지 진단 (안 될 때만)</Body>
+                  <Body muted>켜고 카카오톡에서 답장을 한 번 보낸 뒤 여기로 돌아와, 아래에 뜨는 목록을 캡처해 보내주세요. 그걸로 폰에 맞게 맞춰요.</Body>
+                </View>
+                <Switch
+                  value={debug}
+                  onValueChange={async (on) => {
+                    setReplyDebug?.(on);
+                    await refresh();
+                  }}
+                  trackColor={{ true: t.accent }}
+                />
+              </View>
+              {debug && (
+                debugLog.length === 0 ? (
+                  <Body muted>아직 신호 없음. 카톡에서 답장 보내고 돌아와서 이 화면을 다시 열어 주세요.</Body>
+                ) : (
+                  debugLog
+                    .slice()
+                    .reverse()
+                    .map((d, i) => (
+                      <Text key={`${d.time}-${i}`} style={{ color: t.subtext, fontSize: 11, fontFamily: 'monospace' }}>
+                        {new Date(d.time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} [{d.kind}] {d.text}
+                      </Text>
+                    ))
+                )
+              )}
+            </>
+          )}
         </>
       )}
     </Card>
@@ -84,4 +129,5 @@ export function ReplyWatchCard() {
 
 const styles = StyleSheet.create({
   hr: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.25)', marginVertical: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 });
