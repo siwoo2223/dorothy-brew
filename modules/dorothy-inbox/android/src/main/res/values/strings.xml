@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="dorothy_reply_desc">카카오톡 등에서 내가 보낸 답장을 알아내 회신 대기 목록을 자동으로 정리합니다. 메시지 내용은 저장하지 않고, 메신저 앱에서만 동작합니다.</string>
+</resources>
