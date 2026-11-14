@@ -236,10 +236,10 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 14 },
-  hello: { fontSize: 26, fontWeight: '800' },
+  hello: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: -2 },
   stats: { flexDirection: 'row', gap: 10 },
-  stat: { flex: 1, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 14, alignItems: 'center' },
-  statValue: { fontSize: 24, fontWeight: '800' },
+  stat: { flex: 1, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center', gap: 2 },
+  statValue: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
   talkRow: { flexDirection: 'row', gap: 10 },
   callRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   callText: { fontSize: 15, lineHeight: 22 },
