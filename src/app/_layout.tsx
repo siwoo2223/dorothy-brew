@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router/js-tabs';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -35,9 +35,10 @@ export default function RootLayout() {
           <Tabs
             screenOptions={{
               headerStyle: { backgroundColor: theme.bg },
-              headerTitleStyle: { color: theme.text, fontWeight: '700' },
+              headerTitleStyle: { color: theme.text, fontWeight: '800', fontSize: 18, letterSpacing: -0.3 },
               headerShadowVisible: false,
-              tabBarStyle: { backgroundColor: theme.card, borderTopColor: theme.border },
+              tabBarStyle: { backgroundColor: theme.card, borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth, height: 62, paddingTop: 6, paddingBottom: 8 },
+              tabBarLabelStyle: { fontSize: 11, fontWeight: '700', letterSpacing: -0.2 },
               tabBarActiveTintColor: theme.accent,
               tabBarInactiveTintColor: theme.subtext,
               // Hide the bottom tab bar while typing, so the keyboard doesn't cover the chat input.

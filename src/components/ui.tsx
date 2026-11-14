@@ -1,11 +1,11 @@
 import { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../lib/theme';
 
 export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
   const t = useTheme();
-  return <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }, style]}>{children}</View>;
+  return <View style={[styles.card, cardShadow, { backgroundColor: t.card, borderColor: t.border }, style]}>{children}</View>;
 }
 
 export function Title({ children }: { children: ReactNode }) {
@@ -30,7 +30,7 @@ export function Button({
   variant?: 'primary' | 'ghost' | 'danger';
 }) {
   const t = useTheme();
-  const bg = variant === 'primary' ? t.accent : 'transparent';
+  const bg = variant === 'primary' ? t.accent : variant === 'danger' ? t.dangerSoft : t.accentSoft;
   const fg = variant === 'primary' ? t.accentText : variant === 'danger' ? t.danger : t.accent;
   return (
     <Pressable
@@ -38,7 +38,8 @@ export function Button({
       disabled={disabled}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: bg, borderColor: variant === 'primary' ? bg : t.border, opacity: disabled ? 0.4 : pressed ? 0.7 : 1 },
+        variant === 'primary' && buttonShadow,
+        { backgroundColor: bg, opacity: disabled ? 0.45 : pressed ? 0.82 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] },
       ]}
     >
       <Text style={[styles.buttonText, { color: fg }]}>{label}</Text>
@@ -52,16 +53,29 @@ export function Input(props: TextInputProps) {
     <TextInput
       placeholderTextColor={t.subtext}
       {...props}
-      style={[styles.input, { color: t.text, backgroundColor: t.card, borderColor: t.border }, props.style]}
+      style={[styles.input, { color: t.text, backgroundColor: t.bg, borderColor: t.border }, props.style]}
     />
   );
 }
 
+// Soft, warm shadows — light on Android (elevation) so dark cards don't halo.
+const cardShadow = Platform.select({
+  ios: { shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
+  android: { elevation: 1 },
+  default: {},
+}) as ViewStyle;
+
+const buttonShadow = Platform.select({
+  ios: { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  android: { elevation: 2 },
+  default: {},
+}) as ViewStyle;
+
 const styles = StyleSheet.create({
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 16, gap: 8 },
-  title: { fontSize: 17, fontWeight: '700' },
+  card: { borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 18, gap: 10 },
+  title: { fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
   body: { fontSize: 15, lineHeight: 22 },
-  button: { borderRadius: 12, borderWidth: 1, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center' },
-  buttonText: { fontSize: 15, fontWeight: '600' },
-  input: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+  button: { borderRadius: 16, paddingVertical: 13, paddingHorizontal: 18, alignItems: 'center' },
+  buttonText: { fontSize: 15, fontWeight: '700', letterSpacing: -0.1 },
+  input: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 15, paddingVertical: 13, fontSize: 15 },
 });
