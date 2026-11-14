@@ -1,6 +1,6 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Title } from '../components/ui';
 import { briefing, describeError } from '../lib/assistant';
@@ -124,10 +124,32 @@ export default function Today() {
         </Card>
       )}
 
+      {/* ── 허브: 큰 말하기 버튼 + 바로가기 타일 ── */}
+      {voiceInputAvailable() && (
+        <Pressable
+          onPress={() => router.navigate({ pathname: '/chat', params: { voice: '1' } })}
+          disabled={!state.apiKey}
+          style={({ pressed }) => [styles.bigTalk, { backgroundColor: t.accent, opacity: !state.apiKey ? 0.5 : pressed ? 0.88 : 1 }]}
+        >
+          <Text style={{ fontSize: 30 }}>🎙️</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.bigTalkTitle, { color: t.accentText }]}>말하기</Text>
+            <Text style={{ color: t.accentText, opacity: 0.9, fontSize: 13 }}>&quot;도로시야&quot;라고 부르거나 눌러서</Text>
+          </View>
+        </Pressable>
+      )}
+      <View style={styles.tileGrid}>
+        <Tile icon="📸" label="카메라" sub="보여주며 묻기" onPress={() => router.navigate('/camera')} disabled={!state.apiKey} />
+        <Tile icon="💬" label="채팅" sub="글로 말 걸기" onPress={() => router.navigate('/chat')} />
+        <Tile icon="☀️" label="브리핑" sub="하루 정리" onPress={runBriefing} disabled={loading || !state.apiKey} />
+        <Tile icon="🌙" label="내일 할 일" sub="미리 정리" onPress={() => router.navigate({ pathname: '/chat', params: { plan: '1' } })} disabled={!state.apiKey} />
+      </View>
+
+      {/* ── 피드: 오늘 챙길 것 ── */}
       <View style={styles.stats}>
         <Stat label="기한 지남" value={overdue.length} color={overdue.length ? t.danger : t.subtext} />
         <Stat label="오늘" value={today.length} color={t.accent} />
-        <Stat label="언젠가" value={undated.length} color={t.subtext} />
+        <Stat label="회신 대기" value={openFollowups.length} color={t.subtext} />
       </View>
 
       {events && (
@@ -197,30 +219,30 @@ export default function Today() {
         </Card>
       )}
 
-      <Card>
-        <Title>오늘의 브리핑</Title>
-        {loading ? <ActivityIndicator /> : brief ? <Body>{brief}</Body> : <Body muted>밤사이 온 메시지·문자·부재중 전화와 오늘 일정, 회사 현황, 할 일, 날씨를 모아 하루를 정리해 드려요.</Body>}
-        <Button label={brief ? '다시 브리핑 받기' : '브리핑 받기'} onPress={runBriefing} disabled={loading || !state.apiKey} />
-      </Card>
-
-      <Card>
-        <Title>🌙 내일 할 일</Title>
-        <Body muted>오늘 받은 카톡·문자·메신저, 통화, 일정을 모아 내일 해야 할 일을 정리해요. 메시지와 통화는 설정 → 메시지·통화에서 먼저 연결해 주세요.</Body>
-        <Button label="내일 할 일 정리하기" onPress={() => router.navigate({ pathname: '/chat', params: { plan: '1' } })} />
-      </Card>
-
-      <View style={styles.talkRow}>
-        <View style={{ flex: 1 }}>
-          <Button label="💬 글로 말 걸기" variant="ghost" onPress={() => router.navigate('/chat')} />
-        </View>
-        {voiceInputAvailable() && (
-          <View style={{ flex: 1 }}>
-            <Button label="🎙️ 말로 하기" onPress={() => router.navigate({ pathname: '/chat', params: { voice: '1' } })} disabled={!state.apiKey} />
-          </View>
-        )}
-      </View>
-      <Button label="📸 카메라로 보여주며 묻기" onPress={() => router.navigate('/camera')} disabled={!state.apiKey} />
+      {(loading || brief) && (
+        <Card>
+          <Title>☀️ 오늘의 브리핑</Title>
+          {loading ? <ActivityIndicator /> : <Body>{brief}</Body>}
+          {brief && !loading && <Button label="다시 브리핑 받기" variant="ghost" onPress={runBriefing} disabled={!state.apiKey} />}
+        </Card>
+      )}
     </ScrollView>
+  );
+}
+
+/** A quick-action tile in the home hub (icon + label + hint). */
+function Tile({ icon, label, sub, onPress, disabled }: { icon: string; label: string; sub: string; onPress: () => void; disabled?: boolean }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [styles.tile, { backgroundColor: t.card, borderColor: t.border, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 }]}
+    >
+      <Text style={{ fontSize: 24 }}>{icon}</Text>
+      <Text style={[styles.tileLabel, { color: t.text }]}>{label}</Text>
+      <Text style={{ color: t.subtext, fontSize: 12 }}>{sub}</Text>
+    </Pressable>
   );
 }
 
@@ -240,7 +262,11 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', gap: 10 },
   stat: { flex: 1, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center', gap: 2 },
   statValue: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  talkRow: { flexDirection: 'row', gap: 10 },
+  bigTalk: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18 },
+  bigTalkTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tile: { flexGrow: 1, flexBasis: '46%', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 15, gap: 3 },
+  tileLabel: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2, marginTop: 2 },
   callRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   callText: { fontSize: 15, lineHeight: 22 },
 });
