@@ -26,6 +26,8 @@ type NativeInbox = {
   setReplyDebug(on: boolean): void;
   isReplyDebug(): boolean;
   getReplyDebug(limit: number): Promise<ReplyDebugEntry[]>;
+  setWatchKeywords(list: string[]): void;
+  getWatchKeywords(): string[];
   getMessages(sinceMs: number, limit: number): Promise<InboxMessage[]>;
   messageCount(): number;
   historyCount(): number;
@@ -58,6 +60,11 @@ export const isReplyDebug = () => native?.isReplyDebug?.() ?? false;
 export async function getReplyDebug(limit = 60): Promise<ReplyDebugEntry[]> {
   return native?.getReplyDebug ? native.getReplyDebug(limit) : [];
 }
+
+/** Real-time keyword alerts: words that, when they arrive in a messenger message, fire a notification. */
+export const keywordAlertSupported = () => !!native && typeof native.setWatchKeywords === 'function';
+export const setWatchKeywords = (list: string[]) => native?.setWatchKeywords?.(list);
+export const getWatchKeywords = (): string[] => native?.getWatchKeywords?.() ?? [];
 export const messageCount = () => native?.messageCount() ?? 0;
 export const historyCount = () => native?.historyCount() ?? 0;
 export const clearMessages = () => native?.clearMessages();

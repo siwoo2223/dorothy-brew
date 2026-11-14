@@ -46,6 +46,10 @@ class DorothyInboxModule : Module() {
 
     Function("clearSentReplies") { SentStore.clear(context) }
 
+    // --- Real-time keyword alerts ---
+    Function("setWatchKeywords") { list: List<String> -> KeywordAlert.setKeywords(context, list) }
+    Function("getWatchKeywords") { KeywordAlert.getKeywords(context) }
+
     Function("setReplyDebug") { on: Boolean -> SentStore.setDebug(context, on) }
     Function("isReplyDebug") { SentStore.debugEnabled(context) }
     AsyncFunction("getReplyDebug") { limit: Int -> SentStore.readDebug(context, limit) }

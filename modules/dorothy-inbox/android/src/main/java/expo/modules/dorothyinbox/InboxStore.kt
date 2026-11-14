@@ -87,6 +87,11 @@ object InboxStore {
     while (seen.size > 500) seen.remove(seen.first())
     f.appendText(fresh.joinToString("") { it.toString() + "\n" })
     if (f.length() > MAX_BYTES) prune(f)
+
+    // Real-time keyword alerts on each genuinely new message.
+    for (o in fresh) {
+      KeywordAlert.check(context, o.optString("conversation"), o.optString("sender"), o.optString("text"), o.optString("app"))
+    }
   }
 
   // Without per-message times (exactTime false) an updated notification gets a new post time, so the key leaves it out.
