@@ -311,6 +311,14 @@ export default function Chat() {
     sendRef.current = send;
   });
 
+  // Quick-action chips above the composer (matches the home hub): one tap to the most-used asks.
+  const QUICK: { label: string; go: () => void }[] = [
+    { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
+    { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
+    { label: '🏢 회사 현황', go: () => send('회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 수지를 그래프로 보여줘.') },
+    { label: '📸 카메라', go: () => router.push('/camera') },
+  ];
+
   return (
     // automaticOffset measures where the screen sits (below the header), so no hand-tuned offset is needed.
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" automaticOffset>
@@ -407,6 +415,20 @@ export default function Chat() {
           </Pressable>
         </View>
       )}
+      {!image && !listening && (
+        <View style={[styles.quickRow, { backgroundColor: t.bg }]}>
+          {QUICK.map((q) => (
+            <Pressable
+              key={q.label}
+              onPress={() => { tap(); q.go(); }}
+              disabled={busy}
+              style={[styles.quickChip, { borderColor: t.border, backgroundColor: t.card, opacity: busy ? 0.5 : 1 }]}
+            >
+              <Text style={{ color: t.text, fontSize: 13 }}>{q.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
         <Pressable
           onPress={() => { tap(); chooseImage(); }}
@@ -463,6 +485,8 @@ const styles = StyleSheet.create({
   imagePreview: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   thumb: { width: 44, height: 44, borderRadius: 8 },
   voiceBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 10, paddingTop: 8 },
+  quickChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
   modePill: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   clear: { position: 'absolute', top: 6, right: 12 },
 });
