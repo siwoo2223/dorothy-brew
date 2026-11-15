@@ -46,7 +46,7 @@ export default function RootLayout() {
               sceneStyle: { backgroundColor: theme.bg },
             }}
           >
-            <Tabs.Screen name="index" options={{ title: '오늘', tabBarIcon: icon('☀️') }} />
+            <Tabs.Screen name="index" options={{ title: '오늘', headerShown: false, tabBarIcon: icon('🏠') }} />
             <Tabs.Screen name="chat" options={{ title: '도로시', tabBarIcon: icon('💬') }} />
             <Tabs.Screen name="tasks" options={{ title: '할 일', tabBarIcon: icon('✅') }} />
             <Tabs.Screen name="memory" options={{ title: '기억', tabBarIcon: icon('🧠') }} />
