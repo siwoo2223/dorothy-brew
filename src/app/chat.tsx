@@ -44,7 +44,7 @@ export default function Chat() {
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
   const router = useRouter();
-  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string }>();
+  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string; ask?: string }>();
   const canListen = voiceInputAvailable();
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
@@ -200,6 +200,15 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.company]);
 
+  // Opened with ?ask=<질문> (e.g. a dashboard shortcut): send that exact question once.
+  useEffect(() => {
+    if (!params.ask) return;
+    const text = params.ask;
+    router.setParams({ ask: undefined });
+    sendRef.current(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.ask]);
+
   // Opened with ?call=1 after a call recording was transcribed: summarize it and pull out tasks.
   useEffect(() => {
     if (!params.call) return;
@@ -322,7 +331,9 @@ export default function Chat() {
   });
 
   // Quick-action chips above the composer (matches the home hub): one tap to the most-used asks.
+  // 📝 빠른 기록: start listening right away; a short spoken memo gets auto-filed as a task/followup/memory.
   const QUICK: { label: string; go: () => void }[] = [
+    ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
     { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
