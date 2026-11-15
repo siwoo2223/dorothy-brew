@@ -331,7 +331,9 @@ export default function Chat() {
   });
 
   // Quick-action chips above the composer (matches the home hub): one tap to the most-used asks.
+  // 📝 빠른 기록: start listening right away; a short spoken memo gets auto-filed as a task/followup/memory.
   const QUICK: { label: string; go: () => void }[] = [
+    ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
     { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
