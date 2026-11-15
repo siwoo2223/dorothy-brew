@@ -1,6 +1,7 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, Title } from '../components/ui';
 import { briefing, describeError } from '../lib/assistant';
@@ -10,6 +11,7 @@ import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { autoBackupIfDue } from '../lib/recordings';
 import { checkForUpdate } from '../lib/update';
+import { CompanySummary, companySummary, Overnight, overnightCounts } from '../lib/homeSummary';
 import { voiceInputAvailable } from '../lib/voice';
 
 function greeting(hour: number) {
@@ -30,6 +32,16 @@ export default function Today() {
   const [updateBuild, setUpdateBuild] = useState<number | null>(null);
   const [autoBriefed, setAutoBriefed] = useState(false);
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [overnight, setOvernight] = useState<Overnight | null>(null);
+  const [biz, setBiz] = useState<CompanySummary | null>(null);
+  const insets = useSafeAreaInsets();
+
+  useFocusEffect(
+    useCallback(() => {
+      overnightCounts().then(setOvernight).catch(() => {});
+      companySummary().then(setBiz).catch(() => {});
+    }, []),
+  );
 
   // Opened from the morning briefing notification (/?brief=1): build the briefing right away,
   // so tapping it is enough — Dorothy already "checked the phone" overnight.
@@ -81,7 +93,6 @@ export default function Today() {
   const open = state.tasks.filter((x) => !x.done);
   const overdue = open.filter((x) => x.dueAt && new Date(x.dueAt) < now);
   const today = open.filter((x) => x.dueAt && new Date(x.dueAt) >= now && new Date(x.dueAt) <= endOfToday);
-  const undated = open.filter((x) => !x.dueAt);
   const openFollowups = (state.followups ?? []).filter((x) => !x.done);
   const missedToday = calls.filter(isMissed);
 
@@ -101,12 +112,59 @@ export default function Today() {
     }
   };
 
+  const urgent = [...overdue, ...today];
+  const timeLabel = (iso: string) => {
+    const d = new Date(iso);
+    const days = Math.round((new Date(now).setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+    if (days === 1) return '어제';
+    if (days > 1) return `${days}일 전`;
+    return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: d.getMinutes() ? '2-digit' : undefined });
+  };
+  const dotColor = (iso: string) => {
+    const due = new Date(iso).getTime();
+    if (due < now.getTime()) return t.danger;
+    if (due - now.getTime() < 2 * 3600_000) return t.warn;
+    return t.accent;
+  };
+  const briefSub = [
+    overnight ? `밤사이 카톡 ${overnight.kakao}` : null,
+    overnight ? `문자 ${overnight.sms}` : null,
+    overnight ? `부재중 ${overnight.missed}` : null,
+    events ? `오늘 일정 ${events.length}건` : `오늘 할 일 ${today.length}건`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={[styles.hello, { color: t.text }]}>
-        {greeting(now.getHours())}{state.profile.name ? `, ${state.profile.name}님` : ''}
-      </Text>
-      <Body muted>{now.toLocaleDateString('ko-KR', { dateStyle: 'full' })}</Body>
+    <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}>
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: t.subtext, fontSize: 13 }}>
+            {now.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' })}
+          </Text>
+          <Text style={[styles.hello, { color: t.text }]}>
+            {greeting(now.getHours())}{state.profile.name ? `, ${state.profile.name}님` : ''}
+          </Text>
+        </View>
+        {voiceInputAvailable() && (
+          <Pressable
+            accessibilityLabel="말하기"
+            onPress={() => router.navigate({ pathname: '/chat', params: { voice: '1' } })}
+            disabled={!state.apiKey}
+            style={({ pressed }) => [styles.iconBtn, { backgroundColor: t.card, borderColor: t.border, opacity: !state.apiKey ? 0.5 : pressed ? 0.8 : 1 }]}
+          >
+            <Text style={{ fontSize: 18 }}>🎙️</Text>
+          </Pressable>
+        )}
+        <Pressable
+          accessibilityLabel="카메라로 보여주며 묻기"
+          onPress={() => router.navigate('/camera')}
+          disabled={!state.apiKey}
+          style={({ pressed }) => [styles.iconBtn, { backgroundColor: t.card, borderColor: t.border, opacity: !state.apiKey ? 0.5 : pressed ? 0.8 : 1 }]}
+        >
+          <Text style={{ fontSize: 18 }}>📸</Text>
+        </Pressable>
+      </View>
 
       {updateBuild !== null && (
         <Card style={{ borderColor: t.accent }}>
@@ -124,38 +182,75 @@ export default function Today() {
         </Card>
       )}
 
-      {/* ── 허브: 큰 말하기 버튼 + 바로가기 타일 ── */}
-      {voiceInputAvailable() && (
-        <Pressable
-          onPress={() => router.navigate({ pathname: '/chat', params: { voice: '1' } })}
-          disabled={!state.apiKey}
-          style={({ pressed }) => [styles.bigTalk, { backgroundColor: t.accent, opacity: !state.apiKey ? 0.5 : pressed ? 0.88 : 1 }]}
-        >
-          <Text style={{ fontSize: 30 }}>🎙️</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.bigTalkTitle, { color: t.accentText }]}>말하기</Text>
-            <Text style={{ color: t.accentText, opacity: 0.9, fontSize: 13 }}>&quot;도로시야&quot;라고 부르거나 눌러서</Text>
-          </View>
-        </Pressable>
+      {/* ── 오늘의 브리핑 ── */}
+      <Pressable
+        onPress={runBriefing}
+        disabled={loading || !state.apiKey}
+        style={({ pressed }) => [styles.hero, { backgroundColor: t.accent, opacity: pressed ? 0.9 : 1 }]}
+      >
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={[styles.heroTitle, { color: t.accentText }]}>☀️ 오늘의 브리핑</Text>
+          <Text style={{ color: t.accentText, fontSize: 13, lineHeight: 19, opacity: 0.9 }}>{briefSub}</Text>
+        </View>
+        {loading ? <ActivityIndicator color={t.accentText} /> : <Text style={{ color: t.accentText, fontSize: 24 }}>→</Text>}
+      </Pressable>
+
+      {!!brief && !loading && (
+        <Card>
+          <Body>{brief}</Body>
+        </Card>
       )}
-      <View style={styles.tileGrid}>
-        <Tile icon="📸" label="카메라" sub="보여주며 묻기" onPress={() => router.navigate('/camera')} disabled={!state.apiKey} />
-        <Tile icon="💬" label="채팅" sub="글로 말 걸기" onPress={() => router.navigate('/chat')} />
-        <Tile icon="☀️" label="브리핑" sub="하루 정리" onPress={runBriefing} disabled={loading || !state.apiKey} />
-        <Tile icon="🌙" label="내일 할 일" sub="미리 정리" onPress={() => router.navigate({ pathname: '/chat', params: { plan: '1' } })} disabled={!state.apiKey} />
-      </View>
 
-      {/* ── 피드: 오늘 챙길 것 ── */}
       <View style={styles.stats}>
-        <Stat label="기한 지남" value={overdue.length} color={overdue.length ? t.danger : t.subtext} />
-        <Stat label="오늘" value={today.length} color={t.accent} />
-        <Stat label="회신 대기" value={openFollowups.length} color={t.subtext} />
+        <Stat label="기한 지남" value={overdue.length} color={overdue.length ? t.danger : t.subtext} onPress={() => router.navigate('/tasks')} />
+        <Stat label="오늘" value={today.length} color={t.accent} onPress={() => router.navigate('/tasks')} />
+        <Stat label="회신 대기" value={openFollowups.length} color={t.subtext} onPress={() => router.navigate('/tasks')} />
       </View>
 
-      {events && (
+      {/* ── 놓치지 마세요 ── */}
+      {urgent.length > 0 && (
+        <>
+          <Text style={[styles.section, { color: t.text }]}>놓치지 마세요</Text>
+          <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
+            {urgent.slice(0, 6).map((task, i) => (
+              <View key={task.id} style={[styles.listRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                <View style={[styles.dot, { backgroundColor: dotColor(task.dueAt!) }]} />
+                <Text style={[styles.listText, { color: t.text }]} numberOfLines={1}>{task.title}</Text>
+                <Text style={{ color: t.subtext, fontSize: 13 }}>{timeLabel(task.dueAt!)}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
+      {/* ── 회사 현황 ── */}
+      {biz && (
+        <>
+          <Text style={[styles.section, { color: t.text }]}>회사 현황</Text>
+          <Pressable
+            onPress={() => router.navigate({ pathname: '/chat', params: { company: '1' } })}
+            style={({ pressed }) => [styles.listCard, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
+          >
+            <View style={styles.bizRow}>
+              <Text style={{ color: t.subtext, fontSize: 14, flex: 1 }}>{biz.line}</Text>
+              {biz.badge && (
+                <View style={[styles.badge, { backgroundColor: t.accentSoft }]}>
+                  <Text style={{ color: t.accent, fontSize: 13 }}>
+                    이번 달 <Text style={{ fontWeight: '800' }}>{biz.badge}</Text>
+                  </Text>
+                </View>
+              )}
+            </View>
+            {biz.next && (
+              <Text style={[styles.bizNext, { color: t.subtext, borderTopColor: t.border }]}>다음 출항 · {biz.next}</Text>
+            )}
+          </Pressable>
+        </>
+      )}
+
+      {events && events.length > 0 && (
         <Card>
           <Title>📅 오늘 일정</Title>
-          {events.length === 0 && <Body muted>오늘은 캘린더 일정이 없어요.</Body>}
           {events.map((e) => (
             <Body key={e.id}>
               <Text style={{ color: t.accent, fontWeight: '600' }}>
@@ -163,20 +258,6 @@ export default function Today() {
               </Text>{' '}
               {e.title}
               {e.location ? <Text style={{ color: t.subtext }}> · {e.location}</Text> : null}
-            </Body>
-          ))}
-        </Card>
-      )}
-
-      {[...overdue, ...today].length > 0 && (
-        <Card>
-          <Title>놓치지 마세요</Title>
-          {[...overdue, ...today].map((task) => (
-            <Body key={task.id}>
-              {new Date(task.dueAt!) < now ? '⚠️' : '•'} {task.title}{' '}
-              <Text style={{ color: t.subtext }}>
-                {new Date(task.dueAt!).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}
-              </Text>
             </Body>
           ))}
         </Card>
@@ -218,55 +299,41 @@ export default function Today() {
           {calls.length > 8 && <Body muted>외 {calls.length - 8}건 · 도로시에게 &quot;오늘 통화 누구누구?&quot;로 물어보세요</Body>}
         </Card>
       )}
-
-      {(loading || brief) && (
-        <Card>
-          <Title>☀️ 오늘의 브리핑</Title>
-          {loading ? <ActivityIndicator /> : <Body>{brief}</Body>}
-          {brief && !loading && <Button label="다시 브리핑 받기" variant="ghost" onPress={runBriefing} disabled={!state.apiKey} />}
-        </Card>
-      )}
     </ScrollView>
   );
 }
 
-/** A quick-action tile in the home hub (icon + label + hint). */
-function Tile({ icon, label, sub, onPress, disabled }: { icon: string; label: string; sub: string; onPress: () => void; disabled?: boolean }) {
+function Stat({ label, value, color, onPress }: { label: string; value: number; color: string; onPress: () => void }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [styles.tile, { backgroundColor: t.card, borderColor: t.border, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 }]}
+      style={({ pressed }) => [styles.stat, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
     >
-      <Text style={{ fontSize: 24 }}>{icon}</Text>
-      <Text style={[styles.tileLabel, { color: t.text }]}>{label}</Text>
-      <Text style={{ color: t.subtext, fontSize: 12 }}>{sub}</Text>
+      <Text style={[styles.statValue, { color }]}>{value}</Text>
+      <Text style={{ color: t.subtext, fontSize: 13 }}>{label}</Text>
     </Pressable>
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
-  const t = useTheme();
-  return (
-    <View style={[styles.stat, { backgroundColor: t.card, borderColor: t.border }]}>
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
-      <Text style={{ color: t.subtext, fontSize: 13 }}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 14 },
-  hello: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: -2 },
-  stats: { flexDirection: 'row', gap: 10 },
-  stat: { flex: 1, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center', gap: 2 },
-  statValue: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  bigTalk: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 20, paddingVertical: 16, paddingHorizontal: 18 },
-  bigTalkTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
-  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  tile: { flexGrow: 1, flexBasis: '46%', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, padding: 15, gap: 3 },
-  tileLabel: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2, marginTop: 2 },
+  container: { paddingHorizontal: 16, paddingBottom: 24, gap: 14 },
+  header: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  hello: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5, marginTop: 2 },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, paddingVertical: 18, paddingHorizontal: 20 },
+  heroTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+  stats: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 14, alignItems: 'center', gap: 2 },
+  statValue: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  section: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2, marginTop: 4, marginBottom: -4 },
+  listCard: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 50 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  listText: { flex: 1, fontSize: 15, fontWeight: '600' },
+  bizRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
+  badge: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
+  bizNext: { fontSize: 13, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
   callRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   callText: { fontSize: 15, lineHeight: 22 },
 });
