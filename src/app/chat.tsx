@@ -29,6 +29,8 @@ const SUGGESTIONS = ['오늘 뭐부터 해야 해?', '이번 주 출항·입항 
 
 type Phase = 'off' | 'wake' | 'command' | 'busy';
 
+const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 수지를 그래프로 보여줘.';
+
 export default function Chat() {
   const t = useTheme();
   const { state, actions, getState } = useStore();
@@ -42,7 +44,7 @@ export default function Chat() {
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
   const router = useRouter();
-  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string }>();
+  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string }>();
   const canListen = voiceInputAvailable();
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
@@ -190,6 +192,14 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.plan]);
 
+  // Opened with ?company=1 (the home screen's 회사 현황 card): ask for the company summary.
+  useEffect(() => {
+    if (!params.company) return;
+    router.setParams({ company: undefined });
+    sendRef.current(COMPANY_REQUEST);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.company]);
+
   // Opened with ?call=1 after a call recording was transcribed: summarize it and pull out tasks.
   useEffect(() => {
     if (!params.call) return;
@@ -315,7 +325,7 @@ export default function Chat() {
   const QUICK: { label: string; go: () => void }[] = [
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
-    { label: '🏢 회사 현황', go: () => send('회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 수지를 그래프로 보여줘.') },
+    { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
     { label: '📸 카메라', go: () => router.push('/camera') },
   ];
 
