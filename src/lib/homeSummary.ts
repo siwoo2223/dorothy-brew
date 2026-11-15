@@ -114,3 +114,74 @@ export async function companySummary(): Promise<CompanySummary | null> {
     return null;
   }
 }
+
+/** Best-effort list of "needs attention" shipments from the attention payload, for the 회사 탭. */
+function attentionItems(attention: unknown, max = 8): { title: string; sub: string }[] {
+  if (!attention || typeof attention !== 'object') return [];
+  const out: { title: string; sub: string }[] = [];
+  const seen = new Set<string>();
+  for (const [key, list] of Object.entries(attention as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    for (const it of list as Record<string, unknown>[]) {
+      if (!it || typeof it !== 'object' || out.length >= max) continue;
+      const title = [it.customer, it.title, it.name, it.tracking_no, it.code].find((x) => typeof x === 'string' && x) as string | undefined;
+      if (!title || seen.has(title)) continue;
+      seen.add(title);
+      const code = [it.code, it.voyage, it.voyage_code].find((x) => typeof x === 'string' && x) as string | undefined;
+      const status = [it.status, it.reason, it.stage].find((x) => typeof x === 'string' && x) as string | undefined;
+      const days = num(it.days ?? it.stalled_days ?? it.days_stuck);
+      const bits = [code && code !== title ? code : null, status, days !== null ? `${days}일` : null, groupLabel(key)].filter(Boolean);
+      out.push({ title, sub: bits.join(' · ') });
+    }
+  }
+  return out;
+}
+
+/** Turns an attention list key into a short Korean tag (best effort). */
+function groupLabel(key: string): string | null {
+  if (/stall|stuck|멈춘|오래/i.test(key)) return '오래 멈춤';
+  if (/depart|출항/i.test(key)) return '출항 예정';
+  if (/unpaid|미수|outstanding/i.test(key)) return '미수금';
+  if (/arriv|입항/i.test(key)) return '입항';
+  return null;
+}
+
+export type Dashboard = {
+  statuses: { label: string; value: number }[];
+  month: string | null;
+  attention: { title: string; sub: string }[];
+  next: string | null;
+};
+
+/** Full read-only snapshot for the 회사 dashboard tab: status breakdown, month figure, attention list. */
+export async function companyDashboard(): Promise<Dashboard | null> {
+  if (!company.companyConfigured()) return null;
+  try {
+    const [reportText, attentionText] = await Promise.all([
+      company.fetchCompanyReport('report'),
+      company.fetchCompanyAttention().catch(() => ''),
+    ]);
+    const d = JSON.parse(reportText);
+    const counts = statusCounts(d?.shipments);
+    const statuses = Object.entries(counts)
+      .map(([label, value]) => ({ label, value }))
+      .filter((s) => s.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+    const month = findMonthTotal(d?.shipments);
+    let attention: { title: string; sub: string }[] = [];
+    let next: string | null = null;
+    if (attentionText) {
+      try {
+        const a = JSON.parse(attentionText);
+        attention = attentionItems(a);
+        next = nextDeparture(a);
+      } catch {
+        /* ignore malformed attention payload */
+      }
+    }
+    return { statuses, month: month !== null ? fmt(month) : null, attention, next };
+  } catch {
+    return null;
+  }
+}

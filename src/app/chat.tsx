@@ -44,7 +44,7 @@ export default function Chat() {
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
   const router = useRouter();
-  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string }>();
+  const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string; ask?: string }>();
   const canListen = voiceInputAvailable();
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
@@ -199,6 +199,15 @@ export default function Chat() {
     sendRef.current(COMPANY_REQUEST);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.company]);
+
+  // Opened with ?ask=<질문> (e.g. a dashboard shortcut): send that exact question once.
+  useEffect(() => {
+    if (!params.ask) return;
+    const text = params.ask;
+    router.setParams({ ask: undefined });
+    sendRef.current(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.ask]);
 
   // Opened with ?call=1 after a call recording was transcribed: summarize it and pull out tasks.
   useEffect(() => {
