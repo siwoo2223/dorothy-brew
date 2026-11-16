@@ -54,6 +54,8 @@ export default function RootLayout() {
             <Tabs.Screen name="settings" options={{ title: '설정', tabBarIcon: icon('⚙️') }} />
             {/* Full-screen camera mode: not a tab (href: null), no header, no tab bar. */}
             <Tabs.Screen name="camera" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
+            {/* Shipment list drill-down: not a tab, has a header (title set per group). */}
+            <Tabs.Screen name="shipments" options={{ href: null, title: '화물 목록' }} />
           </Tabs>
         </StoreProvider>
       </KeyboardProvider>

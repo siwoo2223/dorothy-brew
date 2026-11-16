@@ -115,15 +115,17 @@ export default function Company() {
               <Text style={[styles.section, { color: t.text }]}>⚠️ 오늘 챙길 화물</Text>
               <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
                 {dash.attention.map((it, i) => (
-                  <View key={it.title + i} style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                  <Pressable
+                    key={it.title + i}
+                    onPress={() => router.navigate({ pathname: '/shipments', params: { status: it.status ?? '', code: it.code ?? '', filter: it.filter ?? '', title: it.title } })}
+                    style={({ pressed }) => [styles.row, { opacity: pressed ? 0.85 : 1 }, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{it.title}</Text>
                       {!!it.sub && <Text style={{ color: t.subtext, fontSize: 12 }} numberOfLines={1}>{it.sub}</Text>}
                     </View>
-                    <Pressable onPress={() => ask(`${it.title} 화물 지금 어디까지 왔어? 자세히 알려줘.`)} hitSlop={6}>
-                      <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>조회 ›</Text>
-                    </Pressable>
-                  </View>
+                    <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>조회 ›</Text>
+                  </Pressable>
                 ))}
               </View>
             </>

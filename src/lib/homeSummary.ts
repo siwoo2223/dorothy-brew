@@ -90,22 +90,75 @@ export async function companySummary(): Promise<CompanySummary | null> {
   }
 }
 
+/** An "오늘 챙길 화물" row, with where its 조회 button should drill into (status/filter/code). */
+export type AttentionItem = { title: string; sub: string; status?: string; filter?: 'stuck' | 'unpaid'; code?: string };
+
 /** Builds the "오늘 챙길 화물" list exactly from the attention payload's known shapes. */
-function attentionItems(a: Row, max = 8): { title: string; sub: string }[] {
-  const out: { title: string; sub: string }[] = [];
+function attentionItems(a: Row, max = 8): AttentionItem[] {
+  const out: AttentionItem[] = [];
   for (const r of asArr(a.stuck_7days_plus)) {
     const cnt = int(r.cnt);
-    if (out.length < max && str(r.status) && cnt) out.push({ title: `오래 멈춤 · ${str(r.status)}`, sub: `${fmt(cnt)}건 (7일+)` });
+    const status = str(r.status);
+    if (out.length < max && status && cnt) out.push({ title: `오래 멈춤 · ${status}`, sub: `${fmt(cnt)}건 (7일+)`, status, filter: 'stuck' });
   }
   const unpaid = int(a.delivered_unpaid_hint);
-  if (unpaid && out.length < max) out.push({ title: '미수 가능(배송완료·입금 0)', sub: `${fmt(unpaid)}건` });
+  if (unpaid && out.length < max) out.push({ title: '미수 가능(배송완료·입금 0)', sub: `${fmt(unpaid)}건`, status: '배송완료', filter: 'unpaid' });
   for (const r of asArr(a.departing_this_week)) {
-    if (out.length < max) out.push({ title: `출항 예정 · ${str(r.voyage_code)}`, sub: [str(r.route), md(r.departure_date)].filter(Boolean).join(' · ') });
+    if (out.length < max) out.push({ title: `출항 예정 · ${str(r.voyage_code)}`, sub: [str(r.route), md(r.departure_date)].filter(Boolean).join(' · '), code: str(r.voyage_code) });
   }
   for (const r of asArr(a.arriving_this_week)) {
-    if (out.length < max) out.push({ title: `입항 예정 · ${str(r.voyage_code)}`, sub: [str(r.route), md(r.arrival_date)].filter(Boolean).join(' · ') });
+    if (out.length < max) out.push({ title: `입항 예정 · ${str(r.voyage_code)}`, sub: [str(r.route), md(r.arrival_date)].filter(Boolean).join(' · '), code: str(r.voyage_code) });
   }
   return out;
+}
+
+// ── Shipment list (for the 조회 detail page), read exactly from company_shipments ──
+export type Shipment = {
+  trackingNo: string;
+  customer: string;
+  voyageCode: string;
+  status: string;
+  daysInStatus: number | null; // how long it has sat in its current status
+  items: string;
+  boxes: number;
+  cbm: number;
+  weightKg: number;
+  unpaid: boolean; // 배송완료인데 입금액 0/빈 값
+  departureDate: string;
+};
+export type ShipmentsPage = { total: number | null; hasMore: boolean; shipments: Shipment[] };
+
+const daysSince = (v: unknown): number | null => {
+  const s = str(v);
+  if (!s) return null;
+  const ms = Date.parse(s.replace(' ', 'T'));
+  if (isNaN(ms)) return null;
+  return Math.max(0, Math.floor((Date.now() - ms) / 86400_000));
+};
+
+/** One page of shipments for a status (optionally refined client-side to stuck-7day+ or unpaid). */
+export async function shipmentsPage(opts: { status?: string; code?: string; filter?: 'stuck' | 'unpaid'; page?: number }): Promise<ShipmentsPage> {
+  const text = await company.fetchCompanyShipments({ status: opts.status, code: opts.code, page: opts.page });
+  const d = JSON.parse(text) as Row;
+  let list: Shipment[] = asArr(d.shipments).map((r) => {
+    const paid = int(r.paid_amount);
+    return {
+      trackingNo: str(r.tracking_no),
+      customer: str(r.customer),
+      voyageCode: str(r.voyage_code),
+      status: str(r.status),
+      daysInStatus: daysSince(r.status_changed_at),
+      items: str(r.items),
+      boxes: int(r.boxes) ?? 0,
+      cbm: int(r.cbm) ?? 0,
+      weightKg: int(r.weight_kg) ?? 0,
+      unpaid: str(r.status) === '배송완료' && (paid === null || paid === 0),
+      departureDate: str(r.departure_date),
+    };
+  });
+  if (opts.filter === 'stuck') list = list.filter((s) => s.daysInStatus !== null && s.daysInStatus >= 7);
+  else if (opts.filter === 'unpaid') list = list.filter((s) => s.unpaid);
+  return { total: int(d.total), hasMore: d.has_more === true, shipments: list };
 }
 
 export type Dashboard = {
@@ -116,7 +169,7 @@ export type Dashboard = {
   invoiceThisMonth: string | null; // 이번 달 발행 인보이스 합계 (참고)
   invoiceLastMonth: string | null;
   todayNew: number | null; // 오늘 상태 바뀐 화물 수
-  attention: { title: string; sub: string }[];
+  attention: AttentionItem[];
   next: string | null;
 };
 
@@ -139,7 +192,7 @@ export async function companyDashboard(): Promise<Dashboard | null> {
     const invLast = int(inv.last_month_total);
     const todayNew = int((d.recent_status_change as Row)?.today);
     const peso = (n: number | null) => (n !== null ? `₱${fmt(n)}` : null);
-    let attention: { title: string; sub: string }[] = [];
+    let attention: AttentionItem[] = [];
     let next: string | null = null;
     if (attentionText) {
       try {
