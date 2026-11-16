@@ -69,6 +69,20 @@ export type Sailing = {
   createdAt: string;
 };
 
+/** A to-do Dorothy detected from a watched KakaoTalk room, awaiting the owner's 등록/무시 decision. */
+export type TodoCandidate = {
+  id: string;
+  /** Short task sentence (제목). The original message text is NOT stored. */
+  title: string;
+  /** Who requested it (상대/방). */
+  who: string;
+  /** ISO datetime when it's due, or absent → becomes a 회신 대기 instead of a timed task. */
+  dueAt?: string;
+  /** The room it came from. */
+  room: string;
+  createdAt: string;
+};
+
 export type Profile = {
   name: string;
   /** Free-form self-introduction the user writes so Dorothy knows them from day one. */

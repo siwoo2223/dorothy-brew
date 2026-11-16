@@ -7,7 +7,7 @@ import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './n
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Followup, Memory, Profile, Routine, Sailing, Task } from './types';
+import type { ChatTurn, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -28,6 +28,8 @@ const KEYS = {
   routines: 'dorothy.routines',
   standbyShortcut: 'dorothy.standbyShortcut',
   sailings: 'dorothy.sailings',
+  todoRooms: 'dorothy.todoRooms',
+  todoCandidates: 'dorothy.todoCandidates',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -74,6 +76,10 @@ export type AppState = {
   standbyShortcut: boolean;
   /** Booking/sailing schedules Dorothy read from the forwarder's photos (shown as calendar/list). */
   sailings: Sailing[];
+  /** Room names (partial match) to watch for to-do/requests in KakaoTalk etc. Empty = off. */
+  todoRooms: string[];
+  /** To-dos Dorothy detected from watched rooms, awaiting the owner's 등록/무시 decision. */
+  todoCandidates: TodoCandidate[];
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -99,6 +105,8 @@ const initialState: AppState = {
   weeklyReportDay: null,
   standbyShortcut: false,
   sailings: [],
+  todoRooms: [],
+  todoCandidates: [],
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -117,7 +125,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -138,6 +146,8 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.routines),
         AsyncStorage.getItem(KEYS.standbyShortcut),
         AsyncStorage.getItem(KEYS.sailings),
+        AsyncStorage.getItem(KEYS.todoRooms),
+        AsyncStorage.getItem(KEYS.todoCandidates),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -160,6 +170,8 @@ function useStoreValue() {
         routines: routines ? JSON.parse(routines) : [],
         standbyShortcut: standbyShortcut ? JSON.parse(standbyShortcut) : false,
         sailings: sailings ? JSON.parse(sailings) : [],
+        todoRooms: todoRooms ? JSON.parse(todoRooms) : [],
+        todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -305,6 +317,48 @@ function useStoreValue() {
       },
       clearSailings() {
         update('sailings', []);
+      },
+
+      // ── 카톡 할 일 감지: 감지할 방 목록 + 등록 전 후보 ──
+      setTodoRooms(rooms: string[]) {
+        const clean = Array.from(new Set(rooms.map((r) => r.trim()).filter(Boolean)));
+        update('todoRooms', clean);
+        // A removed room's pending candidates are dropped too (spec: 방을 끄면 그 기록도 지움).
+        update('todoCandidates', ref.current.todoCandidates.filter((c) => clean.some((r) => c.room.includes(r) || r.includes(c.room))));
+      },
+      /** Adds detected to-dos awaiting approval, skipping ones already pending or clearly duplicated. */
+      addTodoCandidates(list: Omit<TodoCandidate, 'id' | 'createdAt'>[]): number {
+        const existing = ref.current.todoCandidates;
+        const openTasks = ref.current.tasks.filter((t) => !t.done);
+        const openFollowups = ref.current.followups.filter((f) => !f.done);
+        const fresh: TodoCandidate[] = [];
+        for (const c of list) {
+          const key = `${c.who}|${c.title}`.toLowerCase();
+          const dup =
+            existing.some((e) => `${e.who}|${e.title}`.toLowerCase() === key) ||
+            fresh.some((e) => `${e.who}|${e.title}`.toLowerCase() === key) ||
+            openTasks.some((tsk) => tsk.title.toLowerCase().includes(c.title.toLowerCase().slice(0, 8))) ||
+            openFollowups.some((f) => f.what.toLowerCase().includes(c.title.toLowerCase().slice(0, 8)));
+          if (!dup && c.title.trim()) fresh.push({ id: newId(), createdAt: new Date().toISOString(), ...c });
+        }
+        if (fresh.length) update('todoCandidates', [...existing, ...fresh].slice(-30));
+        return fresh.length;
+      },
+      dismissTodoCandidate(id: string) {
+        update('todoCandidates', ref.current.todoCandidates.filter((c) => c.id !== id));
+      },
+      /** Re-reads candidates the background check may have written while the app was open. */
+      async reloadTodoCandidates() {
+        const raw = await AsyncStorage.getItem(KEYS.todoCandidates).catch(() => null);
+        update('todoCandidates', raw ? JSON.parse(raw) : ref.current.todoCandidates);
+      },
+      /** Approves a candidate: a task when it has a time, else a 회신 대기 followup. Then removes it. */
+      async approveTodoCandidate(id: string): Promise<void> {
+        const c = ref.current.todoCandidates.find((x) => x.id === id);
+        if (!c) return;
+        if (c.dueAt) await a.addTask({ title: c.title, dueAt: c.dueAt, notes: c.room ? `${c.room}` : undefined });
+        else a.addFollowup({ who: c.who || c.room, what: c.title, source: c.room || '카톡' });
+        update('todoCandidates', ref.current.todoCandidates.filter((x) => x.id !== id));
       },
 
       addFollowup(input: { who: string; what: string; source?: string }): Followup {

@@ -1,10 +1,10 @@
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
 import { useStore } from '../lib/store';
-import type { Followup, Routine, Task } from '../lib/types';
+import type { Followup, Routine, Task, TodoCandidate } from '../lib/types';
 import { useTheme } from '../lib/theme';
 
 type Preset = { label: string; at: () => Date | undefined };
@@ -36,6 +36,10 @@ export default function Tasks() {
     setTitle('');
     setPreset(0);
   };
+
+  // Pick up to-dos the background check detected from watched rooms while the app was open.
+  useFocusEffect(useCallback(() => { actions.reloadTodoCandidates(); }, [actions]));
+  const candidates = state.todoCandidates ?? [];
 
   const byDue = (a: Task, b: Task) => (a.dueAt ?? '9999').localeCompare(b.dueAt ?? '9999');
   const open = state.tasks.filter((x) => !x.done).sort(byDue);
@@ -74,6 +78,16 @@ export default function Tasks() {
         <Button label="🌙 내일 할 일 미리 정리받기" variant="ghost" onPress={() => router.navigate({ pathname: '/chat', params: { plan: '1' } })} />
         <Body muted>자세한 시간은 도로시에게 말로 부탁해도 돼요. “금요일 오후 3시 치과 예약 알려줘”</Body>
       </Card>
+
+      {candidates.length > 0 && (
+        <>
+          <Title>📥 도로시가 찾은 할 일 ({candidates.length})</Title>
+          <Body muted>카톡 방에서 사장님께 온 요청이에요. 맞으면 등록, 아니면 무시하세요.</Body>
+          {candidates.map((c) => (
+            <CandidateRow key={c.id} c={c} onApprove={() => actions.approveTodoCandidate(c.id)} onDismiss={() => actions.dismissTodoCandidate(c.id)} />
+          ))}
+        </>
+      )}
 
       {openFollowups.length > 0 && (
         <>
@@ -174,6 +188,27 @@ function RoutineRow({ routine, onDelete }: { routine: Routine; onDelete: () => v
         <Text style={{ color: t.subtext, fontSize: 12 }}>{when}{routine.notificationId ? ' · 🔔' : ' · 알림 꺼짐'}</Text>
       </View>
       <Pressable onPress={onDelete} hitSlop={8}>
+        <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function CandidateRow({ c, onApprove, onDismiss }: { c: TodoCandidate; onApprove: () => void; onDismiss: () => void }) {
+  const t = useTheme();
+  const when = c.dueAt
+    ? new Date(c.dueAt).toLocaleString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' })
+    : '시각 없음 → 회신 대기';
+  return (
+    <View style={[styles.row, { backgroundColor: t.card, borderColor: t.accent }]}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }}>{c.title}</Text>
+        <Text style={{ color: t.subtext, fontSize: 12 }}>{[c.room || c.who, when].filter(Boolean).join(' · ')}</Text>
+      </View>
+      <Pressable onPress={onApprove} hitSlop={6} style={[styles.draftBtn, { borderColor: t.accent, backgroundColor: t.accent }]}>
+        <Text style={{ color: t.accentText, fontSize: 12, fontWeight: '700' }}>등록</Text>
+      </Pressable>
+      <Pressable onPress={onDismiss} hitSlop={8}>
         <Text style={{ color: t.subtext, fontSize: 18 }}>×</Text>
       </Pressable>
     </View>
