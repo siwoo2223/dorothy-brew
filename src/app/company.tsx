@@ -73,24 +73,35 @@ export default function Company() {
             </Card>
           )}
 
-          {/* 이번 달 매출·수지 */}
-          {dash && (dash.monthSales || dash.monthNet) && (
+          {/* 이번 달 수입·수지 (누르면 도로시가 항목별로 요약) */}
+          {dash && (dash.monthIncome || dash.monthNet) && (
             <View style={styles.metrics}>
-              {dash.monthSales && (
-                <View style={[styles.metric, { backgroundColor: t.card, borderColor: t.border }]}>
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 매출</Text>
-                  <Text style={[styles.metricN, { color: t.accent }]} numberOfLines={1}>{dash.monthSales}</Text>
-                  {dash.lastMonthSales && <Text style={{ color: t.subtext, fontSize: 11 }}>지난달 {dash.lastMonthSales}</Text>}
-                </View>
+              {dash.monthIncome && (
+                <Pressable
+                  onPress={() => ask('이번 달 수입을 항목·고객별로 큰 것부터 요약해줘. 어디서 들어온 돈인지, 지난달이랑 비교해서 그래프로 보여줘.')}
+                  style={({ pressed }) => [styles.metric, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수입 ›</Text>
+                  <Text style={[styles.metricN, { color: t.accent }]} numberOfLines={1}>{dash.monthIncome}</Text>
+                  {dash.monthExpense && <Text style={{ color: t.subtext, fontSize: 11 }}>지출 {dash.monthExpense}</Text>}
+                </Pressable>
               )}
               {dash.monthNet && (
-                <View style={[styles.metric, { backgroundColor: t.card, borderColor: t.border }]}>
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수지</Text>
+                <Pressable
+                  onPress={() => ask('이번 달 수입·지출·수지를 항목별로 요약하고 지난달과 비교해줘. 그래프로 보여줘.')}
+                  style={({ pressed }) => [styles.metric, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수지 ›</Text>
                   <Text style={[styles.metricN, { color: t.text }]} numberOfLines={1}>{dash.monthNet}</Text>
                   {dash.todayNew !== null && <Text style={{ color: t.subtext, fontSize: 11 }}>오늘 신규 {dash.todayNew}건</Text>}
-                </View>
+                </Pressable>
               )}
             </View>
+          )}
+          {dash && dash.invoiceThisMonth && (
+            <Text style={{ color: t.subtext, fontSize: 12, marginTop: -4, paddingHorizontal: 4 }}>
+              인보이스 발행 {dash.invoiceThisMonth}{dash.invoiceLastMonth ? ` · 지난달 ${dash.invoiceLastMonth}` : ''} (회계 수입과 별개)
+            </Text>
           )}
           {dash && dash.next && (
             <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
@@ -104,15 +115,17 @@ export default function Company() {
               <Text style={[styles.section, { color: t.text }]}>⚠️ 오늘 챙길 화물</Text>
               <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
                 {dash.attention.map((it, i) => (
-                  <View key={it.title + i} style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                  <Pressable
+                    key={it.title + i}
+                    onPress={() => router.navigate({ pathname: '/shipments', params: { status: it.status ?? '', code: it.code ?? '', filter: it.filter ?? '', title: it.title } })}
+                    style={({ pressed }) => [styles.row, { opacity: pressed ? 0.85 : 1 }, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{it.title}</Text>
                       {!!it.sub && <Text style={{ color: t.subtext, fontSize: 12 }} numberOfLines={1}>{it.sub}</Text>}
                     </View>
-                    <Pressable onPress={() => ask(`${it.title} 화물 지금 어디까지 왔어? 자세히 알려줘.`)} hitSlop={6}>
-                      <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>조회 ›</Text>
-                    </Pressable>
-                  </View>
+                    <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>조회 ›</Text>
+                  </Pressable>
                 ))}
               </View>
             </>
