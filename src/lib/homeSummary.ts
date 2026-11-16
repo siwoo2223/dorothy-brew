@@ -110,9 +110,11 @@ function attentionItems(a: Row, max = 8): { title: string; sub: string }[] {
 
 export type Dashboard = {
   statuses: { label: string; value: number }[];
-  monthSales: string | null; // 이번 달 매출(인보이스 합계)
-  monthNet: string | null; // 이번 달 수지(수입-지출)
-  lastMonthSales: string | null;
+  monthIncome: string | null; // 이번 달 수입 (회계 income)
+  monthExpense: string | null; // 이번 달 지출 (회계 expense)
+  monthNet: string | null; // 이번 달 수지 (수입-지출)
+  invoiceThisMonth: string | null; // 이번 달 발행 인보이스 합계 (참고)
+  invoiceLastMonth: string | null;
   todayNew: number | null; // 오늘 상태 바뀐 화물 수
   attention: { title: string; sub: string }[];
   next: string | null;
@@ -130,10 +132,13 @@ export async function companyDashboard(): Promise<Dashboard | null> {
     const statuses = statusList(d).slice(0, 8);
     const inv = (d.invoices as Row) ?? {};
     const acct = (d.accounting_this_month as Row) ?? {};
-    const monthSales = int(inv.this_month_total);
-    const lastMonthSales = int(inv.last_month_total);
+    const income = int(acct.income);
+    const expense = int(acct.expense);
     const net = int(acct.net);
+    const invThis = int(inv.this_month_total);
+    const invLast = int(inv.last_month_total);
     const todayNew = int((d.recent_status_change as Row)?.today);
+    const peso = (n: number | null) => (n !== null ? `₱${fmt(n)}` : null);
     let attention: { title: string; sub: string }[] = [];
     let next: string | null = null;
     if (attentionText) {
@@ -147,9 +152,11 @@ export async function companyDashboard(): Promise<Dashboard | null> {
     }
     return {
       statuses,
-      monthSales: monthSales !== null ? `₱${fmt(monthSales)}` : null,
-      monthNet: net !== null ? `₱${fmt(net)}` : null,
-      lastMonthSales: lastMonthSales !== null ? `₱${fmt(lastMonthSales)}` : null,
+      monthIncome: peso(income),
+      monthExpense: peso(expense),
+      monthNet: peso(net),
+      invoiceThisMonth: peso(invThis),
+      invoiceLastMonth: peso(invLast),
       todayNew,
       attention,
       next,

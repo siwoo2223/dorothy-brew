@@ -217,6 +217,9 @@ export default function Today() {
                 <View style={[styles.dot, { backgroundColor: dotColor(task.dueAt!) }]} />
                 <Text style={[styles.listText, { color: t.text }]} numberOfLines={1}>{task.title}</Text>
                 <Text style={{ color: t.subtext, fontSize: 13 }}>{timeLabel(task.dueAt!)}</Text>
+                <Pressable onPress={() => actions.setTaskDone(task.id, true)} hitSlop={10} style={[styles.doneBtn, { borderColor: t.accent }]}>
+                  <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>✓ 완료</Text>
+                </Pressable>
               </View>
             ))}
           </View>
@@ -329,6 +332,7 @@ const styles = StyleSheet.create({
   section: { fontSize: 15, fontWeight: '800', letterSpacing: -0.2, marginTop: 4, marginBottom: -4 },
   listCard: { borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 50 },
+  doneBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   listText: { flex: 1, fontSize: 15, fontWeight: '600' },
   bizRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
