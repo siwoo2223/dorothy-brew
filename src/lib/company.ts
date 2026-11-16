@@ -148,6 +148,32 @@ export async function fetchCompanyPattern(days = 90): Promise<string> {
   return text;
 }
 
+/** The funds/P&L endpoint (dorothy_finance.php) sits next to the report endpoint, same token. */
+function financeUrl(): string {
+  if (!endpointUrl) return '';
+  if (endpointUrl.includes('dorothy_report.php')) return endpointUrl.replace('dorothy_report.php', 'dorothy_finance.php');
+  return endpointUrl.replace(/[^/]*(\?.*)?$/, 'dorothy_finance.php');
+}
+
+/** Funds on hand + this month's revenue/deposits/expense/profit, per currency (matches the admin accounting page). */
+export async function fetchCompanyFinance(): Promise<string> {
+  const base = financeUrl();
+  if (!base || !token) {
+    throw new Error('회사 현황이 아직 연결되지 않았어요. 설정 → "회사 현황 연결"에서 주소와 토큰을 넣어 주세요.');
+  }
+  let res: Response;
+  try {
+    res = await fetch(base, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
+  } catch {
+    throw new Error('회사 서버에 연결할 수 없어요. 주소가 맞는지, 인터넷이 되는지 확인해 주세요.');
+  }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw new Error('회사 서버가 접근을 거부했어요(토큰 불일치). 설정의 토큰을 확인해 주세요.');
+  if (res.status === 404) throw new Error('자금 API(dorothy_finance.php)가 서버에 아직 없어요. 회사 서버 배포를 확인해 주세요.');
+  if (!res.ok) throw new Error(`회사 서버 오류 (${res.status}): ${text.slice(0, 300)}`);
+  return text;
+}
+
 /**
  * The generic read-only data endpoint (dorothy_data.php) sits next to the report endpoint and takes
  * the same token — so the owner doesn't enter a second address. It lets the assistant read ANY table

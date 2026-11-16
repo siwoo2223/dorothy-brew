@@ -76,8 +76,10 @@ export async function companySummary(): Promise<CompanySummary | null> {
     const line = picked.length
       ? picked.map((k) => `${k} ${fmt(map[k])}`).join(' · ')
       : counts.slice(0, 2).map((c) => `${c.label} ${fmt(c.value)}`).join(' · ') || '진행 중 화물 없음';
-    const monthSales = int((d.invoices as Row)?.this_month_total);
-    const badge = monthSales !== null ? `₱${fmt(monthSales)}` : null;
+    // No money badge on the home card: a single number can't show ₱/₩ correctly — real money
+    // lives on the 자금·손익 page (dorothy_finance.php). Show today's new count instead.
+    const todayNew = int((d.recent_status_change as Row)?.today);
+    const badge = todayNew ? `오늘 +${fmt(todayNew)}` : null;
     let next: string | null = null;
     try {
       next = attentionText ? firstDeparture(JSON.parse(attentionText) as Row) : null;
@@ -217,4 +219,59 @@ export async function companyDashboard(): Promise<Dashboard | null> {
   } catch {
     return null;
   }
+}
+
+// ── Funds & monthly P&L (dorothy_finance.php), per currency to match the admin accounting page ──
+export type Money = { currency: string; amount: number };
+export type Finance = {
+  month: string;
+  funds: Money[]; // 총 자금
+  accounts: { name: string; currency: string; balance: number }[]; // 계좌별 잔액
+  revenue: Money[]; // 이번 달 매출 (발생주의)
+  expense: Money[]; // 이번 달 지출 (발생주의)
+  deposits: Money[]; // 이번 달 입금 (통장)
+  withdrawals: Money[]; // 이번 달 출금 (통장)
+  net: Money[]; // 이번 달 손익
+};
+
+/** {PHP:x, KRW:y} → [{currency,amount}], PHP first, dropping missing currencies. */
+function moneyList(o: unknown): Money[] {
+  if (!o || typeof o !== 'object') return [];
+  const rec = o as Row;
+  const order = ['PHP', 'KRW', ...Object.keys(rec).filter((k) => k !== 'PHP' && k !== 'KRW')];
+  const out: Money[] = [];
+  for (const cur of order) {
+    if (!(cur in rec)) continue;
+    const n = int(rec[cur]);
+    if (n !== null) out.push({ currency: cur, amount: n });
+  }
+  return out;
+}
+
+export async function companyFinance(): Promise<Finance | null> {
+  if (!company.companyConfigured()) return null;
+  try {
+    const d = JSON.parse(await company.fetchCompanyFinance()) as Row;
+    const cash = (d.cash_in_out as Row) ?? {};
+    return {
+      month: str(d.month),
+      funds: moneyList(d.funds),
+      accounts: asArr(d.accounts)
+        .map((r) => ({ name: str(r.name), currency: str(r.currency), balance: int(r.balance) ?? 0 }))
+        .filter((a) => a.name !== ''),
+      revenue: moneyList(d.revenue),
+      expense: moneyList(d.expense),
+      deposits: moneyList(cash.income),
+      withdrawals: moneyList(cash.expense),
+      net: moneyList(d.net),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Formats an amount with its currency symbol (₱ for PHP, ₩ for KRW, else the code). */
+export function money(m: Money): string {
+  const sym = m.currency === 'PHP' ? '₱' : m.currency === 'KRW' ? '₩' : m.currency + ' ';
+  return `${sym}${fmt(Math.round(m.amount))}`;
 }

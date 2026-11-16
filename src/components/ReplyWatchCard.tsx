@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, AppState, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { Body, Button, Card, Title } from './ui';
 import {
   clearSentReplies,
+  disableReplyWatch,
   getReplyDebug,
   getSentReplies,
   isReplyDebug,
@@ -63,6 +64,27 @@ export function ReplyWatchCard() {
       <Body>
         상태: <Text style={{ color: granted ? t.accent : t.danger, fontWeight: '600' }}>{granted ? '켜짐' : '꺼짐 (권한 필요)'}</Text>
       </Body>
+
+      <View style={[styles.warn, { borderColor: t.danger }]}>
+        <Body>
+          ⚠️ <Text style={{ fontWeight: '700' }}>은행·금융 앱 주의</Text> — 이 기능(접근성)이 켜져 있으면 GCash·Maya 같은 금융앱이 보안상 열리지 않을 수 있어요. 안드로이드 제약이라 켠 채로는 우회가 안 돼요. 금융앱을 쓸 땐 아래 버튼으로 잠시 끄고, 끝나면 다시 켜 주세요.
+        </Body>
+        {granted && (
+          <Button
+            label="🏦 은행 앱 쓰기 — 접근성 지금 끄기"
+            variant="danger"
+            onPress={() => {
+              const ok = disableReplyWatch();
+              setGranted(false);
+              Alert.alert(
+                ok ? '접근성을 껐어요' : '이미 꺼져 있어요',
+                '이제 GCash·Maya를 열 수 있어요. 카톡 답장 자동 감지를 다시 쓰려면, 아래 "접근성 권한 켜기"로 다시 켜 주세요.',
+              );
+            }}
+          />
+        )}
+      </View>
+
       <Button label={granted ? '접근성 설정 열기 (끄기/확인)' : '접근성 권한 켜기'} onPress={() => openAccessibilitySettings?.()} />
       <Body muted>
         설정 화면에서 &quot;설치된 앱/다운로드한 앱&quot; → &quot;도로시&quot;를 켜 주세요. 켜는 스위치가 회색으로 막혀 있으면, 아래 &quot;앱 정보 열기&quot;에서 점 3개 메뉴 → &quot;제한된 설정 허용&quot;을 먼저 눌러야 해요(삼성/안드로이드 13+).
@@ -130,4 +152,5 @@ export function ReplyWatchCard() {
 const styles = StyleSheet.create({
   hr: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(127,127,127,0.25)', marginVertical: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  warn: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8, marginVertical: 2 },
 });

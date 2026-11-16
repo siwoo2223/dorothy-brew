@@ -8,14 +8,15 @@ import { companyConfigured, loadCompanyConfig } from '../lib/company';
 import { companyDashboard, Dashboard } from '../lib/homeSummary';
 import { useTheme } from '../lib/theme';
 
-/** One-tap questions that open the chat and ask Dorothy for the detail (she answers with graphs/lists). */
-const SHORTCUTS = [
-  { icon: '📋', label: '전체 현황 요약', ask: '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 수지를 그래프로 보여줘.' },
-  { icon: '🐢', label: '오래 멈춘 화물', ask: '오래 멈춰 있는 화물 있어? 급한 순서로 목록으로 알려줘.' },
-  { icon: '🚢', label: '이번 주 출항·입항', ask: '이번 주 출항·입항 예정 화물 정리해줘.' },
-  { icon: '💰', label: '미수금 현황', ask: '미수금 있는 화물 정리해줘. 고객별 금액이랑 합계 알려줘.' },
-  { icon: '📅', label: '이번 달 수지', ask: '이번 달 수입·지출·수지 알려주고 지난달이랑 비교해줘. 그래프로 보여줘.' },
-] as const;
+type Shortcut = { icon: string; label: string; nav?: { pathname: string; params?: Record<string, string> }; ask?: string };
+
+/** Quick entries — most open a dedicated page (not chat); only the open-ended one asks Dorothy. */
+const SHORTCUTS: Shortcut[] = [
+  { icon: '💰', label: '자금 · 손익', nav: { pathname: '/finance' } },
+  { icon: '🧾', label: '미수금', nav: { pathname: '/shipments', params: { status: '배송완료', filter: 'unpaid', title: '미수 가능(배송완료·입금 0)' } } },
+  { icon: '📅', label: '이번 달 손익', nav: { pathname: '/finance', params: { focus: 'net' } } },
+  { icon: '📋', label: '요약 묻기', ask: '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 손익을 그래프로 보여줘.' },
+];
 
 export default function Company() {
   const t = useTheme();
@@ -73,36 +74,16 @@ export default function Company() {
             </Card>
           )}
 
-          {/* 이번 달 수입·수지 (누르면 도로시가 항목별로 요약) */}
-          {dash && (dash.monthIncome || dash.monthNet) && (
-            <View style={styles.metrics}>
-              {dash.monthIncome && (
-                <Pressable
-                  onPress={() => ask('이번 달 수입을 항목·고객별로 큰 것부터 요약해줘. 어디서 들어온 돈인지, 지난달이랑 비교해서 그래프로 보여줘.')}
-                  style={({ pressed }) => [styles.metric, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
-                >
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수입 ›</Text>
-                  <Text style={[styles.metricN, { color: t.accent }]} numberOfLines={1}>{dash.monthIncome}</Text>
-                  {dash.monthExpense && <Text style={{ color: t.subtext, fontSize: 11 }}>지출 {dash.monthExpense}</Text>}
-                </Pressable>
-              )}
-              {dash.monthNet && (
-                <Pressable
-                  onPress={() => ask('이번 달 수입·지출·수지를 항목별로 요약하고 지난달과 비교해줘. 그래프로 보여줘.')}
-                  style={({ pressed }) => [styles.metric, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
-                >
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수지 ›</Text>
-                  <Text style={[styles.metricN, { color: t.text }]} numberOfLines={1}>{dash.monthNet}</Text>
-                  {dash.todayNew !== null && <Text style={{ color: t.subtext, fontSize: 11 }}>오늘 신규 {dash.todayNew}건</Text>}
-                </Pressable>
-              )}
+          {/* 자금·손익은 통화(₱/₩)를 섞으면 안 되므로 전용 페이지(정확한 서버 수치)로 안내 */}
+          <Pressable
+            onPress={() => router.navigate('/finance')}
+            style={({ pressed }) => [styles.listCard, { backgroundColor: t.accentSoft, borderColor: t.accent, opacity: pressed ? 0.85 : 1 }]}
+          >
+            <View style={{ paddingHorizontal: 16, paddingVertical: 14, gap: 2 }}>
+              <Text style={{ color: t.accent, fontSize: 15, fontWeight: '800' }}>💰 자금 · 손익 보기 ›</Text>
+              <Text style={{ color: t.subtext, fontSize: 12 }}>현재 계좌별 잔액 + 이번 달 매출·입금·지출·손익 (₱·₩ 통화별, 회계 화면과 동일)</Text>
             </View>
-          )}
-          {dash && dash.invoiceThisMonth && (
-            <Text style={{ color: t.subtext, fontSize: 12, marginTop: -4, paddingHorizontal: 4 }}>
-              인보이스 발행 {dash.invoiceThisMonth}{dash.invoiceLastMonth ? ` · 지난달 ${dash.invoiceLastMonth}` : ''} (회계 수입과 별개)
-            </Text>
-          )}
+          </Pressable>
           {dash && dash.next && (
             <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
               <Text style={{ color: t.subtext, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 }}>🚢 다음 출항 · {dash.next}</Text>
@@ -137,7 +118,7 @@ export default function Company() {
             {SHORTCUTS.map((s) => (
               <Pressable
                 key={s.label}
-                onPress={() => ask(s.ask)}
+                onPress={() => (s.nav ? router.navigate(s.nav) : s.ask ? ask(s.ask) : undefined)}
                 style={({ pressed }) => [styles.shortcut, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.8 : 1 }]}
               >
                 <Text style={{ fontSize: 22 }}>{s.icon}</Text>
@@ -146,7 +127,7 @@ export default function Company() {
             ))}
           </View>
 
-          <Body muted>숫자는 회사 서버에서 바로 읽은 값이에요. 당겨서 새로고침할 수 있어요. 더 자세한 건 위 버튼이나 도로시(채팅)에게 물어보세요.</Body>
+          <Body muted>숫자는 회사 서버에서 바로 읽은 값이에요. 당겨서 새로고침할 수 있어요.</Body>
         </>
       )}
     </ScrollView>
