@@ -21,6 +21,7 @@ type NativeInbox = {
   openAppDetails(): void;
   isReplyWatchGranted(): boolean;
   openAccessibilitySettings(): void;
+  disableReplyWatch(): boolean;
   getSentReplies(sinceMs: number, limit: number): Promise<SentReply[]>;
   clearSentReplies(): void;
   setReplyDebug(on: boolean): void;
@@ -50,6 +51,9 @@ export const openAppDetails = () => native?.openAppDetails();
 export const replyWatchSupported = () => !!native && typeof native.isReplyWatchGranted === 'function';
 export const replyWatchGranted = () => native?.isReplyWatchGranted?.() ?? false;
 export const openAccessibilitySettings = () => native?.openAccessibilitySettings?.();
+/** Turns the reply-watch accessibility service off in one tap (so GCash/Maya will open). */
+export const disableReplyWatch = (): boolean => native?.disableReplyWatch?.() ?? false;
+export const disableReplyWatchSupported = () => !!native && typeof native.disableReplyWatch === 'function';
 export const clearSentReplies = () => native?.clearSentReplies?.();
 export async function getSentReplies(sinceMs = 0, limit = 200): Promise<SentReply[]> {
   return native?.getSentReplies ? native.getSentReplies(sinceMs, limit) : [];

@@ -40,6 +40,10 @@ class DorothyInboxModule : Module() {
       context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // Turn the reply-watch accessibility service off from inside the app, so banking apps
+    // (GCash/Maya) that refuse to run while accessibility is on can be opened.
+    Function("disableReplyWatch") { DorothyReplyListener.disableNow() }
+
     AsyncFunction("getSentReplies") { sinceMs: Double, limit: Int ->
       SentStore.read(context, sinceMs.toLong(), limit)
     }

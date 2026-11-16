@@ -126,7 +126,33 @@ class DorothyReplyListener : AccessibilityService() {
 
   override fun onInterrupt() {}
 
+  override fun onServiceConnected() {
+    super.onServiceConnected()
+    instance = this
+  }
+
+  override fun onDestroy() {
+    if (instance === this) instance = null
+    super.onDestroy()
+  }
+
   companion object {
     private val SEND_WORDS = listOf("전송", "보내기", "send")
+
+    // Keep a reference to the running service so the app can turn accessibility off in one tap
+    // (banking apps like GCash/Maya refuse to run while any accessibility service is enabled).
+    @Volatile
+    private var instance: DorothyReplyListener? = null
+
+    /** Turns this accessibility service off from inside the app. Returns true if it was running. */
+    fun disableNow(): Boolean {
+      val s = instance ?: return false
+      return try {
+        s.disableSelf()
+        true
+      } catch (e: Throwable) {
+        false
+      }
+    }
   }
 }
