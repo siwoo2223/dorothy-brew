@@ -74,7 +74,7 @@ export function Markdown({ text, color, size = 15 }: { text: string; color: stri
     if (heading) {
       const level = heading[1].length;
       blocks.push(
-        <Text key={idx} style={{ color, fontWeight: '800', fontSize: size + (level === 1 ? 4 : level === 2 ? 2 : 1), marginTop: idx ? 4 : 0, lineHeight: (size + 6) * 1.3 }}>
+        <Text key={idx} selectable style={{ color, fontWeight: '800', fontSize: size + (level === 1 ? 4 : level === 2 ? 2 : 1), marginTop: idx ? 4 : 0, lineHeight: (size + 6) * 1.3 }}>
           <Inline segs={parseInline(heading[2])} color={color} size={size + 2} />
         </Text>,
       );
@@ -86,7 +86,7 @@ export function Markdown({ text, color, size = 15 }: { text: string; color: stri
       blocks.push(
         <View key={idx} style={styles.li}>
           <Text style={{ color, fontSize: size, lineHeight: size * 1.5 }}>•</Text>
-          <Text style={{ color, fontSize: size, lineHeight: size * 1.5, flex: 1 }}>
+          <Text selectable style={{ color, fontSize: size, lineHeight: size * 1.5, flex: 1 }}>
             <Inline segs={parseInline(bullet[1])} color={color} size={size} />
           </Text>
         </View>,
@@ -99,7 +99,7 @@ export function Markdown({ text, color, size = 15 }: { text: string; color: stri
       blocks.push(
         <View key={idx} style={styles.li}>
           <Text style={{ color, fontSize: size, lineHeight: size * 1.5, fontWeight: '600' }}>{numbered[1]}.</Text>
-          <Text style={{ color, fontSize: size, lineHeight: size * 1.5, flex: 1 }}>
+          <Text selectable style={{ color, fontSize: size, lineHeight: size * 1.5, flex: 1 }}>
             <Inline segs={parseInline(numbered[2])} color={color} size={size} />
           </Text>
         </View>,
@@ -108,7 +108,7 @@ export function Markdown({ text, color, size = 15 }: { text: string; color: stri
     }
 
     blocks.push(
-      <Text key={idx} style={{ color, fontSize: size, lineHeight: size * 1.5 }}>
+      <Text key={idx} selectable style={{ color, fontSize: size, lineHeight: size * 1.5 }}>
         <Inline segs={parseInline(line)} color={color} size={size} />
       </Text>,
     );

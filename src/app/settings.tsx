@@ -6,6 +6,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 import { Body, Button, Card, Input, Title } from '../components/ui';
+import { SetupCard } from '../components/SetupCard';
 import { CompanyCard } from '../components/CompanyCard';
 import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { GoogleCard } from '../components/GoogleCard';
@@ -52,6 +53,7 @@ export default function Settings() {
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <UpdateCard />
+      <SetupCard />
 
       <Section icon="🙂" title="나에 대해" defaultOpen>
         {loaded && (

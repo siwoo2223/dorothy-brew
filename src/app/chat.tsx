@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, LayoutAnimation, Platform, Pressable, Share, StyleSheet, Text, UIManager, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,6 +15,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const tap = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 /** Smoothly animates the next layout change (e.g. the photo preview sliding in/out). */
 const smooth = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+/** Dorothy's reply as plain text to copy/send: drop the ```chart/```image blocks and the ⚠️ prefix. */
+const shareText = (raw: string) =>
+  raw.replace(/```(chart|image)\s*\n[\s\S]*?```/g, '').replace(/^⚠️\s*/, '').replace(/\n{3,}/g, '\n\n').trim();
+/** Opens the system share sheet (복사 · 카카오톡 · 문자 …) with the given text. */
+const copyOrSend = (raw: string) => {
+  const text = shareText(raw);
+  if (text) Share.share({ message: text }).catch(() => {});
+};
 
 import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
@@ -371,22 +379,21 @@ export default function Chat() {
         }
         renderItem={({ item }) => {
           const mine = item.role === 'user';
+          if (mine) {
+            return (
+              <View style={[styles.bubble, { alignSelf: 'flex-end', backgroundColor: t.userBubble }]}>
+                <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>{item.text}</Text>
+              </View>
+            );
+          }
           return (
-            <View
-              style={[
-                styles.bubble,
-                mine
-                  ? { alignSelf: 'flex-end', backgroundColor: t.userBubble }
-                  : { alignSelf: 'flex-start', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
-              {mine ? (
-                <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>
-                  {item.text}
-                </Text>
-              ) : (
+            <View style={{ alignSelf: 'flex-start', maxWidth: '92%' }}>
+              <View style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
                 <RichMessage text={item.text} color={t.text} />
-              )}
+              </View>
+              <Pressable onPress={() => { tap(); copyOrSend(item.text); }} hitSlop={6} style={styles.copyBtn}>
+                <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>📋 복사 · 보내기</Text>
+              </Pressable>
             </View>
           );
         }}
@@ -500,6 +507,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 20, fontWeight: '700' },
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
+  copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 1 },
   composer: { flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end' },
   send: { borderRadius: 14, paddingHorizontal: 18, paddingVertical: 13 },
   mic: { borderRadius: 14, borderWidth: 1, width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
