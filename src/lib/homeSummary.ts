@@ -223,6 +223,8 @@ export async function companyDashboard(): Promise<Dashboard | null> {
 
 // ── Funds & monthly P&L (dorothy_finance.php), per currency to match the admin accounting page ──
 export type Money = { currency: string; amount: number };
+export type ExpenseCat = { currency: string; items: { category: string; amount: number }[] };
+export type MonthRow = { ym: string; revenue: Money[]; expense: Money[]; net: Money[] };
 export type Finance = {
   month: string;
   funds: Money[]; // 총 자금
@@ -232,6 +234,8 @@ export type Finance = {
   deposits: Money[]; // 이번 달 입금 (통장)
   withdrawals: Money[]; // 이번 달 출금 (통장)
   net: Money[]; // 이번 달 손익
+  expenseByCategory: ExpenseCat[]; // 이번 달 지출(통장) 분류별, 통화별
+  months: MonthRow[]; // 최근 6개월 결산
 };
 
 /** {PHP:x, KRW:y} → [{currency,amount}], PHP first, dropping missing currencies. */
@@ -264,6 +268,20 @@ export async function companyFinance(): Promise<Finance | null> {
       deposits: moneyList(cash.income),
       withdrawals: moneyList(cash.expense),
       net: moneyList(d.net),
+      expenseByCategory: ['PHP', 'KRW']
+        .map((cur) => ({
+          currency: cur,
+          items: asArr((d.expense_by_category as Row)?.[cur])
+            .map((r) => ({ category: str(r.category), amount: int(r.amount) ?? 0 }))
+            .filter((x) => x.category !== '' && x.amount !== 0),
+        }))
+        .filter((c) => c.items.length > 0),
+      months: asArr(d.months).map((m) => ({
+        ym: str(m.ym),
+        revenue: moneyList(m.revenue),
+        expense: moneyList(m.expense),
+        net: moneyList(m.net),
+      })),
     };
   } catch {
     return null;
