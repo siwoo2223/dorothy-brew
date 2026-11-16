@@ -73,21 +73,28 @@ export default function Company() {
             </Card>
           )}
 
-          {/* 이번 달 + 다음 출항 */}
-          {dash && (dash.month || dash.next) && (
+          {/* 이번 달 매출·수지 */}
+          {dash && (dash.monthSales || dash.monthNet) && (
             <View style={styles.metrics}>
-              {dash.month && (
+              {dash.monthSales && (
                 <View style={[styles.metric, { backgroundColor: t.card, borderColor: t.border }]}>
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달</Text>
-                  <Text style={[styles.metricN, { color: t.accent }]}>{dash.month}</Text>
+                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 매출</Text>
+                  <Text style={[styles.metricN, { color: t.accent }]} numberOfLines={1}>{dash.monthSales}</Text>
+                  {dash.lastMonthSales && <Text style={{ color: t.subtext, fontSize: 11 }}>지난달 {dash.lastMonthSales}</Text>}
                 </View>
               )}
-              {dash.next && (
+              {dash.monthNet && (
                 <View style={[styles.metric, { backgroundColor: t.card, borderColor: t.border }]}>
-                  <Text style={{ color: t.subtext, fontSize: 12 }}>다음 출항</Text>
-                  <Text style={[styles.metricN, { color: t.text, fontSize: 16 }]} numberOfLines={2}>{dash.next}</Text>
+                  <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달 수지</Text>
+                  <Text style={[styles.metricN, { color: t.text }]} numberOfLines={1}>{dash.monthNet}</Text>
+                  {dash.todayNew !== null && <Text style={{ color: t.subtext, fontSize: 11 }}>오늘 신규 {dash.todayNew}건</Text>}
                 </View>
               )}
+            </View>
+          )}
+          {dash && dash.next && (
+            <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
+              <Text style={{ color: t.subtext, fontSize: 13, paddingHorizontal: 16, paddingVertical: 12 }}>🚢 다음 출항 · {dash.next}</Text>
             </View>
           )}
 
