@@ -58,6 +58,7 @@ export default function RootLayout() {
             <Tabs.Screen name="shipments" options={{ href: null, title: '화물 목록' }} />
             <Tabs.Screen name="shipment" options={{ href: null, title: '화물 상세' }} />
             <Tabs.Screen name="finance" options={{ href: null, title: '자금 · 손익' }} />
+            <Tabs.Screen name="account" options={{ href: null, title: '계좌 상세' }} />
             <Tabs.Screen name="schedule" options={{ href: null, title: '출항 스케줄' }} />
           </Tabs>
         </StoreProvider>
