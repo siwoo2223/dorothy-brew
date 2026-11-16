@@ -227,8 +227,9 @@ export type ExpenseCat = { currency: string; items: { category: string; amount: 
 export type MonthRow = { ym: string; revenue: Money[]; expense: Money[]; net: Money[] };
 export type Finance = {
   month: string;
+  fx: number; // 환율 (₩ per ₱1)
   funds: Money[]; // 총 자금
-  accounts: { name: string; currency: string; balance: number }[]; // 계좌별 잔액
+  accounts: { id: number; name: string; currency: string; balance: number }[]; // 계좌별 잔액
   revenue: Money[]; // 이번 달 매출 (발생주의)
   expense: Money[]; // 이번 달 지출 (발생주의)
   deposits: Money[]; // 이번 달 입금 (통장)
@@ -259,9 +260,10 @@ export async function companyFinance(): Promise<Finance | null> {
     const cash = (d.cash_in_out as Row) ?? {};
     return {
       month: str(d.month),
+      fx: int(d.fx_krw_per_php) ?? 24.7,
       funds: moneyList(d.funds),
       accounts: asArr(d.accounts)
-        .map((r) => ({ name: str(r.name), currency: str(r.currency), balance: int(r.balance) ?? 0 }))
+        .map((r) => ({ id: int(r.id) ?? 0, name: str(r.name), currency: str(r.currency), balance: int(r.balance) ?? 0 }))
         .filter((a) => a.name !== ''),
       revenue: moneyList(d.revenue),
       expense: moneyList(d.expense),
@@ -292,4 +294,34 @@ export async function companyFinance(): Promise<Finance | null> {
 export function money(m: Money): string {
   const sym = m.currency === 'PHP' ? '₱' : m.currency === 'KRW' ? '₩' : m.currency + ' ';
   return `${sym}${fmt(Math.round(m.amount))}`;
+}
+
+// ── One account's this-month transactions (dorothy_finance.php?account=id) ──
+export type AccountTxn = { date: string; time: string; direction: 'in' | 'out'; amount: number; category: string; memo: string; counterparty: string };
+export type AccountDetail = { id: number; name: string; currency: string; balance: number; month: string; transactions: AccountTxn[] };
+
+export async function companyAccount(id: number): Promise<AccountDetail | null> {
+  if (!company.companyConfigured()) return null;
+  try {
+    const d = JSON.parse(await company.fetchCompanyFinance(id)) as Row;
+    const a = (d.account as Row) ?? {};
+    return {
+      id: int(a.id) ?? id,
+      name: str(a.name),
+      currency: str(a.currency),
+      balance: int(a.balance) ?? 0,
+      month: str(d.month),
+      transactions: asArr(d.transactions).map((r) => ({
+        date: str(r.txn_date),
+        time: str(r.txn_time),
+        direction: str(r.direction) === 'in' ? 'in' : 'out',
+        amount: int(r.amount) ?? 0,
+        category: str(r.category),
+        memo: str(r.memo),
+        counterparty: str(r.counterparty),
+      })),
+    };
+  } catch {
+    return null;
+  }
 }

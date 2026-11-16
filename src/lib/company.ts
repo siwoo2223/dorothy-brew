@@ -156,14 +156,15 @@ function financeUrl(): string {
 }
 
 /** Funds on hand + this month's revenue/deposits/expense/profit, per currency (matches the admin accounting page). */
-export async function fetchCompanyFinance(): Promise<string> {
+export async function fetchCompanyFinance(accountId?: number): Promise<string> {
   const base = financeUrl();
   if (!base || !token) {
     throw new Error('회사 현황이 아직 연결되지 않았어요. 설정 → "회사 현황 연결"에서 주소와 토큰을 넣어 주세요.');
   }
+  const url = accountId ? `${base}${base.includes('?') ? '&' : '?'}account=${encodeURIComponent(String(accountId))}` : base;
   let res: Response;
   try {
-    res = await fetch(base, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
+    res = await fetch(url, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
   } catch {
     throw new Error('회사 서버에 연결할 수 없어요. 주소가 맞는지, 인터넷이 되는지 확인해 주세요.');
   }

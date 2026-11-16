@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-import { triageAlerts } from './assistant';
+import { detectTodos, triageAlerts } from './assistant';
 import * as company from './company';
 import * as google from './google';
 import * as inbox from './inbox';
@@ -90,6 +90,45 @@ async function runProactiveCheck(): Promise<void> {
   const missed = calls.filter((c) => c.type === 'missed' && !seenSet.has(key(`c:${c.time}`)));
 
   await AsyncStorage.setItem(LAST_KEY, String(now));
+
+  // ── 카톡 할 일 감지: 지정한 방에서 '사용자에게 온 요청'을 뽑아 등록 전 후보로 쌓고 알린다. ──
+  try {
+    const todoRooms: string[] = JSON.parse((await AsyncStorage.getItem('dorothy.todoRooms')) ?? '[]');
+    if (todoRooms.length && freshMessages.length) {
+      const roomMsgs = freshMessages.filter((m) => {
+        const room = (m.conversation || m.sender || '').toLowerCase();
+        return todoRooms.some((r) => room.includes(r.toLowerCase()) || r.toLowerCase().includes(room));
+      });
+      if (roomMsgs.length) {
+        const nowManila = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Manila' }) + ' (Asia/Manila, UTC+8)';
+        const todos = await detectTodos(state, inbox.formatMessages(roomMsgs, 6000), nowManila).catch(() => []);
+        if (todos.length) {
+          const cur = JSON.parse((await AsyncStorage.getItem('dorothy.todoCandidates')) ?? '[]') as {
+            id: string; title: string; who: string; dueAt?: string; room: string; createdAt: string;
+          }[];
+          const keys = new Set(cur.map((c) => `${c.who}|${c.title}`.toLowerCase()));
+          const add = todos
+            .filter((td) => td.title && !keys.has(`${td.who}|${td.title}`.toLowerCase()))
+            .map((td) => ({
+              id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+              title: td.title, who: td.who, room: td.room, dueAt: td.dueAt ?? undefined, createdAt: new Date().toISOString(),
+            }));
+          if (add.length) {
+            await AsyncStorage.setItem('dorothy.todoCandidates', JSON.stringify([...cur, ...add].slice(-30)));
+            const hr = new Date().getHours();
+            if (!(QUIET_START <= hr || hr < QUIET_END)) {
+              await Notifications.scheduleNotificationAsync({
+                content: { title: '📥 도로시가 할 일을 찾았어요', body: add.map((x) => x.title).slice(0, 3).join(' · ') + ' — 등록할지 확인하세요', data: { url: '/tasks' } },
+                trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 1, channelId: 'reminders' },
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // never break the background runner on detection errors
+  }
 
   // Business snapshot: once a day in the morning, pull the company status so Dorothy can flag
   // something the owner should act on today. Guarded by the date so it isn't repeated every run.

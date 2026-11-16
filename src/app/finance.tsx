@@ -1,6 +1,6 @@
-import { useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Card, Title } from '../components/ui';
 import { Chart } from '../components/Chart';
@@ -18,6 +18,7 @@ const sym = (cur: string) => (cur === 'PHP' ? '₱' : cur === 'KRW' ? '₩' : cu
 export default function FinanceScreen() {
   const t = useTheme();
   const navigation = useNavigation();
+  const router = useRouter();
   const params = useLocalSearchParams<{ focus?: string }>(); // 'net' highlights 손익
   const [fin, setFin] = useState<Finance | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,18 +85,47 @@ export default function FinanceScreen() {
               <Body muted>계좌 잔액을 읽지 못했어요.</Body>
             )}
             <Text style={{ color: t.subtext, fontSize: 12 }}>통화별 합계 (가상계좌 제외)</Text>
+            {fin.funds.length > 0 && fin.fx > 0 && (() => {
+              const php = fin.funds.find((f) => f.currency === 'PHP')?.amount ?? 0;
+              const krw = fin.funds.find((f) => f.currency === 'KRW')?.amount ?? 0;
+              const inPhp = php + krw / fin.fx;
+              const inKrw = krw + php * fin.fx;
+              return (
+                <View style={{ borderTopColor: t.accent, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8, paddingTop: 8, gap: 2 }}>
+                  <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>환산 합계 (환율 ₩{Math.round(fin.fx)}/₱1)</Text>
+                  <Text style={{ color: t.text, fontSize: 15 }}>전부 원화로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'KRW', amount: inKrw })}</Text></Text>
+                  <Text style={{ color: t.text, fontSize: 15 }}>전부 페소로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'PHP', amount: inPhp })}</Text></Text>
+                </View>
+              );
+            })()}
           </View>
 
-          {fin.accounts.length > 0 && (
-            <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
-              {fin.accounts.map((a, i) => (
-                <View key={a.name + i} style={[styles.acctRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
-                  <Text style={{ color: t.text, fontSize: 14, flex: 1 }} numberOfLines={1}>{a.name}</Text>
-                  <Text style={{ color: t.text, fontSize: 14, fontWeight: '700' }}>{money({ currency: a.currency, amount: a.balance })}</Text>
+          {/* 계좌: 통화별로 묶어 소계 + 계좌 누르면 그 계좌 이번 달 거래 상세 */}
+          {fin.funds.map((fund) => {
+            const accts = fin.accounts.filter((a) => a.currency === fund.currency);
+            if (accts.length === 0) return null;
+            const label = fund.currency === 'PHP' ? '페소' : fund.currency === 'KRW' ? '원화' : fund.currency;
+            return (
+              <View key={fund.currency} style={{ gap: 4 }}>
+                <Text style={{ color: t.subtext, fontSize: 13, fontWeight: '700', paddingHorizontal: 4 }}>
+                  {sym(fund.currency)} {label} 계좌 — 합계 {money(fund)}
+                </Text>
+                <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
+                  {accts.map((a, i) => (
+                    <Pressable
+                      key={a.id || a.name + i}
+                      onPress={() => router.navigate({ pathname: '/account', params: { id: String(a.id), name: a.name, currency: a.currency } })}
+                      style={({ pressed }) => [styles.acctRow, { opacity: pressed ? 0.85 : 1 }, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}
+                    >
+                      <Text style={{ color: t.text, fontSize: 14, flex: 1 }} numberOfLines={1}>{a.name}</Text>
+                      <Text style={{ color: t.text, fontSize: 14, fontWeight: '700' }}>{money({ currency: a.currency, amount: a.balance })}</Text>
+                      <Text style={{ color: t.accent, fontSize: 13 }}> ›</Text>
+                    </Pressable>
+                  ))}
                 </View>
-              ))}
-            </View>
-          )}
+              </View>
+            );
+          })}
 
           {/* 이번 달 */}
           <Text style={[styles.section, { color: t.text }]}>📅 이번 달 ({fin.month})</Text>
