@@ -12,6 +12,7 @@ type Shortcut = { icon: string; label: string; nav?: { pathname: string; params?
 
 /** Quick entries — most open a dedicated page (not chat); only the open-ended one asks Dorothy. */
 const SHORTCUTS: Shortcut[] = [
+  { icon: '🚢', label: '출항 스케줄', nav: { pathname: '/schedule' } },
   { icon: '💰', label: '자금 · 손익', nav: { pathname: '/finance' } },
   { icon: '🧾', label: '미수금', nav: { pathname: '/shipments', params: { status: '배송완료', filter: 'unpaid', title: '미수 가능(배송완료·입금 0)' } } },
   { icon: '📅', label: '이번 달 손익', nav: { pathname: '/finance', params: { focus: 'net' } } },
@@ -62,11 +63,26 @@ export default function Company() {
         </Card>
       ) : (
         <>
-          {/* 상태별 건수 그래프 */}
+          {/* 상태별 건수 그래프 + 눌러서 상세 목록 */}
           {loading && !dash ? (
             <Card><ActivityIndicator color={t.accent} /><Body muted>회사 현황을 불러오는 중…</Body></Card>
           ) : dash && dash.statuses.length > 0 ? (
-            <Chart spec={{ type: 'bar', title: '🏢 화물 상태별 건수', data: dash.statuses }} />
+            <>
+              <Chart spec={{ type: 'bar', title: '🏢 화물 상태별 건수', data: dash.statuses }} />
+              <Text style={{ color: t.subtext, fontSize: 12, paddingHorizontal: 4 }}>상태를 누르면 그 화물 목록(상세)이 열려요 ›</Text>
+              <View style={styles.shortcuts}>
+                {dash.statuses.map((s) => (
+                  <Pressable
+                    key={s.label}
+                    onPress={() => router.navigate({ pathname: '/shipments', params: { status: s.label, title: `${s.label} 화물 (${s.value}건)` } })}
+                    style={({ pressed }) => [styles.statusChip, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.8 : 1 }]}
+                  >
+                    <Text style={{ color: t.text, fontSize: 13, fontWeight: '700' }}>{s.label}</Text>
+                    <Text style={{ color: t.accent, fontSize: 13, fontWeight: '800' }}>{s.value}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
           ) : (
             <Card>
               <Title>🏢 화물 상태</Title>
@@ -145,4 +161,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   shortcuts: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   shortcut: { flexGrow: 1, flexBasis: '46%', borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'center', gap: 8 },
+  statusChip: { flexDirection: 'row', alignItems: 'center', gap: 7, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: 8 },
 });

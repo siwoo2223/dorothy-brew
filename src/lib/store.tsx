@@ -7,7 +7,7 @@ import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './n
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Followup, Memory, Profile, Routine, Task } from './types';
+import type { ChatTurn, Followup, Memory, Profile, Routine, Sailing, Task } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -27,6 +27,7 @@ const KEYS = {
   speechRate: 'dorothy.speechRate',
   routines: 'dorothy.routines',
   standbyShortcut: 'dorothy.standbyShortcut',
+  sailings: 'dorothy.sailings',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -71,6 +72,8 @@ export type AppState = {
   weeklyReportDay: number | null;
   /** Keep a persistent lock-screen notification that opens straight into standby. Android only. */
   standbyShortcut: boolean;
+  /** Booking/sailing schedules Dorothy read from the forwarder's photos (shown as calendar/list). */
+  sailings: Sailing[];
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -95,6 +98,7 @@ const initialState: AppState = {
   companyToken: '',
   weeklyReportDay: null,
   standbyShortcut: false,
+  sailings: [],
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -113,7 +117,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -133,6 +137,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.speechRate),
         AsyncStorage.getItem(KEYS.routines),
         AsyncStorage.getItem(KEYS.standbyShortcut),
+        AsyncStorage.getItem(KEYS.sailings),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -154,6 +159,7 @@ function useStoreValue() {
         speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
         routines: routines ? JSON.parse(routines) : [],
         standbyShortcut: standbyShortcut ? JSON.parse(standbyShortcut) : false,
+        sailings: sailings ? JSON.parse(sailings) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -281,6 +287,24 @@ function useStoreValue() {
         const next: Memory = { ...m, category: patch.category ?? m.category, content: patch.content ?? m.content };
         update('memories', ref.current.memories.map((x) => (x.id === id ? next : x)));
         return true;
+      },
+
+      /** Saves one sailing/booking Dorothy read from a schedule photo (shown on the 스케줄 calendar/list). */
+      addSailing(input: Omit<Sailing, 'id' | 'createdAt'>): Sailing {
+        // Skip an obvious duplicate (same carrier + voyage + ETD still listed).
+        const dup = ref.current.sailings.find(
+          (s) => s.carrier === input.carrier && (s.voyageNo ?? '') === (input.voyageNo ?? '') && (s.etd ?? '') === (input.etd ?? ''),
+        );
+        if (dup) return dup;
+        const sailing: Sailing = { id: newId(), createdAt: new Date().toISOString(), ...input };
+        update('sailings', [...ref.current.sailings, sailing]);
+        return sailing;
+      },
+      deleteSailing(id: string) {
+        update('sailings', ref.current.sailings.filter((s) => s.id !== id));
+      },
+      clearSailings() {
+        update('sailings', []);
       },
 
       addFollowup(input: { who: string; what: string; source?: string }): Followup {
