@@ -65,7 +65,7 @@ export default function CameraScreen() {
       let streamed = '';
       const reply = await chat(question, getState(), actions, {
         spoken: true,
-        image: { base64: shot.base64, mediaType: 'image/jpeg' },
+        images: [{ base64: shot.base64, mediaType: 'image/jpeg' }],
         onToken: (tok) => { streamed += tok; setAnswer(streamed); },
       });
       setAnswer(reply);

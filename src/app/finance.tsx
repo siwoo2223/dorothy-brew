@@ -3,9 +3,12 @@ import { useCallback, useLayoutEffect, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Card, Title } from '../components/ui';
+import { Chart } from '../components/Chart';
 import { companyConfigured, loadCompanyConfig } from '../lib/company';
 import { companyFinance, Finance, money, Money } from '../lib/homeSummary';
 import { useTheme } from '../lib/theme';
+
+const sym = (cur: string) => (cur === 'PHP' ? '₱' : cur === 'KRW' ? '₩' : cur + ' ');
 
 /**
  * Funds on hand + this month's revenue / deposits / expense / profit — read straight from the
@@ -102,8 +105,42 @@ export default function FinanceScreen() {
             <Line label="지출 (쓴 돈)" value={moneyRow(fin.expense)} t={t} border />
             <Line label="손익 (매출 − 지출)" value={moneyRow(fin.net)} t={t} border highlight={params.focus === 'net'} />
           </View>
+
+          {/* 이번 달 지출 분류별 (통장 출금 기준) */}
+          {fin.expenseByCategory.length > 0 && (
+            <>
+              <Text style={[styles.section, { color: t.text }]}>🧾 이번 달 지출 — 어디에 썼나 (통장 기준)</Text>
+              {fin.expenseByCategory.map((c) => (
+                <Chart
+                  key={c.currency}
+                  spec={{ type: 'bar', title: `${sym(c.currency)} 지출 분류`, unit: c.currency, data: c.items.slice(0, 10).map((i) => ({ label: i.category, value: i.amount })) }}
+                />
+              ))}
+            </>
+          )}
+
+          {/* 최근 6개월 결산 */}
+          {fin.months.length > 0 && (
+            <>
+              <Text style={[styles.section, { color: t.text }]}>📊 월별 결산 (최근 6개월)</Text>
+              <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
+                {fin.months.map((m, i) => (
+                  <View key={m.ym} style={[styles.monthRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                    <Text style={{ color: t.text, fontSize: 14, fontWeight: '700', width: 64 }}>{m.ym.slice(2)}</Text>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={{ color: t.text, fontSize: 14, fontWeight: '700' }}>손익 {m.net.length ? m.net.map(money).join(' · ') : '—'}</Text>
+                      <Text style={{ color: t.subtext, fontSize: 11 }}>
+                        매출 {m.revenue.length ? m.revenue.map(money).join(' · ') : '—'} · 지출 {m.expense.length ? m.expense.map(money).join(' · ') : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
           <Body muted>
-            매출·지출·손익은 회계(재무제표)와 같은 기준이에요. 입금은 통장에 실제로 들어온 돈이라 매출과 다를 수 있어요. 통화(₱·₩)는 섞지 않고 따로 보여드려요.
+            매출·지출·손익은 회계(재무제표)와 같은 기준이에요. 입금과 &quot;지출 분류별&quot;은 통장에 실제로 오간 현금 기준이라 발생주의 지출과 다를 수 있어요. 통화(₱·₩)는 섞지 않고 따로 보여드려요.
           </Body>
         </>
       ) : null}
@@ -128,4 +165,5 @@ const styles = StyleSheet.create({
   listCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   acctRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
+  monthRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
 });
