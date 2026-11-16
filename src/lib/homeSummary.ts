@@ -227,6 +227,7 @@ export type ExpenseCat = { currency: string; items: { category: string; amount: 
 export type MonthRow = { ym: string; revenue: Money[]; expense: Money[]; net: Money[] };
 export type Finance = {
   month: string;
+  fx: number; // 환율 (₩ per ₱1)
   funds: Money[]; // 총 자금
   accounts: { id: number; name: string; currency: string; balance: number }[]; // 계좌별 잔액
   revenue: Money[]; // 이번 달 매출 (발생주의)
@@ -259,6 +260,7 @@ export async function companyFinance(): Promise<Finance | null> {
     const cash = (d.cash_in_out as Row) ?? {};
     return {
       month: str(d.month),
+      fx: int(d.fx_krw_per_php) ?? 24.7,
       funds: moneyList(d.funds),
       accounts: asArr(d.accounts)
         .map((r) => ({ id: int(r.id) ?? 0, name: str(r.name), currency: str(r.currency), balance: int(r.balance) ?? 0 }))

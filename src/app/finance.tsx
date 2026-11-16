@@ -85,6 +85,19 @@ export default function FinanceScreen() {
               <Body muted>계좌 잔액을 읽지 못했어요.</Body>
             )}
             <Text style={{ color: t.subtext, fontSize: 12 }}>통화별 합계 (가상계좌 제외)</Text>
+            {fin.funds.length > 0 && fin.fx > 0 && (() => {
+              const php = fin.funds.find((f) => f.currency === 'PHP')?.amount ?? 0;
+              const krw = fin.funds.find((f) => f.currency === 'KRW')?.amount ?? 0;
+              const inPhp = php + krw / fin.fx;
+              const inKrw = krw + php * fin.fx;
+              return (
+                <View style={{ borderTopColor: t.accent, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8, paddingTop: 8, gap: 2 }}>
+                  <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>환산 합계 (환율 ₩{Math.round(fin.fx)}/₱1)</Text>
+                  <Text style={{ color: t.text, fontSize: 15 }}>전부 원화로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'KRW', amount: inKrw })}</Text></Text>
+                  <Text style={{ color: t.text, fontSize: 15 }}>전부 페소로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'PHP', amount: inPhp })}</Text></Text>
+                </View>
+              );
+            })()}
           </View>
 
           {/* 계좌: 통화별로 묶어 소계 + 계좌 누르면 그 계좌 이번 달 거래 상세 */}
