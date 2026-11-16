@@ -98,11 +98,15 @@ async function runProactiveCheck(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   const bizDay = await AsyncStorage.getItem('dorothy.proactiveBizDay');
   if (bizDay !== today && hourNow >= 8 && hourNow < QUIET_START && (await company.loadCompanyConfig())) {
-    const report = await company.fetchCompanyReport('report').catch(() => '');
-    if (report) {
-      companyBlock = `<company_status>\n${report}\n</company_status>`;
-      await AsyncStorage.setItem('dorothy.proactiveBizDay', today);
-    }
+    const [report, attention] = await Promise.all([
+      company.fetchCompanyReport('report').catch(() => ''),
+      company.fetchCompanyAttention().catch(() => ''),
+    ]);
+    if (report) companyBlock += `<company_status>\n${report}\n</company_status>`;
+    // attention has this week's departures/arrivals, 7-day-stuck shipments, and an unpaid hint —
+    // exactly the "오늘 꼭 챙길 것" the owner wants flagged first.
+    if (attention) companyBlock += `${report ? '\n\n' : ''}<company_attention>\n${attention}\n</company_attention>`;
+    if (companyBlock) await AsyncStorage.setItem('dorothy.proactiveBizDay', today);
   }
 
   if (!freshMessages.length && !freshMail.length && !missed.length && !companyBlock) return;
