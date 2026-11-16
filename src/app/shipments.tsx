@@ -1,4 +1,4 @@
-import { useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -14,6 +14,7 @@ import { useTheme } from '../lib/theme';
 export default function Shipments() {
   const t = useTheme();
   const navigation = useNavigation();
+  const router = useRouter();
   const params = useLocalSearchParams<{ status?: string; code?: string; filter?: string; title?: string }>();
   const filter = params.filter === 'stuck' || params.filter === 'unpaid' ? params.filter : undefined;
   const title = params.title || '화물 목록';
@@ -94,7 +95,15 @@ export default function Shipments() {
           <Body muted>해당하는 화물이 없어요.</Body>
         ) : (
           rows.map((s, i) => (
-            <View key={`${s.trackingNo}-${i}`} style={[styles.row, { backgroundColor: t.card, borderColor: t.border }]}>
+            <Pressable
+              key={`${s.trackingNo}-${i}`}
+              onPress={() => router.navigate({ pathname: '/shipment', params: {
+                no: s.trackingNo, customer: s.customer, voyage: s.voyageCode, status: s.status,
+                days: s.daysInStatus !== null ? String(s.daysInStatus) : '', items: s.items,
+                boxes: String(s.boxes), cbm: String(s.cbm), weight: String(s.weightKg), unpaid: s.unpaid ? '1' : '',
+              } })}
+              style={({ pressed }) => [styles.row, { backgroundColor: t.card, borderColor: t.border, opacity: pressed ? 0.85 : 1 }]}
+            >
               <View style={styles.rowTop}>
                 <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>{s.trackingNo || '—'}</Text>
                 <View style={[styles.badge, { backgroundColor: t.accentSoft }]}>
@@ -104,9 +113,9 @@ export default function Shipments() {
               <Text style={{ color: t.text, fontSize: 14 }}>{s.customer || '고객 미상'}{s.voyageCode ? ` · ${s.voyageCode}` : ''}</Text>
               {!!s.items && <Text style={{ color: t.subtext, fontSize: 13 }} numberOfLines={2}>{s.items}</Text>}
               <Text style={{ color: t.subtext, fontSize: 12 }}>
-                박스 {s.boxes} · {s.cbm} CBM · {s.weightKg} kg{s.unpaid ? ' · 💰 입금 0' : ''}
+                박스 {s.boxes} · {s.cbm} CBM · {s.weightKg} kg{s.unpaid ? ' · 💰 입금 0' : ''}  ›
               </Text>
-            </View>
+            </Pressable>
           ))
         )}
 

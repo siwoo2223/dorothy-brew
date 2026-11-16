@@ -56,6 +56,8 @@ export default function RootLayout() {
             <Tabs.Screen name="camera" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
             {/* Shipment list drill-down: not a tab, has a header (title set per group). */}
             <Tabs.Screen name="shipments" options={{ href: null, title: '화물 목록' }} />
+            <Tabs.Screen name="shipment" options={{ href: null, title: '화물 상세' }} />
+            <Tabs.Screen name="finance" options={{ href: null, title: '자금 · 손익' }} />
           </Tabs>
         </StoreProvider>
       </KeyboardProvider>
