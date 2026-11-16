@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, LayoutAnimation, Platform, Pressable, Share, StyleSheet, Text, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, LayoutAnimation, Platform, Pressable, Share, StyleSheet, Text, UIManager, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,19 +36,32 @@ import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvail
 const SUGGESTIONS = ['오늘 뭐부터 해야 해?', '이번 주 출항·입항 뭐 있어?', '이번 달 수지 어때?', '회신할 거 뭐 있어?', '내일 할 일 정리해줘'];
 
 type Phase = 'off' | 'wake' | 'command' | 'busy';
+type Img = { uri: string; base64: string; mediaType: string };
+
+/**
+ * The real image type from the base64 bytes — the photo picker often reports the wrong mimeType
+ * (e.g. "image/png" for a JPEG screenshot), which makes the Claude API reject the upload (400).
+ */
+function sniffMedia(b64: string): string {
+  if (b64.startsWith('/9j/')) return 'image/jpeg';
+  if (b64.startsWith('iVBORw0KGgo')) return 'image/png';
+  if (b64.startsWith('R0lGOD')) return 'image/gif';
+  if (b64.startsWith('UklGR')) return 'image/webp';
+  return 'image/jpeg';
+}
 
 const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 손익을 그래프로 보여줘.';
 /** Pre-filled prompt for the 🚢 부킹 스케줄 chip: read the forwarder's schedule photo and organize it. */
 const BOOKING_PROMPT =
-  '이 부킹 스케줄 사진을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 마감과 출항 전에 알림 받을 수 있게 할 일로 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
+  '이 부킹 스케줄 사진(여러 장이면 전부)을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 출항 스케줄에 저장(add_sailing)한 뒤 마감·출항 전 알림도 필요하면 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
 
 export default function Chat() {
   const t = useTheme();
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  // A photo/screenshot attached to the next message (Claude can read it).
-  const [image, setImage] = useState<{ uri: string; base64: string; mediaType: string } | null>(null);
+  // Photo(s)/screenshot(s) attached to the next message (Claude can read them).
+  const [images, setImages] = useState<Img[]>([]);
   // The phone brain streams its reply; show it as it is written.
   const [streaming, setStreaming] = useState('');
   const list = useRef<FlatList>(null);
@@ -271,17 +284,20 @@ export default function Chat() {
         Alert.alert('권한 필요', camera ? '카메라 권한을 허용해 주세요.' : '사진 접근 권한을 허용해 주세요.');
         return;
       }
+      // Gallery allows picking several pages of a schedule at once; the camera takes one shot.
       const res = camera
         ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.5 })
-        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.5, mediaTypes: ['images'] });
+        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.5, mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 8 });
       if (res.canceled || !res.assets?.length) return;
-      const a = res.assets[0];
-      if (!a.base64) {
+      const picked: Img[] = res.assets
+        .filter((a) => a.base64)
+        .map((a) => ({ uri: a.uri, base64: a.base64!, mediaType: sniffMedia(a.base64!) }));
+      if (picked.length === 0) {
         Alert.alert('사진을 읽지 못했어요', '다시 시도해 주세요.');
         return;
       }
       smooth();
-      setImage({ uri: a.uri, base64: a.base64, mediaType: a.mimeType ?? 'image/jpeg' });
+      setImages((prev) => [...prev, ...picked].slice(0, 8));
     } catch (e) {
       Alert.alert('사진 오류', e instanceof Error ? e.message : String(e));
     }
@@ -292,7 +308,8 @@ export default function Chat() {
       Alert.alert('사진은 Claude 두뇌에서', '설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.');
       return;
     }
-    Alert.alert('사진 보여주기', '영수증·입고표·화면 캡처 등을 도로시에게 보여줘요.', [
+    Keyboard.dismiss(); // avoid a phantom keyboard inset pushing the composer up after the picker closes
+    Alert.alert('사진 보여주기', '영수증·입고표·부킹 스케줄 등을 도로시에게 보여줘요. 여러 장 한 번에 골라도 돼요.', [
       { text: '카메라로 찍기', onPress: () => pickImage(true) },
       { text: '사진첩에서 고르기', onPress: () => pickImage(false) },
       { text: '취소', style: 'cancel' },
@@ -301,27 +318,28 @@ export default function Chat() {
 
   const send = async (text: string, spoken = false, extra?: string) => {
     const message = text.trim();
-    const img = image;
-    if ((!message && !img) || busy) return;
+    const imgs = images;
+    if ((!message && imgs.length === 0) || busy) return;
     if (state.model !== 'local' && !state.apiKey) {
       Alert.alert('API 키 필요', '설정 탭에서 Claude API 키를 먼저 입력해 주세요.');
       return;
     }
     setDraft('');
-    if (img) smooth();
-    setImage(null);
+    if (imgs.length) smooth();
+    setImages([]);
     setBusy(true);
     // Sending my own message always jumps to the newest, even if I had scrolled up.
     atBottom.current = true;
     // Snapshot before appending so the new message is not sent twice.
     const snapshot = getState();
-    actions.appendChat({ role: 'user', text: img ? `📷 ${message || '사진'}` : message });
+    const label = imgs.length ? `📷${imgs.length > 1 ? `×${imgs.length}` : ''} ${message || '사진'}` : message;
+    actions.appendChat({ role: 'user', text: label });
     const voiceReply = spoken || phase.current !== 'off';
     try {
-      const reply = await chat(message || '이 사진에서 중요한 내용을 읽어서 정리해 줘.', snapshot, actions, {
+      const reply = await chat(message || '이 사진(들)에서 중요한 내용을 읽어서 정리해 줘.', snapshot, actions, {
         spoken: voiceReply,
         extra,
-        image: img ?? undefined,
+        images: imgs.length ? imgs.map((i) => ({ base64: i.base64, mediaType: i.mediaType })) : undefined,
         onToken: (token) => setStreaming((s) => s + token),
       });
       setStreaming('');
@@ -438,16 +456,26 @@ export default function Chat() {
           )}
         </View>
       )}
-      {image && (
+      {images.length > 0 && (
         <View style={[styles.imagePreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
-          <Image source={{ uri: image.uri }} style={styles.thumb} />
-          <Text style={{ color: t.subtext, flex: 1 }}>사진 1장 · 전송하면 도로시가 읽어요</Text>
-          <Pressable onPress={() => { tap(); smooth(); setImage(null); }} hitSlop={8}>
-            <Text style={{ color: t.danger, fontSize: 18 }}>✕</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+            {images.map((im, i) => (
+              <View key={im.uri + i}>
+                <Image source={{ uri: im.uri }} style={styles.thumb} />
+                <Pressable
+                  onPress={() => { tap(); smooth(); setImages((prev) => prev.filter((_, k) => k !== i)); }}
+                  hitSlop={6}
+                  style={styles.thumbX}
+                >
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+          <Text style={{ color: t.subtext, fontSize: 12 }}>사진 {images.length}장 · 전송하면 읽어요</Text>
         </View>
       )}
-      {!image && !listening && (
+      {images.length === 0 && !listening && (
         <View style={[styles.quickRow, { backgroundColor: t.bg }]}>
           {QUICK.map((q) => (
             <Pressable
@@ -489,7 +517,7 @@ export default function Chat() {
           multiline
           onSubmitEditing={() => send(draft)}
         />
-        <Pressable onPress={() => { tap(); send(draft); }} disabled={busy || (!draft.trim() && !image)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && !image) ? 0.4 : 1 }]}>
+        <Pressable onPress={() => { tap(); send(draft); }} disabled={busy || (!draft.trim() && images.length === 0)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}>
           <Text style={{ color: '#fff', fontWeight: '700' }}>전송</Text>
         </Pressable>
       </View>
@@ -516,6 +544,7 @@ const styles = StyleSheet.create({
   send: { borderRadius: 14, paddingHorizontal: 18, paddingVertical: 13 },
   mic: { borderRadius: 14, borderWidth: 1, width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   imagePreview: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  thumbX: { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   thumb: { width: 44, height: 44, borderRadius: 8 },
   voiceBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 10, paddingTop: 8 },

@@ -893,12 +893,12 @@ export async function chat(
     spoken?: boolean;
     onToken?: (token: string) => void;
     extra?: string;
-    /** A photo/screenshot the user attached to this turn (Claude can see it; the local model cannot). */
-    image?: { base64: string; mediaType: string };
+    /** Photo(s)/screenshot(s) the user attached to this turn (Claude can see them; the local model cannot). */
+    images?: { base64: string; mediaType: string }[];
   } = {},
 ): Promise<string> {
   if (state.model === 'local') {
-    if (opts.image) return '사진은 폰 안의 두뇌로는 못 봐요. 설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.';
+    if (opts.images?.length) return '사진은 폰 안의 두뇌로는 못 봐요. 설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.';
     return localChat(userText, state, opts);
   }
   const client = createClient(state);
@@ -911,12 +911,10 @@ export async function chat(
       role: 'user',
       // Only on the live turn; history keeps the plain text.
       content: [
-        ...(opts.image
-          ? [{
-              type: 'image' as const,
-              source: { type: 'base64' as const, media_type: opts.image.mediaType as 'image/jpeg', data: opts.image.base64 },
-            }]
-          : []),
+        ...(opts.images ?? []).map((img) => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: img.mediaType as 'image/jpeg', data: img.base64 },
+        })),
         { type: 'text', text: clean(userText) },
         ...(opts.extra ? [{ type: 'text' as const, text: clean(opts.extra) }] : []),
         ...(opts.spoken
