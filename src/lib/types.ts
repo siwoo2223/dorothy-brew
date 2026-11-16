@@ -46,6 +46,29 @@ export type Memory = {
   createdAt: string;
 };
 
+/** A booking/sailing Dorothy read from the forwarder's schedule photo. Dates are ISO (YYYY-MM-DD). */
+export type Sailing = {
+  id: string;
+  /** 선사, e.g. HMM / KMTC / ONE. */
+  carrier: string;
+  /** 항차 또는 부킹 번호. */
+  voyageNo?: string;
+  /** 출발항, e.g. 부산 / 인천. */
+  from?: string;
+  /** 도착항, e.g. 마닐라 노스포트. */
+  to?: string;
+  /** 서류 마감(YYYY-MM-DD). */
+  docCutoff?: string;
+  /** 반입 마감(CY closing, YYYY-MM-DD). */
+  cyCutoff?: string;
+  /** 출항일 ETD(YYYY-MM-DD). */
+  etd?: string;
+  /** 도착일 ETA(YYYY-MM-DD). */
+  eta?: string;
+  note?: string;
+  createdAt: string;
+};
+
 export type Profile = {
   name: string;
   /** Free-form self-introduction the user writes so Dorothy knows them from day one. */

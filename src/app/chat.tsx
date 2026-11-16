@@ -37,7 +37,10 @@ const SUGGESTIONS = ['오늘 뭐부터 해야 해?', '이번 주 출항·입항 
 
 type Phase = 'off' | 'wake' | 'command' | 'busy';
 
-const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 수지를 그래프로 보여줘.';
+const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 손익을 그래프로 보여줘.';
+/** Pre-filled prompt for the 🚢 부킹 스케줄 chip: read the forwarder's schedule photo and organize it. */
+const BOOKING_PROMPT =
+  '이 부킹 스케줄 사진을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 마감과 출항 전에 알림 받을 수 있게 할 일로 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
 
 export default function Chat() {
   const t = useTheme();
@@ -342,6 +345,7 @@ export default function Chat() {
   // 📝 빠른 기록: start listening right away; a short spoken memo gets auto-filed as a task/followup/memory.
   const QUICK: { label: string; go: () => void }[] = [
     ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
+    { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
     { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
