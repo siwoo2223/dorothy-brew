@@ -322,12 +322,36 @@ function useStoreValue() {
         if (dup) return dup;
         const sailing: Sailing = { id: newId(), createdAt: new Date().toISOString(), ...input };
         update('sailings', [...ref.current.sailings, sailing]);
+        // 서류마감·반입마감·출항일 '하루 전 오전 9시'에 자동 알림 예약(지난 날짜는 건너뜀). 백그라운드로.
+        (async () => {
+          const ids: string[] = [];
+          const plan: { label: string; date?: string }[] = [
+            { label: '서류마감', date: sailing.docCutoff },
+            { label: '반입마감', date: sailing.cyCutoff },
+            { label: '출항(ETD)', date: sailing.etd },
+          ];
+          for (const p of plan) {
+            if (!p.date || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) continue;
+            const remind = new Date(`${p.date}T09:00:00`);
+            remind.setDate(remind.getDate() - 1); // 하루 전
+            if (remind.getTime() <= Date.now()) continue;
+            const route = [sailing.from, sailing.to].filter(Boolean).join('→');
+            const title = `🚢 ${sailing.carrier}${sailing.voyageNo ? ' ' + sailing.voyageNo : ''} ${p.label} 하루 전`;
+            const body = `${p.label} ${p.date}${route ? ` · ${route}` : ''}`;
+            const id = await scheduleReminder(title, body, remind).catch(() => undefined);
+            if (id) ids.push(id);
+          }
+          if (ids.length) update('sailings', ref.current.sailings.map((x) => (x.id === sailing.id ? { ...x, reminderIds: ids } : x)));
+        })().catch(() => {});
         return sailing;
       },
-      deleteSailing(id: string) {
-        update('sailings', ref.current.sailings.filter((s) => s.id !== id));
+      async deleteSailing(id: string) {
+        const s = ref.current.sailings.find((x) => x.id === id);
+        for (const nid of s?.reminderIds ?? []) await cancelReminder(nid);
+        update('sailings', ref.current.sailings.filter((x) => x.id !== id));
       },
-      clearSailings() {
+      async clearSailings() {
+        for (const s of ref.current.sailings) for (const nid of s.reminderIds ?? []) await cancelReminder(nid);
         update('sailings', []);
       },
 

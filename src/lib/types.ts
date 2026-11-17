@@ -66,6 +66,8 @@ export type Sailing = {
   /** 도착일 ETA(YYYY-MM-DD). */
   eta?: string;
   note?: string;
+  /** Local-notification ids for the auto reminders (day before cutoffs/ETD), so they can be cancelled. */
+  reminderIds?: string[];
   createdAt: string;
 };
 
