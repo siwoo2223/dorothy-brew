@@ -15,6 +15,7 @@ import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
 import { KeywordAlertCard } from '../components/KeywordAlertCard';
 import { TodoWatchCard } from '../components/TodoWatchCard';
+import { FxRoomCard } from '../components/FxRoomCard';
 import { ReplyWatchCard } from '../components/ReplyWatchCard';
 import { RecordingBackupCard } from '../components/RecordingBackupCard';
 import { InboxCard } from '../components/InboxCard';
@@ -85,6 +86,7 @@ export default function Settings() {
         <InboxCard />
         <KeywordAlertCard />
         <TodoWatchCard />
+        <FxRoomCard />
         <CallCard />
         <ReplyWatchCard />
         <RecordingBackupCard />
