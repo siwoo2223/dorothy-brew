@@ -416,6 +416,43 @@ function useStoreValue() {
         return { memories: newMemories.length, tasks: added };
       },
 
+      /** 드라이브 백업(backup.ts의 Backup)으로 복구한다. 목록은 id로 합쳐 중복 없이 추가, 설정·프로필·방은 백업 값으로. */
+      async applyBackup(b: {
+        profile?: Profile;
+        memories?: Memory[];
+        tasks?: Task[];
+        followups?: Followup[];
+        routines?: Routine[];
+        sailings?: Sailing[];
+        todoRooms?: string[];
+        fxRooms?: string[];
+        settings?: Partial<Pick<AppState, 'model' | 'briefingHour' | 'planHour' | 'weeklyReportDay' | 'speechRate' | 'voiceId' | 'voiceOnOpen' | 'companyUrl'>>;
+      }): Promise<{ memories: number; tasks: number; followups: number }> {
+        const mergeById = <T extends { id: string }>(cur: T[], incoming?: T[]) => {
+          const have = new Set(cur.map((x) => x.id));
+          const add = (incoming ?? []).filter((x) => x && x.id && !have.has(x.id));
+          return { merged: [...cur, ...add], added: add.length };
+        };
+        if (b.profile && (b.profile.name?.trim() || b.profile.about?.trim())) update('profile', { name: b.profile.name ?? '', about: b.profile.about ?? '' });
+        const m = mergeById(ref.current.memories, b.memories); update('memories', m.merged);
+        const t = mergeById(ref.current.tasks, b.tasks); update('tasks', t.merged);
+        const f = mergeById(ref.current.followups, b.followups); update('followups', f.merged);
+        const r = mergeById(ref.current.routines, b.routines); update('routines', r.merged);
+        const s = mergeById(ref.current.sailings, b.sailings); update('sailings', s.merged);
+        if (Array.isArray(b.todoRooms)) update('todoRooms', b.todoRooms);
+        if (Array.isArray(b.fxRooms)) update('fxRooms', b.fxRooms);
+        const st = b.settings ?? {};
+        if (st.model) update('model', st.model);
+        if (st.briefingHour !== undefined) update('briefingHour', st.briefingHour);
+        if (st.planHour !== undefined) update('planHour', st.planHour);
+        if (st.weeklyReportDay !== undefined) update('weeklyReportDay', st.weeklyReportDay);
+        if (typeof st.speechRate === 'number') update('speechRate', st.speechRate);
+        if (typeof st.voiceId === 'string') update('voiceId', st.voiceId);
+        if (st.voiceOnOpen) update('voiceOnOpen', st.voiceOnOpen);
+        if (typeof st.companyUrl === 'string') update('companyUrl', st.companyUrl);
+        return { memories: m.added, tasks: t.added, followups: f.added };
+      },
+
       appendChat(turn: Omit<ChatTurn, 'id' | 'createdAt'>) {
         update('chat', [...ref.current.chat, { ...turn, id: newId(), createdAt: new Date().toISOString() }]);
       },

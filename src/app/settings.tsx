@@ -10,6 +10,7 @@ import { SetupCard } from '../components/SetupCard';
 import { CompanyCard } from '../components/CompanyCard';
 import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { GoogleCard } from '../components/GoogleCard';
+import { BackupCard } from '../components/BackupCard';
 import { SheetsCard } from '../components/SheetsCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
@@ -94,6 +95,7 @@ export default function Settings() {
 
       <Section icon="🏢" title="회사·구글">
         <GoogleCard />
+        <BackupCard />
         <SheetsCard />
         <CompanyCard />
         <WeeklyReportCard />
