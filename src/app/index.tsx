@@ -10,6 +10,7 @@ import { CalendarEvent, connectedEmails, listEvents } from '../lib/google';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { autoBackupIfDue } from '../lib/recordings';
+import { autoBackupIfDue as backupIfDue } from '../lib/backup';
 import { checkForUpdate } from '../lib/update';
 import { CompanySummary, companySummary, Overnight, overnightCounts } from '../lib/homeSummary';
 import { voiceInputAvailable } from '../lib/voice';
@@ -70,6 +71,8 @@ export default function Today() {
         .catch(() => {});
       // Back up any new call recordings in the background (no-op unless set up and enabled).
       autoBackupIfDue().catch(() => {});
+      // 하루 한 번, 기억·할 일·설정을 구글 드라이브에 자동 백업(구글 연결 시).
+      backupIfDue(getState()).catch(() => {});
       // Archive the phone's recent call log into the app (no-op without the call-log permission).
       syncCalls()
         .then(() => todaysCalls())

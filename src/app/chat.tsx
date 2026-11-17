@@ -52,6 +52,9 @@ function sniffMedia(b64: string): string {
 
 const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 손익을 그래프로 보여줘.';
 /** Pre-filled prompt for the 🚢 부킹 스케줄 chip: read the forwarder's schedule photo and organize it. */
+/** Pre-filled prompt for the 🧾 영수증 chip: read a receipt/payment photo and record it as an expense. */
+const RECEIPT_PROMPT =
+  '이 영수증/결제 사진(여러 장이면 각각)을 읽어줘. 총액·통화(페소/원)·날짜·가게명을 그대로 읽어서 add_expense로 지출 기록에 저장하고, 사진에 없는 값은 비워 둬. 저장 후 한 줄로만 확인해줘.';
 const BOOKING_PROMPT =
   '이 부킹 스케줄 사진(여러 장이면 전부)을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 출항 스케줄에 저장(add_sailing)한 뒤 마감·출항 전 알림도 필요하면 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
 
@@ -393,11 +396,23 @@ export default function Chat() {
     sendRef.current = send;
   });
 
+  // ＋ 버튼: 사진/카메라 첨부 메뉴.
+  const plusMenu = () => {
+    tap();
+    Alert.alert('첨부', '무엇을 보여드릴까요?', [
+      { text: '🖼️ 사진 보여주기', onPress: () => chooseImage() },
+      { text: '📷 카메라로 찍기', onPress: () => router.push('/camera') },
+      { text: '🧾 영수증', onPress: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
+      { text: '취소', style: 'cancel' },
+    ]);
+  };
+
   // Quick-action chips above the composer (matches the home hub): one tap to the most-used asks.
   // 📝 빠른 기록: start listening right away; a short spoken memo gets auto-filed as a task/followup/memory.
   const QUICK: { label: string; go: () => void }[] = [
     ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
+    { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '🌙 놓친 거', go: () => send('오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
@@ -525,36 +540,47 @@ export default function Chat() {
         </View>
       )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
-        <Pressable
-          onPress={() => { tap(); chooseImage(); }}
-          disabled={busy || listening}
-          accessibilityLabel="사진 보여주기"
-          style={[styles.mic, { backgroundColor: t.card, borderColor: t.border, opacity: busy || listening ? 0.4 : 1 }]}
-        >
-          <Text style={{ fontSize: 18 }}>📷</Text>
-        </Pressable>
-        {canListen && (
+        <View style={[styles.pill, { backgroundColor: t.card, borderColor: t.border }]}>
+          {/* ＋ 첨부: 사진/카메라 */}
           <Pressable
-            onPress={() => { tap(); if (listening) voice.stop(); else voice.start(); }}
-            disabled={busy || standby}
-            accessibilityLabel={listening ? '말하기 끝내기' : '음성으로 말하기'}
-            style={[styles.mic, { backgroundColor: listening ? t.danger : t.card, borderColor: listening ? t.danger : t.border, opacity: busy || standby ? 0.4 : 1 }]}
+            onPress={plusMenu}
+            disabled={busy || listening}
+            accessibilityLabel="첨부"
+            style={[styles.round, { backgroundColor: t.bg, opacity: busy || listening ? 0.4 : 1 }]}
           >
-            <Text style={{ fontSize: 18 }}>{listening ? '⏹' : '🎙️'}</Text>
+            <Text style={{ fontSize: 22, color: t.text, marginTop: -2 }}>＋</Text>
           </Pressable>
-        )}
-        <Input
-          style={{ flex: 1, maxHeight: 120 }}
-          value={listening ? voice.transcript : draft}
-          onChangeText={setDraft}
-          placeholder={listening ? '듣고 있어요…' : suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 말하기…'}
-          editable={!listening}
-          multiline
-          onSubmitEditing={() => send(draft)}
-        />
-        <Pressable onPress={() => { tap(); send(draft); }} disabled={busy || (!draft.trim() && images.length === 0)} style={[styles.send, { backgroundColor: t.accent, opacity: busy || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}>
-          <Text style={{ color: '#fff', fontWeight: '700' }}>전송</Text>
-        </Pressable>
+          <Input
+            style={{ flex: 1, maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
+            value={listening ? voice.transcript : draft}
+            onChangeText={setDraft}
+            placeholder={listening ? '듣고 있어요…' : draft ? '' : canListen ? '길게 눌러 말하거나, 입력하세요' : suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 말하기…'}
+            editable={!listening}
+            multiline
+            onSubmitEditing={() => send(draft)}
+          />
+          {/* 🎙️ 꾹 눌러 말하기(누르는 동안 듣고, 떼면 전송) */}
+          {canListen && !draft.trim() && (
+            <Pressable
+              onPressIn={() => { if (!busy && !standby && !listening) { tap(); voice.start(); } }}
+              onPressOut={() => { if (listening) voice.stop(); }}
+              disabled={busy || standby}
+              accessibilityLabel="길게 눌러 말하기"
+              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, opacity: busy || standby ? 0.4 : 1 }]}
+            >
+              <Text style={{ fontSize: 18 }}>🎙️</Text>
+            </Pressable>
+          )}
+          {/* ↑ 전송 */}
+          <Pressable
+            onPress={() => { tap(); send(draft); }}
+            disabled={busy || listening || (!draft.trim() && images.length === 0)}
+            accessibilityLabel="전송"
+            style={[styles.round, { backgroundColor: t.accent, opacity: busy || listening || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}
+          >
+            <Text style={{ color: t.accentText, fontSize: 18, fontWeight: '800', marginTop: -1 }}>↑</Text>
+          </Pressable>
+        </View>
       </View>
       {state.chat.length > 0 && (
         <Pressable
@@ -575,7 +601,9 @@ const styles = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
   copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 1 },
-  composer: { flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end' },
+  composer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  pill: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 28, paddingHorizontal: 6, paddingVertical: 5 },
+  round: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   send: { borderRadius: 14, paddingHorizontal: 18, paddingVertical: 13 },
   mic: { borderRadius: 14, borderWidth: 1, width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   imagePreview: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },

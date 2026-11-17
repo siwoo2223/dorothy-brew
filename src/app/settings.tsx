@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
 import { Alert, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, View } from 'react-native';
 
@@ -10,6 +11,7 @@ import { SetupCard } from '../components/SetupCard';
 import { CompanyCard } from '../components/CompanyCard';
 import { WeeklyReportCard } from '../components/WeeklyReportCard';
 import { GoogleCard } from '../components/GoogleCard';
+import { BackupCard } from '../components/BackupCard';
 import { SheetsCard } from '../components/SheetsCard';
 import { ImportCard } from '../components/ImportCard';
 import { CallCard } from '../components/CallCard';
@@ -94,6 +96,7 @@ export default function Settings() {
 
       <Section icon="🏢" title="회사·구글">
         <GoogleCard />
+        <BackupCard />
         <SheetsCard />
         <CompanyCard />
         <WeeklyReportCard />
@@ -126,8 +129,9 @@ export default function Settings() {
         <Card>
           <Title>내 데이터</Title>
           <Body muted>
-            기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
+            기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 지출 {state.expenses.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
           </Body>
+          <Button label="🧾 내 지출 기록 보기" variant="ghost" onPress={() => router.navigate('/expenses')} />
           <Button
             label="대화 기록 지우기"
             variant="danger"

@@ -7,7 +7,7 @@ import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './n
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -30,6 +30,7 @@ const KEYS = {
   sailings: 'dorothy.sailings',
   todoRooms: 'dorothy.todoRooms',
   fxRooms: 'dorothy.fxRooms',
+  expenses: 'dorothy.expenses',
   todoCandidates: 'dorothy.todoCandidates',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
@@ -83,6 +84,8 @@ export type AppState = {
   fxRooms: string[];
   /** To-dos Dorothy detected from watched rooms, awaiting the owner's 등록/무시 decision. */
   todoCandidates: TodoCandidate[];
+  /** 개인 지출 기록(주로 영수증 사진에서 읽어 저장). */
+  expenses: Expense[];
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -110,6 +113,7 @@ const initialState: AppState = {
   sailings: [],
   todoRooms: [],
   fxRooms: ['손대손', '환전/호텔방'],
+  expenses: [],
   todoCandidates: [],
 };
 
@@ -129,7 +133,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms, expenses] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -153,6 +157,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.todoRooms),
         AsyncStorage.getItem(KEYS.todoCandidates),
         AsyncStorage.getItem(KEYS.fxRooms),
+        AsyncStorage.getItem(KEYS.expenses),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -178,6 +183,7 @@ function useStoreValue() {
         todoRooms: todoRooms ? JSON.parse(todoRooms) : [],
         todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
         fxRooms: fxRooms ? JSON.parse(fxRooms) : initialState.fxRooms,
+        expenses: expenses ? JSON.parse(expenses) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -316,13 +322,47 @@ function useStoreValue() {
         if (dup) return dup;
         const sailing: Sailing = { id: newId(), createdAt: new Date().toISOString(), ...input };
         update('sailings', [...ref.current.sailings, sailing]);
+        // 서류마감·반입마감·출항일 '하루 전 오전 9시'에 자동 알림 예약(지난 날짜는 건너뜀). 백그라운드로.
+        (async () => {
+          const ids: string[] = [];
+          const plan: { label: string; date?: string }[] = [
+            { label: '서류마감', date: sailing.docCutoff },
+            { label: '반입마감', date: sailing.cyCutoff },
+            { label: '출항(ETD)', date: sailing.etd },
+          ];
+          for (const p of plan) {
+            if (!p.date || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) continue;
+            const remind = new Date(`${p.date}T09:00:00`);
+            remind.setDate(remind.getDate() - 1); // 하루 전
+            if (remind.getTime() <= Date.now()) continue;
+            const route = [sailing.from, sailing.to].filter(Boolean).join('→');
+            const title = `🚢 ${sailing.carrier}${sailing.voyageNo ? ' ' + sailing.voyageNo : ''} ${p.label} 하루 전`;
+            const body = `${p.label} ${p.date}${route ? ` · ${route}` : ''}`;
+            const id = await scheduleReminder(title, body, remind).catch(() => undefined);
+            if (id) ids.push(id);
+          }
+          if (ids.length) update('sailings', ref.current.sailings.map((x) => (x.id === sailing.id ? { ...x, reminderIds: ids } : x)));
+        })().catch(() => {});
         return sailing;
       },
-      deleteSailing(id: string) {
-        update('sailings', ref.current.sailings.filter((s) => s.id !== id));
+      async deleteSailing(id: string) {
+        const s = ref.current.sailings.find((x) => x.id === id);
+        for (const nid of s?.reminderIds ?? []) await cancelReminder(nid);
+        update('sailings', ref.current.sailings.filter((x) => x.id !== id));
       },
-      clearSailings() {
+      async clearSailings() {
+        for (const s of ref.current.sailings) for (const nid of s.reminderIds ?? []) await cancelReminder(nid);
         update('sailings', []);
+      },
+
+      // ── 개인 지출 기록(영수증 등) ──
+      addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {
+        const exp: Expense = { id: newId(), createdAt: new Date().toISOString(), ...input, currency: input.currency || 'PHP' };
+        update('expenses', [exp, ...ref.current.expenses].slice(0, 1000));
+        return exp;
+      },
+      deleteExpense(id: string) {
+        update('expenses', ref.current.expenses.filter((e) => e.id !== id));
       },
 
       // ── 단톡방 평균 환율: 환율을 뽑을 방 목록(부분 일치) ──
@@ -414,6 +454,45 @@ function useStoreValue() {
           added++;
         }
         return { memories: newMemories.length, tasks: added };
+      },
+
+      /** 드라이브 백업(backup.ts의 Backup)으로 복구한다. 목록은 id로 합쳐 중복 없이 추가, 설정·프로필·방은 백업 값으로. */
+      async applyBackup(b: {
+        profile?: Profile;
+        memories?: Memory[];
+        tasks?: Task[];
+        followups?: Followup[];
+        routines?: Routine[];
+        sailings?: Sailing[];
+        expenses?: Expense[];
+        todoRooms?: string[];
+        fxRooms?: string[];
+        settings?: Partial<Pick<AppState, 'model' | 'briefingHour' | 'planHour' | 'weeklyReportDay' | 'speechRate' | 'voiceId' | 'voiceOnOpen' | 'companyUrl'>>;
+      }): Promise<{ memories: number; tasks: number; followups: number }> {
+        const mergeById = <T extends { id: string }>(cur: T[], incoming?: T[]) => {
+          const have = new Set(cur.map((x) => x.id));
+          const add = (incoming ?? []).filter((x) => x && x.id && !have.has(x.id));
+          return { merged: [...cur, ...add], added: add.length };
+        };
+        if (b.profile && (b.profile.name?.trim() || b.profile.about?.trim())) update('profile', { name: b.profile.name ?? '', about: b.profile.about ?? '' });
+        const m = mergeById(ref.current.memories, b.memories); update('memories', m.merged);
+        const t = mergeById(ref.current.tasks, b.tasks); update('tasks', t.merged);
+        const f = mergeById(ref.current.followups, b.followups); update('followups', f.merged);
+        const r = mergeById(ref.current.routines, b.routines); update('routines', r.merged);
+        const s = mergeById(ref.current.sailings, b.sailings); update('sailings', s.merged);
+        const ex = mergeById(ref.current.expenses, b.expenses); update('expenses', ex.merged);
+        if (Array.isArray(b.todoRooms)) update('todoRooms', b.todoRooms);
+        if (Array.isArray(b.fxRooms)) update('fxRooms', b.fxRooms);
+        const st = b.settings ?? {};
+        if (st.model) update('model', st.model);
+        if (st.briefingHour !== undefined) update('briefingHour', st.briefingHour);
+        if (st.planHour !== undefined) update('planHour', st.planHour);
+        if (st.weeklyReportDay !== undefined) update('weeklyReportDay', st.weeklyReportDay);
+        if (typeof st.speechRate === 'number') update('speechRate', st.speechRate);
+        if (typeof st.voiceId === 'string') update('voiceId', st.voiceId);
+        if (st.voiceOnOpen) update('voiceOnOpen', st.voiceOnOpen);
+        if (typeof st.companyUrl === 'string') update('companyUrl', st.companyUrl);
+        return { memories: m.added, tasks: t.added, followups: f.added };
       },
 
       appendChat(turn: Omit<ChatTurn, 'id' | 'createdAt'>) {
