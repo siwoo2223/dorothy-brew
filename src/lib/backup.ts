@@ -22,6 +22,7 @@ export type Backup = {
   followups: AppState['followups'];
   routines: AppState['routines'];
   sailings: AppState['sailings'];
+  expenses: AppState['expenses'];
   todoRooms: string[];
   fxRooms: string[];
   settings: {
@@ -47,6 +48,7 @@ export function buildBackup(s: AppState): Backup {
     followups: s.followups ?? [],
     routines: s.routines ?? [],
     sailings: s.sailings ?? [],
+    expenses: s.expenses ?? [],
     todoRooms: s.todoRooms ?? [],
     fxRooms: s.fxRooms ?? [],
     settings: {

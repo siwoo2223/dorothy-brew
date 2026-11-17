@@ -60,6 +60,7 @@ export default function RootLayout() {
             <Tabs.Screen name="finance" options={{ href: null, title: '자금 · 손익' }} />
             <Tabs.Screen name="account" options={{ href: null, title: '계좌 상세' }} />
             <Tabs.Screen name="schedule" options={{ href: null, title: '출항 스케줄' }} />
+            <Tabs.Screen name="expenses" options={{ href: null, title: '내 지출 기록' }} />
           </Tabs>
         </StoreProvider>
       </KeyboardProvider>

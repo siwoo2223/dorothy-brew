@@ -7,7 +7,7 @@ import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './n
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
-import type { ChatTurn, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -30,6 +30,7 @@ const KEYS = {
   sailings: 'dorothy.sailings',
   todoRooms: 'dorothy.todoRooms',
   fxRooms: 'dorothy.fxRooms',
+  expenses: 'dorothy.expenses',
   todoCandidates: 'dorothy.todoCandidates',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
@@ -83,6 +84,8 @@ export type AppState = {
   fxRooms: string[];
   /** To-dos Dorothy detected from watched rooms, awaiting the owner's 등록/무시 decision. */
   todoCandidates: TodoCandidate[];
+  /** 개인 지출 기록(주로 영수증 사진에서 읽어 저장). */
+  expenses: Expense[];
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -110,6 +113,7 @@ const initialState: AppState = {
   sailings: [],
   todoRooms: [],
   fxRooms: ['손대손', '환전/호텔방'],
+  expenses: [],
   todoCandidates: [],
 };
 
@@ -129,7 +133,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms, expenses] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -153,6 +157,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.todoRooms),
         AsyncStorage.getItem(KEYS.todoCandidates),
         AsyncStorage.getItem(KEYS.fxRooms),
+        AsyncStorage.getItem(KEYS.expenses),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -178,6 +183,7 @@ function useStoreValue() {
         todoRooms: todoRooms ? JSON.parse(todoRooms) : [],
         todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
         fxRooms: fxRooms ? JSON.parse(fxRooms) : initialState.fxRooms,
+        expenses: expenses ? JSON.parse(expenses) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -325,6 +331,16 @@ function useStoreValue() {
         update('sailings', []);
       },
 
+      // ── 개인 지출 기록(영수증 등) ──
+      addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {
+        const exp: Expense = { id: newId(), createdAt: new Date().toISOString(), ...input, currency: input.currency || 'PHP' };
+        update('expenses', [exp, ...ref.current.expenses].slice(0, 1000));
+        return exp;
+      },
+      deleteExpense(id: string) {
+        update('expenses', ref.current.expenses.filter((e) => e.id !== id));
+      },
+
       // ── 단톡방 평균 환율: 환율을 뽑을 방 목록(부분 일치) ──
       setFxRooms(rooms: string[]) {
         update('fxRooms', Array.from(new Set(rooms.map((r) => r.trim()).filter(Boolean))));
@@ -424,6 +440,7 @@ function useStoreValue() {
         followups?: Followup[];
         routines?: Routine[];
         sailings?: Sailing[];
+        expenses?: Expense[];
         todoRooms?: string[];
         fxRooms?: string[];
         settings?: Partial<Pick<AppState, 'model' | 'briefingHour' | 'planHour' | 'weeklyReportDay' | 'speechRate' | 'voiceId' | 'voiceOnOpen' | 'companyUrl'>>;
@@ -439,6 +456,7 @@ function useStoreValue() {
         const f = mergeById(ref.current.followups, b.followups); update('followups', f.merged);
         const r = mergeById(ref.current.routines, b.routines); update('routines', r.merged);
         const s = mergeById(ref.current.sailings, b.sailings); update('sailings', s.merged);
+        const ex = mergeById(ref.current.expenses, b.expenses); update('expenses', ex.merged);
         if (Array.isArray(b.todoRooms)) update('todoRooms', b.todoRooms);
         if (Array.isArray(b.fxRooms)) update('fxRooms', b.fxRooms);
         const st = b.settings ?? {};

@@ -83,6 +83,24 @@ export type TodoCandidate = {
   createdAt: string;
 };
 
+/** A personal expense Dorothy recorded, usually read from a receipt/payment photo. */
+export type Expense = {
+  id: string;
+  /** 금액(숫자). */
+  amount: number;
+  /** 통화: 'PHP' | 'KRW' (기본 PHP). */
+  currency: string;
+  /** 분류, e.g. 식비·교통·통신·공과금·장보기·기타. */
+  category?: string;
+  /** 어디서/무엇에 썼는지 한 줄. */
+  memo?: string;
+  /** 가게/상대. */
+  vendor?: string;
+  /** 쓴 날짜(YYYY-MM-DD). 없으면 등록일로. */
+  spentAt?: string;
+  createdAt: string;
+};
+
 export type Profile = {
   name: string;
   /** Free-form self-introduction the user writes so Dorothy knows them from day one. */
