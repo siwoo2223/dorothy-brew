@@ -26,7 +26,7 @@ const copyOrSend = (raw: string) => {
 
 import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
-import { chat, describeError, PLAN_REQUEST, weeklyReport } from '../lib/assistant';
+import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, weeklyReport } from '../lib/assistant';
 import { suggestPrompts } from '../lib/suggest';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
@@ -60,13 +60,15 @@ export default function Chat() {
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  // 입력창 플레이스홀더로 돌아가며 보여줄 '상황 기반' 제안(고정 목록이 아니라 지금 상황에서 생성).
+  // 입력창 제안: ① AI가 최근 대화·상황으로 '다음 지시'를 예측(클로드처럼), ② 안 되면 규칙 기반으로 대체.
   const [phIdx, setPhIdx] = useState(0);
-  // 지금 상황(할 일·회신·등록 대기·시간대·회사 연결)에서 만들어낸 제안. 상태가 바뀌면 다시 생성.
-  const suggestions = useMemo(
+  const [aiSuggest, setAiSuggest] = useState<string[]>([]);
+  const ruleSuggest = useMemo(
     () => suggestPrompts(state),
     [state.tasks, state.followups, state.todoCandidates, state.companyUrl],
   );
+  const useAi = aiSuggest.length > 0 && !!state.apiKey && state.model !== 'local';
+  const suggestions = useAi ? aiSuggest : ruleSuggest;
   const emptyPicks = suggestions.slice(0, 5);
   // Photo(s)/screenshot(s) attached to the next message (Claude can read them).
   const [images, setImages] = useState<Img[]>([]);
@@ -86,6 +88,22 @@ export default function Chat() {
     const id = setInterval(() => setPhIdx((i) => (i + 1) % n), 4000);
     return () => clearInterval(id);
   }, [suggestions.length]);
+
+  // AI 예측 제안: 화면이 쉬고 있을 때(응답 끝난 직후·진입 시) 최근 대화로 다음 지시를 예측해 갱신.
+  // 대화 길이당 한 번만 호출(비용 아낌). 로컬 두뇌/키 없음이면 규칙 기반으로 둔다.
+  const sugSig = useRef('');
+  useEffect(() => {
+    if (busy) return;
+    if (!state.apiKey || state.model === 'local') return; // 규칙 기반이 대신 쓰임
+    const sig = String(state.chat.length);
+    if (sig === sugSig.current) return;
+    sugSig.current = sig;
+    let cancelled = false;
+    suggestNextPrompts(getState())
+      .then((s) => { if (!cancelled && s.length) { setAiSuggest(s); setPhIdx(0); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [busy, state.chat.length, state.apiKey, state.model, getState]);
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
   // phase: wake = waiting for the name, command = listening for a request, busy = thinking/speaking.

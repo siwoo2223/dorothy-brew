@@ -1073,6 +1073,60 @@ export async function triageAlerts(state: AppState, contextBlob: string): Promis
   }
 }
 
+/**
+ * 입력창에 보여줄 '다음 지시' 예측: 최근 대화와 현재 상황을 보고, 사용자가 다음에 보낼 법한 짧은
+ * 지시/질문을 사용자 말투로 생성한다(클로드가 다음 입력을 제안하듯). 방금 반복한 패턴(예: 작업 후
+ * "병합되면 알려줘")을 우선한다. 로컬 두뇌/키 없음/실패 시 빈 배열 → 호출측이 규칙 기반으로 대체.
+ */
+export async function suggestNextPrompts(state: AppState): Promise<string[]> {
+  if (state.model === 'local' || !state.apiKey) return [];
+  const open = (state.tasks ?? []).filter((t) => !t.done);
+  const now = Date.now();
+  const overdue = open.filter((t) => t.dueAt && new Date(t.dueAt).getTime() < now).length;
+  const followups = (state.followups ?? []).filter((f) => !f.done);
+  const candidates = state.todoCandidates ?? [];
+  // 최근 대화(최대 10개)를 사용자 말투 학습용으로 넣는다.
+  const recent = (state.chat ?? [])
+    .slice(-10)
+    .map((m) => `${m.role === 'user' ? '사용자' : '도로시'}: ${(m.text ?? '').slice(0, 300)}`)
+    .join('\n');
+  const situation =
+    `열린 할 일 ${open.length}건(기한지남 ${overdue}건), 회신 대기 ${followups.length}명` +
+    `${followups[0]?.who ? `(예: ${followups[0].who})` : ''}, 등록 대기 ${candidates.length}건, ` +
+    `회사 연결 ${company.companyConfigured() ? '됨' : '안 됨'}.`;
+  const client = createClient(state);
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    {
+      type: 'text',
+      text:
+        '당신은 개인 비서 앱 "도로시"의 입력 제안기입니다. 아래 최근 대화와 현재 상황을 보고, 사용자(사장)가 ' +
+        '"다음에 보낼 법한" 짧은 지시나 질문을 사용자 말투로 예측해 제안하세요. ' +
+        '방금 사용자가 반복하는 패턴이 있으면(예: 작업을 시킨 뒤 "병합되면 알려줘", "언제 돼?") 그것을 1순위로 넣으세요. ' +
+        '도로시가 실제로 할 수 있는 것, 지금 상황에 바로 맞는 것만. 뻔한 일반 예시(아무 기능 나열)는 금지. ' +
+        '각 제안은 사용자가 그대로 보낼 수 있는 완성된 한국어 문장(20자 안팎). 최대 4개, 관련순. ' +
+        '반드시 JSON 문자열 배열만 출력합니다. 예: ["병합되면 알려줘","지금 어디까지 됐어?"]',
+    },
+  ];
+  try {
+    const response = await client.beta.messages.create({
+      ...modelParams(state.model),
+      max_tokens: 300,
+      output_config: { effort: 'low' },
+      system,
+      messages: [{ role: 'user', content: `<상황>\n${situation}\n</상황>\n\n<최근대화>\n${recent || '(없음)'}\n</최근대화>` }],
+    });
+    if (response.stop_reason === 'refusal') return [];
+    const text = textOf(response.content);
+    const open2 = text.indexOf('[');
+    const close = text.lastIndexOf(']');
+    if (open2 < 0 || close < open2) return [];
+    const arr = JSON.parse(text.slice(open2, close + 1));
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string' && !!x.trim()).map((s) => s.trim()).slice(0, 4) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** A short morning briefing built from tasks and memories, with live info (weather, news) when useful. */
 export async function briefing(state: AppState): Promise<string> {
   if (state.model === 'local') {
