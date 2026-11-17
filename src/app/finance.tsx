@@ -5,8 +5,11 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { Body, Card, Title } from '../components/ui';
 import { Chart } from '../components/Chart';
 import { companyConfigured, loadCompanyConfig } from '../lib/company';
+import { chatAverageRate, ChatRate, naverPhpKrw, NaverRate } from '../lib/fx';
 import { companyFinance, Finance, money, Money } from '../lib/homeSummary';
 import { useTheme } from '../lib/theme';
+
+const md = (ms: number) => new Date(ms).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
 
 const sym = (cur: string) => (cur === 'PHP' ? '₱' : cur === 'KRW' ? '₩' : cur + ' ');
 
@@ -24,6 +27,8 @@ export default function FinanceScreen() {
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
   const [error, setError] = useState('');
+  const [naver, setNaver] = useState<NaverRate>(null);
+  const [chatRate, setChatRate] = useState<ChatRate>(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: '자금 · 손익' });
@@ -53,8 +58,15 @@ export default function FinanceScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
+      // 환율 두 가지는 회사 서버와 별개로 가져온다(네이버 실시간 + 단톡방 평균). 실패해도 화면은 유지.
+      naverPhpKrw().then(setNaver).catch(() => setNaver(null));
+      chatAverageRate().then(setChatRate).catch(() => setChatRate(null));
     }, [load]),
   );
+
+  // 환산에 쓸 환율: 네이버 실시간 우선, 없으면 회사 서버 기준 환율(수동).
+  const convRate = naver?.krwPerPhp && naver.krwPerPhp > 0 ? naver.krwPerPhp : fin?.fx ?? 0;
+  const rateLabel = naver?.krwPerPhp ? '네이버 실시간' : '회사 기준(수동)';
 
   const moneyRow = (list: Money[]) => (list.length ? list.map(money).join('  ·  ') : '—');
 
@@ -85,19 +97,47 @@ export default function FinanceScreen() {
               <Body muted>계좌 잔액을 읽지 못했어요.</Body>
             )}
             <Text style={{ color: t.subtext, fontSize: 12 }}>통화별 합계 (가상계좌 제외)</Text>
-            {fin.funds.length > 0 && fin.fx > 0 && (() => {
+            {fin.funds.length > 0 && convRate > 0 && (() => {
               const php = fin.funds.find((f) => f.currency === 'PHP')?.amount ?? 0;
               const krw = fin.funds.find((f) => f.currency === 'KRW')?.amount ?? 0;
-              const inPhp = php + krw / fin.fx;
-              const inKrw = krw + php * fin.fx;
+              const inPhp = php + krw / convRate;
+              const inKrw = krw + php * convRate;
               return (
                 <View style={{ borderTopColor: t.accent, borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8, paddingTop: 8, gap: 2 }}>
-                  <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>환산 합계 (환율 ₩{Math.round(fin.fx)}/₱1)</Text>
+                  <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>환산 합계 ({rateLabel} ₩{convRate.toFixed(2)}/₱1)</Text>
                   <Text style={{ color: t.text, fontSize: 15 }}>전부 원화로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'KRW', amount: inKrw })}</Text></Text>
                   <Text style={{ color: t.text, fontSize: 15 }}>전부 페소로: <Text style={{ fontWeight: '800' }}>{money({ currency: 'PHP', amount: inPhp })}</Text></Text>
                 </View>
               );
             })()}
+          </View>
+
+          {/* 환율: 네이버 실시간 + 단톡방 평균 (따로) */}
+          <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
+            <View style={styles.rateRow}>
+              <Text style={{ color: t.subtext, fontSize: 14, flex: 1 }}>🟢 네이버 실시간</Text>
+              <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>
+                {naver ? `₩${naver.krwPerPhp.toFixed(2)} / ₱1` : '못 가져옴'}
+              </Text>
+            </View>
+            <View style={[styles.rateRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.subtext, fontSize: 14 }}>💬 단톡방 평균</Text>
+                {chatRate && (
+                  <Text style={{ color: t.subtext, fontSize: 11 }}>
+                    최근 {chatRate.count}건 · {md(chatRate.latest)}까지 · {chatRate.min.toFixed(1)}~{chatRate.max.toFixed(1)}
+                  </Text>
+                )}
+              </View>
+              <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>
+                {chatRate ? `₩${chatRate.avg.toFixed(2)} / ₱1` : '언급 못 찾음'}
+              </Text>
+            </View>
+            {!chatRate && (
+              <Text style={{ color: t.subtext, fontSize: 11, paddingHorizontal: 16, paddingBottom: 12 }}>
+                단톡방 환율은 메시지 알림에서 &apos;환율·페소·원&apos;이 적힌 숫자만 모아 평균 내요. 알림 읽기가 켜져 있고 환율이 올라온 방이 있어야 보여요.
+              </Text>
+            )}
           </View>
 
           {/* 계좌: 통화별로 묶어 소계 + 계좌 누르면 그 계좌 이번 달 거래 상세 */}
@@ -194,6 +234,7 @@ const styles = StyleSheet.create({
   totalN: { fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
   listCard: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   acctRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
   monthRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
 });
