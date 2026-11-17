@@ -29,6 +29,7 @@ const KEYS = {
   standbyShortcut: 'dorothy.standbyShortcut',
   sailings: 'dorothy.sailings',
   todoRooms: 'dorothy.todoRooms',
+  fxRooms: 'dorothy.fxRooms',
   todoCandidates: 'dorothy.todoCandidates',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
@@ -78,6 +79,8 @@ export type AppState = {
   sailings: Sailing[];
   /** Room names (partial match) to watch for to-do/requests in KakaoTalk etc. Empty = off. */
   todoRooms: string[];
+  /** 단톡방 평균 환율을 뽑을 방(부분 일치). 기본은 사장님이 쓰는 두 환전방. */
+  fxRooms: string[];
   /** To-dos Dorothy detected from watched rooms, awaiting the owner's 등록/무시 decision. */
   todoCandidates: TodoCandidate[];
 };
@@ -106,6 +109,7 @@ const initialState: AppState = {
   standbyShortcut: false,
   sailings: [],
   todoRooms: [],
+  fxRooms: ['손대손', '환전/호텔방'],
   todoCandidates: [],
 };
 
@@ -125,7 +129,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -148,6 +152,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.sailings),
         AsyncStorage.getItem(KEYS.todoRooms),
         AsyncStorage.getItem(KEYS.todoCandidates),
+        AsyncStorage.getItem(KEYS.fxRooms),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -172,6 +177,7 @@ function useStoreValue() {
         sailings: sailings ? JSON.parse(sailings) : [],
         todoRooms: todoRooms ? JSON.parse(todoRooms) : [],
         todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
+        fxRooms: fxRooms ? JSON.parse(fxRooms) : initialState.fxRooms,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -317,6 +323,11 @@ function useStoreValue() {
       },
       clearSailings() {
         update('sailings', []);
+      },
+
+      // ── 단톡방 평균 환율: 환율을 뽑을 방 목록(부분 일치) ──
+      setFxRooms(rooms: string[]) {
+        update('fxRooms', Array.from(new Set(rooms.map((r) => r.trim()).filter(Boolean))));
       },
 
       // ── 카톡 할 일 감지: 감지할 방 목록 + 등록 전 후보 ──

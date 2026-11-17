@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import * as inbox from './inbox';
 
 /**
@@ -8,14 +10,15 @@ import * as inbox from './inbox';
  */
 
 export type NaverRate = { krwPerPhp: number; asOf: number; source: 'naver' | 'market' } | null;
+export type RoomRate = { room: string; avg: number; count: number; latest: number; min: number; max: number };
 export type ChatRate = {
-  avg: number;
-  count: number;
-  latest: number;
-  min: number;
-  max: number;
-  samples: { rate: number; time: number; room: string }[];
+  rooms: RoomRate[]; // 방별 평균(사장님이 고른 방만)
+  combinedAvg: number; // 두 방 합친 평균
+  combinedCount: number;
 } | null;
+
+// 사장님이 고른 환전방 기본값(부분 일치). 설정에서 바꿀 수 있다.
+const DEFAULT_FX_ROOMS = ['손대손', '환전/호텔방'];
 
 const NAVER_URLS = [
   'https://m.stock.naver.com/front-api/marketIndex/prices?category=exchange&reutersCode=FX_PHPKRW&page=1&pageSize=1',
@@ -88,54 +91,74 @@ export async function naverPhpKrw(): Promise<NaverRate> {
   return null;
 }
 
-// 환율 언급으로 볼 수 있는 숫자: 환율/페소/원 등의 바로 옆(4자 이내)에 15~35 범위의 수.
-const AFTER = /(?:환율|페소|peso|php|₱)[^\d]{0,4}(\d{1,2}(?:[.,]\d{1,2})?)/gi;
-const BEFORE = /(\d{1,2}(?:[.,]\d{1,2})?)[^\d]{0,4}(?:원|환율|페소|peso|php|₱)/gi;
+// 환전방 메시지에서 환율을 뽑는다: 환율 신호어(환율·페소·테더·달러·매입/매도·삽/팝 등) 바로 옆
+// (5자 이내)에 20~30 범위의 두 자리 수만 환율로 본다. 날짜(25일)·수량(500만)·호실은 제외된다.
+const FX_KW = '환율|페소|peso|php|₱|테더|usdt|달러|매입|매도|삽니|팝니|팔|사|시오디|코드|환전';
+const FX_AFTER = new RegExp(`(?:${FX_KW})[^\\d]{0,5}(\\d{2}(?:[.,]\\d{1,2})?)`, 'gi');
+const FX_BEFORE = new RegExp(`(\\d{2}(?:[.,]\\d{1,2})?)[^\\d]{0,5}(?:${FX_KW})`, 'gi');
 
-function ratesInText(t: string): number[] {
+function fxRatesInText(t: string): number[] {
   const out = new Set<number>();
-  for (const re of [AFTER, BEFORE]) {
+  for (const re of [FX_AFTER, FX_BEFORE]) {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(t))) {
       const v = Number(m[1].replace(',', '.'));
-      if (Number.isFinite(v) && v >= 15 && v <= 35) out.add(v);
+      if (Number.isFinite(v) && v >= 20 && v <= 30) out.add(v);
     }
   }
   return [...out];
 }
 
 /**
- * 단톡방 평균 환율: 최근 days일 메시지 알림에서 '환율/페소/원' 문맥의 15~35 숫자만 모아 평균.
- * 메시지 권한이 없거나 언급이 하나도 없으면 null(지어내지 않음). 최근 건부터 최대 20개만 쓴다.
+ * 단톡방 평균 환율: 사장님이 고른 환전방(기본 2곳)에서만, 최근 days일 메시지 알림의 환율 숫자를 모아
+ * 방별로 평균을 낸다(두 개의 평균 + 합친 평균). 메시지 권한이 없거나 환율 언급이 없으면 null.
+ * 방마다 최근 20건만 쓴다. 지어내지 않는다.
  */
 export async function chatAverageRate(days = 14): Promise<ChatRate> {
+  let fxRooms = DEFAULT_FX_ROOMS;
   let msgs: inbox.InboxMessage[] = [];
   try {
+    const raw = await AsyncStorage.getItem('dorothy.fxRooms');
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) fxRooms = arr; }
     const st = await inbox.inboxStatus();
     if (!st.messages) return null;
-    msgs = await inbox.getMessages(Date.now() - days * 86400000, 500);
+    msgs = await inbox.getMessages(Date.now() - days * 86400000, 1500);
   } catch {
     return null;
   }
-  const found: { rate: number; time: number; room: string }[] = [];
+  const low = fxRooms.map((r) => r.toLowerCase());
+  // 매칭된 방 조각별로 환율을 모은다(방 이름은 실제 메시지의 방 이름을 쓴다).
+  const groups = new Map<string, { name: string; items: { rate: number; time: number }[] }>();
   for (const m of msgs) {
-    const text = m.text || '';
-    if (!/(환율|페소|peso|php|₱|원)/i.test(text)) continue;
-    for (const rate of ratesInText(text)) {
-      found.push({ rate, time: m.time, room: m.conversation || m.sender || '' });
-    }
+    const conv = m.conversation || m.sender || '';
+    const hay = conv.toLowerCase();
+    const idx = low.findIndex((r) => hay.includes(r));
+    if (idx < 0) continue;
+    const rates = fxRatesInText(m.text || '');
+    if (!rates.length) continue;
+    const key = fxRooms[idx];
+    const g = groups.get(key) ?? { name: conv, items: [] };
+    for (const rate of rates) g.items.push({ rate, time: m.time });
+    groups.set(key, g);
   }
-  if (!found.length) return null;
-  found.sort((a, b) => b.time - a.time);
-  const use = found.slice(0, 20);
-  const avg = use.reduce((s, x) => s + x.rate, 0) / use.length;
-  return {
-    avg,
-    count: use.length,
-    latest: use[0].time,
-    min: Math.min(...use.map((x) => x.rate)),
-    max: Math.max(...use.map((x) => x.rate)),
-    samples: use.slice(0, 5),
-  };
+  const rooms: RoomRate[] = [];
+  const all: number[] = [];
+  for (const g of groups.values()) {
+    if (!g.items.length) continue;
+    g.items.sort((a, b) => b.time - a.time);
+    const use = g.items.slice(0, 20);
+    const vals = use.map((x) => x.rate);
+    rooms.push({
+      room: g.name,
+      avg: vals.reduce((s, x) => s + x, 0) / vals.length,
+      count: use.length,
+      latest: use[0].time,
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+    });
+    all.push(...vals);
+  }
+  if (!rooms.length) return null;
+  return { rooms, combinedAvg: all.reduce((s, x) => s + x, 0) / all.length, combinedCount: all.length };
 }

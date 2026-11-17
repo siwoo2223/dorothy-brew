@@ -121,23 +121,37 @@ export default function FinanceScreen() {
                 {naver ? `₩${naver.krwPerPhp.toFixed(2)} / ₱1` : '못 가져옴'}
               </Text>
             </View>
-            <View style={[styles.rateRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: t.subtext, fontSize: 14 }}>💬 단톡방 평균</Text>
-                {chatRate && (
-                  <Text style={{ color: t.subtext, fontSize: 11 }}>
-                    최근 {chatRate.count}건 · {md(chatRate.latest)}까지 · {chatRate.min.toFixed(1)}~{chatRate.max.toFixed(1)}
-                  </Text>
+            {/* 방별 평균(사장님이 고른 환전방만) */}
+            {chatRate ? (
+              <>
+                {chatRate.rooms.map((r, i) => (
+                  <View key={r.room + i} style={[styles.rateRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: t.subtext, fontSize: 14 }} numberOfLines={1}>💬 {r.room}</Text>
+                      <Text style={{ color: t.subtext, fontSize: 11 }}>
+                        최근 {r.count}건 · {md(r.latest)}까지 · {r.min.toFixed(1)}~{r.max.toFixed(1)}
+                      </Text>
+                    </View>
+                    <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>₩{r.avg.toFixed(2)} / ₱1</Text>
+                  </View>
+                ))}
+                {chatRate.rooms.length > 1 && (
+                  <View style={[styles.rateRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                    <Text style={{ color: t.text, fontSize: 14, fontWeight: '700', flex: 1 }}>💬 두 방 합친 평균 ({chatRate.combinedCount}건)</Text>
+                    <Text style={{ color: t.accent, fontSize: 15, fontWeight: '800' }}>₩{chatRate.combinedAvg.toFixed(2)} / ₱1</Text>
+                  </View>
                 )}
+              </>
+            ) : (
+              <View style={[styles.rateRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.subtext, fontSize: 14 }}>💬 단톡방 평균</Text>
+                  <Text style={{ color: t.subtext, fontSize: 11 }}>
+                    설정 → 내 폰 연결 → &apos;단톡방 환율 방&apos;에 환전방을 넣고, 메시지 알림 읽기를 켜 주세요.
+                  </Text>
+                </View>
+                <Text style={{ color: t.subtext, fontSize: 15, fontWeight: '800' }}>언급 못 찾음</Text>
               </View>
-              <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>
-                {chatRate ? `₩${chatRate.avg.toFixed(2)} / ₱1` : '언급 못 찾음'}
-              </Text>
-            </View>
-            {!chatRate && (
-              <Text style={{ color: t.subtext, fontSize: 11, paddingHorizontal: 16, paddingBottom: 12 }}>
-                단톡방 환율은 메시지 알림에서 &apos;환율·페소·원&apos;이 적힌 숫자만 모아 평균 내요. 알림 읽기가 켜져 있고 환율이 올라온 방이 있어야 보여요.
-              </Text>
             )}
           </View>
 
