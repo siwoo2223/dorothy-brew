@@ -7,7 +7,7 @@ import * as inbox from './inbox';
  * 어느 쪽도 못 구하면 null. 앱(폰)은 인터넷 제한이 없어 네이버 호출이 된다.
  */
 
-export type NaverRate = { krwPerPhp: number; asOf: number } | null;
+export type NaverRate = { krwPerPhp: number; asOf: number; source: 'naver' | 'market' } | null;
 export type ChatRate = {
   avg: number;
   count: number;
@@ -31,21 +31,58 @@ function num(x: unknown): number {
   return NaN;
 }
 
-/** 네이버 실시간 PHP→KRW(₩ per ₱1). 비공개 내부 API라 형식이 바뀔 수 있어 여러 경로·필드를 시도한다. */
+/** 네이버 내부 API 응답 어디에 들어있든 closePrice/calcPrice 류의 환율 숫자를 찾아낸다(형식이 자주 바뀜). */
+function digNaver(j: any): number {
+  const keys = ['closePrice', 'calcPrice', 'price', 'nv', 'num'];
+  const seen = new Set<any>();
+  const walk = (o: any, depth: number): number => {
+    if (!o || depth > 6 || seen.has(o)) return NaN;
+    if (typeof o === 'object') seen.add(o);
+    if (Array.isArray(o)) {
+      for (const x of o) { const v = walk(x, depth + 1); if (Number.isFinite(v)) return v; }
+      return NaN;
+    }
+    if (typeof o === 'object') {
+      for (const k of keys) { if (k in o) { const v = num(o[k]); if (Number.isFinite(v) && v > 5 && v < 100) return v; } }
+      for (const k of Object.keys(o)) { const v = walk(o[k], depth + 1); if (Number.isFinite(v)) return v; }
+    }
+    return NaN;
+  };
+  return walk(j, 0);
+}
+
+/**
+ * 실시간 PHP→KRW(₩ per ₱1). 먼저 네이버 여러 경로를 시도하고(source='naver'),
+ * 안 되면 공개 무료 환율 API로 백업(source='market'). 폰은 인터넷 제한이 없어 호출된다.
+ * 전부 실패하면 null. 함수 이름은 호환 위해 유지.
+ */
 export async function naverPhpKrw(): Promise<NaverRate> {
+  // 1) 네이버 내부 API (형식이 자주 바뀌므로 응답 전체를 뒤져 환율 숫자를 찾는다)
   for (const url of NAVER_URLS) {
     try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+      const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json', Referer: 'https://m.stock.naver.com/' } });
       if (!r.ok) continue;
-      const j: any = await r.json();
-      const res = j?.result;
-      let v = NaN;
-      if (Array.isArray(res)) v = num(res[0]?.closePrice ?? res[0]?.calcPrice);
-      else if (res && typeof res === 'object') v = num(res.closePrice ?? res.calcPrice ?? res?.prices?.[0]?.closePrice);
-      if (!Number.isFinite(v)) v = num(j?.closePrice ?? j?.calcPrice);
-      if (Number.isFinite(v) && v > 5 && v < 100) return { krwPerPhp: v, asOf: Date.now() };
+      const j = await r.json();
+      const v = digNaver(j);
+      if (Number.isFinite(v)) return { krwPerPhp: v, asOf: Date.now(), source: 'naver' };
     } catch {
-      // try next endpoint
+      // try next
+    }
+  }
+  // 2) 공개 무료 환율 API 백업 (키 불필요, PHP 포함)
+  const markets: { url: string; pick: (j: any) => number }[] = [
+    { url: 'https://open.er-api.com/v6/latest/PHP', pick: (j) => num(j?.rates?.KRW) },
+    { url: 'https://api.exchangerate.host/latest?base=PHP&symbols=KRW', pick: (j) => num(j?.rates?.KRW) },
+    { url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/php.json', pick: (j) => num(j?.php?.krw) },
+  ];
+  for (const m of markets) {
+    try {
+      const r = await fetch(m.url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) continue;
+      const v = m.pick(await r.json());
+      if (Number.isFinite(v) && v > 5 && v < 100) return { krwPerPhp: v, asOf: Date.now(), source: 'market' };
+    } catch {
+      // try next
     }
   }
   return null;

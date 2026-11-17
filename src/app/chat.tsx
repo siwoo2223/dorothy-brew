@@ -33,7 +33,33 @@ import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
 
-const SUGGESTIONS = ['오늘 뭐부터 해야 해?', '이번 주 출항·입항 뭐 있어?', '이번 달 수지 어때?', '회신할 거 뭐 있어?', '내일 할 일 정리해줘'];
+// 입력창에 자동으로 돌아가며 뜨는 예시 + 빈 화면 추천 칩. 도로시가 실제로 할 수 있는 것만(회사·개인 섞어서).
+const EXAMPLES = [
+  '오늘 뭐부터 해야 해?',
+  '오늘 내가 놓친 거 있어?',
+  '이번 주 출항·입항 뭐 있어?',
+  '이번 달 손익 어때?',
+  '페소 환율 얼마야?',
+  '회신할 거 뭐 있어?',
+  '내일 할 일 정리해줘',
+  'DRY35 화물 목록 보여줘',
+  '한아름마트 미수금 얼마야?',
+  '방금 통화 요약해줘',
+  '부킹 스케줄 사진 읽어줘',
+  '다음 주 월요일 병원 예약, 알림 맞춰줘',
+  '엄마 생신 음력으로 기억해둬',
+  '마트에서 계란·우유 사기 할 일에 넣어줘',
+];
+
+/** 매번 조금씩 달라 보이도록 예시를 섞어 n개 뽑는다. */
+function pickExamples(n: number): string[] {
+  const a = [...EXAMPLES];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
 
 type Phase = 'off' | 'wake' | 'command' | 'busy';
 type Img = { uri: string; base64: string; mediaType: string };
@@ -60,6 +86,10 @@ export default function Chat() {
   const { state, actions, getState } = useStore();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  // 입력창 플레이스홀더로 돌아가며 보여줄 예시(뭘 물어볼 수 있는지 자동 제안). 빈 입력일 때만 보임.
+  const [phIdx, setPhIdx] = useState(0);
+  // 빈 화면 추천 칩: 매번 섞어 5개(이 화면이 떠 있는 동안 고정).
+  const emptyPicks = useRef(pickExamples(5)).current;
   // Photo(s)/screenshot(s) attached to the next message (Claude can read them).
   const [images, setImages] = useState<Img[]>([]);
   // The phone brain streams its reply; show it as it is written.
@@ -70,6 +100,12 @@ export default function Chat() {
   const router = useRouter();
   const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string; ask?: string }>();
   const canListen = voiceInputAvailable();
+
+  // 입력창 예시를 4초마다 바꿔 보여준다(입력 중·듣는 중이면 어차피 플레이스홀더가 안 보임).
+  useEffect(() => {
+    const id = setInterval(() => setPhIdx((i) => (i + 1) % EXAMPLES.length), 4000);
+    return () => clearInterval(id);
+  }, []);
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
   // phase: wake = waiting for the name, command = listening for a request, busy = thinking/speaking.
@@ -393,7 +429,7 @@ export default function Chat() {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: t.text }]}>무엇을 도와드릴까요?</Text>
             <Text style={{ color: t.subtext, textAlign: 'center' }}>나에 대해 이야기해 주시면 기억해 두고, 할 일은 알림으로 챙겨 드려요.</Text>
-            {SUGGESTIONS.map((s) => (
+            {emptyPicks.map((s) => (
               <Pressable key={s} onPress={() => { tap(); send(s); }} style={[styles.chip, { borderColor: t.border, backgroundColor: t.card }]}>
                 <Text style={{ color: t.text }}>{s}</Text>
               </Pressable>
@@ -513,7 +549,7 @@ export default function Chat() {
           style={{ flex: 1, maxHeight: 120 }}
           value={listening ? voice.transcript : draft}
           onChangeText={setDraft}
-          placeholder={listening ? '듣고 있어요…' : '도로시에게 말하기…'}
+          placeholder={listening ? '듣고 있어요…' : `예) ${EXAMPLES[phIdx]}`}
           editable={!listening}
           multiline
           onSubmitEditing={() => send(draft)}

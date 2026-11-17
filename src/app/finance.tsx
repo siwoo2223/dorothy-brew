@@ -64,9 +64,10 @@ export default function FinanceScreen() {
     }, [load]),
   );
 
-  // 환산에 쓸 환율: 네이버 실시간 우선, 없으면 회사 서버 기준 환율(수동).
+  // 환산에 쓸 환율: 실시간(네이버→시장 백업) 우선, 없으면 회사 서버 기준 환율(수동).
   const convRate = naver?.krwPerPhp && naver.krwPerPhp > 0 ? naver.krwPerPhp : fin?.fx ?? 0;
-  const rateLabel = naver?.krwPerPhp ? '네이버 실시간' : '회사 기준(수동)';
+  const liveLabel = naver?.source === 'naver' ? '네이버 실시간' : '실시간 시장환율';
+  const rateLabel = naver?.krwPerPhp ? liveLabel : '회사 기준(수동)';
 
   const moneyRow = (list: Money[]) => (list.length ? list.map(money).join('  ·  ') : '—');
 
@@ -115,7 +116,7 @@ export default function FinanceScreen() {
           {/* 환율: 네이버 실시간 + 단톡방 평균 (따로) */}
           <View style={[styles.listCard, { backgroundColor: t.card, borderColor: t.border }]}>
             <View style={styles.rateRow}>
-              <Text style={{ color: t.subtext, fontSize: 14, flex: 1 }}>🟢 네이버 실시간</Text>
+              <Text style={{ color: t.subtext, fontSize: 14, flex: 1 }}>🟢 {naver ? liveLabel : '실시간 환율'}</Text>
               <Text style={{ color: t.text, fontSize: 15, fontWeight: '800' }}>
                 {naver ? `₩${naver.krwPerPhp.toFixed(2)} / ₱1` : '못 가져옴'}
               </Text>
