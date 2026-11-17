@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Keyboard, LayoutAnimation, Platform, Pressable, Share, StyleSheet, Text, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, LayoutAnimation, Platform, Pressable, Share, StyleSheet, Text, TextInput, UIManager, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ImagePicker from 'expo-image-picker';
@@ -65,6 +65,8 @@ export default function Chat() {
   const [busy, setBusy] = useState(false);
   // 입력창 제안: ① AI가 최근 대화·상황으로 '다음 지시'를 예측(클로드처럼), ② 안 되면 규칙 기반으로 대체.
   const [phIdx, setPhIdx] = useState(0);
+  const [typing, setTyping] = useState(false); // 입력칸에 포커스됨(키보드 입력 중)
+  const inputRef = useRef<TextInput>(null);
   const [aiSuggest, setAiSuggest] = useState<string[]>([]);
   const ruleSuggest = useMemo(
     () => suggestPrompts(state),
@@ -550,27 +552,39 @@ export default function Chat() {
           >
             <Text style={{ fontSize: 22, color: t.text, marginTop: -2 }}>＋</Text>
           </Pressable>
-          <Input
-            style={{ flex: 1, maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
-            value={listening ? voice.transcript : draft}
-            onChangeText={setDraft}
-            placeholder={listening ? '듣고 있어요…' : draft ? '' : canListen ? '길게 눌러 말하거나, 입력하세요' : suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 말하기…'}
-            editable={!listening}
-            multiline
-            onSubmitEditing={() => send(draft)}
-          />
-          {/* 🎙️ 꾹 눌러 말하기(누르는 동안 듣고, 떼면 전송) */}
-          {canListen && !draft.trim() && (
-            <Pressable
-              onPressIn={() => { if (!busy && !standby && !listening) { tap(); voice.start(); } }}
-              onPressOut={() => { if (listening) voice.stop(); }}
-              disabled={busy || standby}
-              accessibilityLabel="길게 눌러 말하기"
-              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, opacity: busy || standby ? 0.4 : 1 }]}
-            >
-              <Text style={{ fontSize: 18 }}>🎙️</Text>
-            </Pressable>
-          )}
+          {/* 입력칸: 평소엔 '길게 눌러 말하세요'(눌러서 입력도 가능), 꾹 누르면 그 자리에서 말하기 */}
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <Input
+              ref={inputRef}
+              style={{ maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
+              value={listening ? voice.transcript : draft}
+              onChangeText={setDraft}
+              onFocus={() => setTyping(true)}
+              onBlur={() => setTyping(false)}
+              placeholder={typing || !canListen ? (suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 말하기…') : ''}
+              editable={!listening}
+              multiline
+              onSubmitEditing={() => send(draft)}
+            />
+            {/* 입력 중이 아니고 글자도 없을 때: 입력칸 위에 '길게 눌러 말하기' 오버레이.
+                짧게 누르면 키보드로 입력, 꾹 누르면 그동안 듣고 떼면 자동 전송. */}
+            {canListen && !typing && !draft.trim() && (
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => inputRef.current?.focus()}
+                onLongPress={() => { if (!busy && !standby && !listening) { tap(); voice.start(); } }}
+                onPressOut={() => { if (listening) voice.stop(); }}
+                delayLongPress={160}
+                accessibilityLabel="길게 눌러 말하기"
+              >
+                <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 8 }}>
+                  <Text style={{ color: listening ? t.accent : t.subtext, fontSize: 15 }} numberOfLines={1}>
+                    {listening ? (voice.transcript || '듣고 있어요… (떼면 전송)') : '길게 눌러 말하세요'}
+                  </Text>
+                </View>
+              </Pressable>
+            )}
+          </View>
           {/* ↑ 전송 */}
           <Pressable
             onPress={() => { tap(); send(draft); }}
