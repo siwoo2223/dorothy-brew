@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { forwardRef, ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 
 import { useTheme } from '../lib/theme';
@@ -47,16 +47,17 @@ export function Button({
   );
 }
 
-export function Input(props: TextInputProps) {
+export const Input = forwardRef<TextInput, TextInputProps>(function Input(props, ref) {
   const t = useTheme();
   return (
     <TextInput
+      ref={ref}
       placeholderTextColor={t.subtext}
       {...props}
       style={[styles.input, { color: t.text, backgroundColor: t.bg, borderColor: t.border }, props.style]}
     />
   );
-}
+});
 
 // Soft, warm shadows — light on Android (elevation) so dark cards don't halo.
 const cardShadow = Platform.select({
