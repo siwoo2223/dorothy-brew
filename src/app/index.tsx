@@ -21,6 +21,10 @@ function greeting(hour: number) {
   return '편안한 저녁이에요';
 }
 
+// 저녁엔 하루를 마무리하며 '놓친 것'을 점검하도록 도로시에게 보내는 요청.
+const MISSED_REVIEW =
+  '오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.';
+
 export default function Today() {
   const t = useTheme();
   const router = useRouter();
@@ -40,7 +44,9 @@ export default function Today() {
     useCallback(() => {
       overnightCounts().then(setOvernight).catch(() => {});
       companySummary().then(setBiz).catch(() => {});
-    }, []),
+      // 배경 점검이 올린 '할 일 후보'를 홈에서도 최신으로 반영.
+      actions.reloadTodoCandidates?.();
+    }, [actions]),
   );
 
   // Opened from the morning briefing notification (/?brief=1): build the briefing right away,
@@ -135,6 +141,18 @@ export default function Today() {
     .filter(Boolean)
     .join(' · ');
 
+  const isEvening = now.getHours() >= 18;
+  const candidates = state.todoCandidates ?? [];
+  const missedSub =
+    [
+      urgent.length ? `오늘까지 할 일 ${urgent.length}건` : null,
+      openFollowups.length ? `회신 ${openFollowups.length}명` : null,
+      candidates.length ? `등록 대기 ${candidates.length}건` : null,
+      missedToday.length ? `부재중 ${missedToday.length}건` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ') || '오늘 하루, 놓친 게 있나 같이 볼까요';
+
   return (
     <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}>
       <View style={styles.header}>
@@ -182,18 +200,32 @@ export default function Today() {
         </Card>
       )}
 
-      {/* ── 오늘의 브리핑 ── */}
-      <Pressable
-        onPress={runBriefing}
-        disabled={loading || !state.apiKey}
-        style={({ pressed }) => [styles.hero, { backgroundColor: t.accent, opacity: pressed ? 0.9 : 1 }]}
-      >
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={[styles.heroTitle, { color: t.accentText }]}>☀️ 오늘의 브리핑</Text>
-          <Text style={{ color: t.accentText, fontSize: 13, lineHeight: 19, opacity: 0.9 }}>{briefSub}</Text>
-        </View>
-        {loading ? <ActivityIndicator color={t.accentText} /> : <Text style={{ color: t.accentText, fontSize: 24 }}>→</Text>}
-      </Pressable>
+      {/* ── 시간대별 히어로: 낮엔 '오늘의 브리핑', 저녁(18시~)엔 '오늘 마무리(놓친 것 점검)' ── */}
+      {isEvening ? (
+        <Pressable
+          onPress={() => router.navigate({ pathname: '/chat', params: { ask: MISSED_REVIEW } })}
+          disabled={!state.apiKey}
+          style={({ pressed }) => [styles.hero, { backgroundColor: t.accent, opacity: !state.apiKey ? 0.6 : pressed ? 0.9 : 1 }]}
+        >
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={[styles.heroTitle, { color: t.accentText }]}>🌙 오늘 마무리</Text>
+            <Text style={{ color: t.accentText, fontSize: 13, lineHeight: 19, opacity: 0.9 }}>{missedSub}</Text>
+          </View>
+          <Text style={{ color: t.accentText, fontSize: 24 }}>→</Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={runBriefing}
+          disabled={loading || !state.apiKey}
+          style={({ pressed }) => [styles.hero, { backgroundColor: t.accent, opacity: pressed ? 0.9 : 1 }]}
+        >
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={[styles.heroTitle, { color: t.accentText }]}>☀️ 오늘의 브리핑</Text>
+            <Text style={{ color: t.accentText, fontSize: 13, lineHeight: 19, opacity: 0.9 }}>{briefSub}</Text>
+          </View>
+          {loading ? <ActivityIndicator color={t.accentText} /> : <Text style={{ color: t.accentText, fontSize: 24 }}>→</Text>}
+        </Pressable>
+      )}
 
       {!!brief && !loading && (
         <Card>
@@ -206,6 +238,23 @@ export default function Today() {
         <Stat label="오늘" value={today.length} color={t.accent} onPress={() => router.navigate('/tasks')} />
         <Stat label="회신 대기" value={openFollowups.length} color={t.subtext} onPress={() => router.navigate('/tasks')} />
       </View>
+
+      {/* ── 등록 대기: 카톡 할 일 감지가 올린 후보. 등록/무시는 할 일 탭 맨 위에서. ── */}
+      {candidates.length > 0 && (
+        <Pressable
+          onPress={() => router.navigate('/tasks')}
+          style={({ pressed }) => [styles.pending, { backgroundColor: t.accentSoft, borderColor: t.accent, opacity: pressed ? 0.85 : 1 }]}
+        >
+          <Text style={{ fontSize: 18 }}>📥</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.text, fontSize: 14, fontWeight: '700' }}>등록할 할 일 {candidates.length}건</Text>
+            <Text style={{ color: t.subtext, fontSize: 12 }} numberOfLines={1}>
+              {candidates.slice(0, 2).map((c) => c.title).join(' · ')} — 등록/무시 확인하세요
+            </Text>
+          </View>
+          <Text style={{ color: t.accent, fontSize: 20 }}>→</Text>
+        </Pressable>
+      )}
 
       {/* ── 놓치지 마세요 ── */}
       {urgent.length > 0 && (
@@ -335,6 +384,7 @@ const styles = StyleSheet.create({
   doneBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   listText: { flex: 1, fontSize: 15, fontWeight: '600' },
+  pending: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 14 },
   bizRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14 },
   badge: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
   bizNext: { fontSize: 13, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },

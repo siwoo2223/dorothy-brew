@@ -52,7 +52,7 @@ export default function AccountScreen() {
         <Text style={{ color: t.accent, fontSize: 24, fontWeight: '800' }}>
           {detail ? `${sym(cur)}${fmt(detail.balance)}` : '—'}
         </Text>
-        {detail && <Text style={{ color: t.subtext, fontSize: 12 }}>이번 달({detail.month}) 거래 {detail.transactions.length}건</Text>}
+        {detail && <Text style={{ color: t.subtext, fontSize: 12 }}>최근 거래 {detail.transactions.length}건</Text>}
       </View>
 
       {loading && !detail ? (
@@ -82,9 +82,9 @@ export default function AccountScreen() {
           })}
         </View>
       ) : (
-        <Body muted>이번 달 거래가 없어요.</Body>
+        <Body muted>거래 내역이 없어요.</Body>
       )}
-      <Body muted>이번 달 거래만 보여드려요(최신순). 당겨서 새로고침할 수 있어요.</Body>
+      <Body muted>최근 거래를 최신순으로 보여드려요(최대 100건). 당겨서 새로고침할 수 있어요.</Body>
     </ScrollView>
   );
 }

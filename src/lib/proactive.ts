@@ -148,6 +148,40 @@ async function runProactiveCheck(): Promise<void> {
     if (companyBlock) await AsyncStorage.setItem('dorothy.proactiveBizDay', today);
   }
 
+  // ── 저녁 '놓친 것' 정리: 하루 끝에 아직 열려 있는 할 일·회신·등록 안 한 후보를 한 번만 모아 알린다. ──
+  // 숫자는 저장된 실제 항목에서 센다(추측 금지). 저녁 20~22시 사이 하루 한 번만.
+  try {
+    const eveDay = await AsyncStorage.getItem('dorothy.proactiveEveningDay');
+    if (eveDay !== today && hourNow >= 20 && hourNow < QUIET_START) {
+      const [tasksRaw, followRaw, candRaw] = await Promise.all([
+        AsyncStorage.getItem('dorothy.tasks'),
+        AsyncStorage.getItem('dorothy.followups'),
+        AsyncStorage.getItem('dorothy.todoCandidates'),
+      ]);
+      const tasks: { dueAt?: string; done?: boolean; title: string }[] = tasksRaw ? JSON.parse(tasksRaw) : [];
+      const follows: { done?: boolean }[] = followRaw ? JSON.parse(followRaw) : [];
+      const cands: unknown[] = candRaw ? JSON.parse(candRaw) : [];
+      const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
+      const due = tasks.filter((t) => !t.done && t.dueAt && new Date(t.dueAt).getTime() <= endToday.getTime());
+      const openFollows = follows.filter((f) => !f.done).length;
+      const parts = [
+        due.length ? `오늘까지 할 일 ${due.length}건` : '',
+        openFollows ? `회신할 사람 ${openFollows}명` : '',
+        cands.length ? `등록 대기 ${cands.length}건` : '',
+        missed.length ? `부재중 ${missed.length}건` : '',
+      ].filter(Boolean);
+      if (parts.length) {
+        await Notifications.scheduleNotificationAsync({
+          content: { title: '🌙 오늘 놓친 거 있나 볼까요', body: parts.join(' · ') + ' — 내일로 넘길지 지금 처리할지 챙겨보세요', data: { url: '/tasks' } },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 1, channelId: 'reminders' },
+        }).catch(() => {});
+      }
+      await AsyncStorage.setItem('dorothy.proactiveEveningDay', today);
+    }
+  } catch {
+    // never break the background runner on the evening digest
+  }
+
   if (!freshMessages.length && !freshMail.length && !missed.length && !companyBlock) return;
 
   const blob = [

@@ -365,6 +365,7 @@ export default function Chat() {
     ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
+    { label: '🌙 놓친 거', go: () => send('오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.') },
     { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
     { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
     { label: '📸 카메라', go: () => router.push('/camera') },
