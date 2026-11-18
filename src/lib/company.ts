@@ -64,6 +64,30 @@ async function get(params: Record<string, string>): Promise<string> {
   return text;
 }
 
+/** 회사 서버 Gemini로 음성(오디오 파일)을 정확히 받아쓴다. 실패하면 '' 반환(호출측이 폰 인식으로 대체). */
+export async function transcribeAudio(audioUri: string): Promise<string> {
+  if (!endpointUrl || !token || !audioUri) return '';
+  const url = endpointUrl.includes('dorothy_report.php')
+    ? endpointUrl.replace('dorothy_report.php', 'dorothy_transcribe.php')
+    : endpointUrl.replace(/[^/]*$/, 'dorothy_transcribe.php');
+  try {
+    const FileSystem = await import('expo-file-system/legacy');
+    const base64 = await FileSystem.readAsStringAsync(audioUri, { encoding: FileSystem.EncodingType.Base64 });
+    if (!base64) return '';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Dorothy-Token': token, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ audio_base64: base64, mime: 'audio/wav' }),
+    });
+    if (!res.ok) return '';
+    const data = JSON.parse(await res.text());
+    const text = typeof data?.text === 'string' ? data.text.trim() : '';
+    return text;
+  } catch {
+    return '';
+  }
+}
+
 /** Fetches the JSON summary (or the schema dump) as text, to hand straight to Claude. */
 export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): Promise<string> {
   return get({ mode });

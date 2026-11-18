@@ -28,6 +28,7 @@ import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
 import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, weeklyReport } from '../lib/assistant';
 import { suggestPrompts } from '../lib/suggest';
+import { companyConfigured, transcribeAudio } from '../lib/company';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
 import { useStore } from '../lib/store';
@@ -66,6 +67,7 @@ export default function Chat() {
   // 입력창 제안: ① AI가 최근 대화·상황으로 '다음 지시'를 예측(클로드처럼), ② 안 되면 규칙 기반으로 대체.
   const [phIdx, setPhIdx] = useState(0);
   const [typing, setTyping] = useState(false); // 입력칸에 포커스됨(키보드 입력 중)
+  const [transcribing, setTranscribing] = useState(false); // 손 뗀 뒤 서버로 받아쓰는 중
   const inputRef = useRef<TextInput>(null);
   const [aiSuggest, setAiSuggest] = useState<string[]>([]);
   const ruleSuggest = useMemo(
@@ -130,7 +132,7 @@ export default function Chat() {
   const sendRef = useRef<(text: string, spoken?: boolean, extra?: string) => void>(() => {});
 
   const voice = useVoiceInput(
-    (text) => {
+    (text, audioUri) => {
       if (phase.current === 'wake') {
         const command = extractWakeCommand(text);
         if (command === null) return; // not for Dorothy; keep waiting
@@ -143,7 +145,22 @@ export default function Chat() {
         text = command;
       }
       if (phase.current !== 'off') phase.current = 'busy';
-      sendRef.current(text, true);
+      // 꾹 눌러 말하기(audioUri 있음): 회사 서버 Gemini로 정확히 받아쓰고, 안 되면 폰 인식 결과로 대체.
+      if (audioUri && companyConfigured()) {
+        setTranscribing(true);
+        transcribeAudio(audioUri)
+          .then((better) => {
+            const finalText = (better && better.trim()) || text;
+            setTranscribing(false);
+            if (finalText.trim()) sendRef.current(finalText, true);
+          })
+          .catch(() => {
+            setTranscribing(false);
+            if (text.trim()) sendRef.current(text, true);
+          });
+        return;
+      }
+      if (text.trim()) sendRef.current(text, true);
     },
     (info) => {
       // The recognizer stops on silence or timeouts; in standby, quietly pick up listening again.
@@ -572,14 +589,14 @@ export default function Chat() {
               <Pressable
                 style={StyleSheet.absoluteFill}
                 onPress={() => inputRef.current?.focus()}
-                onLongPress={() => { if (!busy && !standby && !listening) { tap(); voice.start(); } }}
-                onPressOut={() => { if (listening) voice.stop(); }}
+                onLongPress={() => { if (!busy && !standby && !listening && !transcribing) { tap(); voice.pushStart(); } }}
+                onPressOut={() => { if (listening) voice.pushEnd(); }}
                 delayLongPress={160}
                 accessibilityLabel="길게 눌러 말하기"
               >
                 <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 8 }}>
-                  <Text style={{ color: listening ? t.accent : t.subtext, fontSize: 15 }} numberOfLines={1}>
-                    {listening ? (voice.transcript || '듣고 있어요… (떼면 전송)') : '길게 눌러 말하세요'}
+                  <Text style={{ color: listening || transcribing ? t.accent : t.subtext, fontSize: 15 }} numberOfLines={1}>
+                    {transcribing ? '받아쓰는 중…' : listening ? (voice.transcript || '듣고 있어요… (떼면 전송)') : '길게 눌러 말하세요'}
                   </Text>
                 </View>
               </Pressable>

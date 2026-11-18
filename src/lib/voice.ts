@@ -107,10 +107,12 @@ type VoiceState = 'idle' | 'listening' | 'error';
 
 // lastText/delivered: some recognizers (seen on Samsung with Google's service) stream partial
 // results but finish with an empty or missing final result, so the last partial is sent on 'end'.
-function newSession(quiet = false, startedAt = Date.now(), record = false) {
+function newSession(quiet = false, startedAt = Date.now(), record = false, pushToTalk = false) {
   // started: this hook owns the current recognition. Enrollment (recordUtterance) drives the shared
   // recognizer directly, so the hook ignores those events instead of sending them to the chat.
-  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet, record, audioUri: null as string | null, started: false };
+  // pushToTalk/holding/finals: in 꾹-눌러-말하기, nothing is sent until the finger is lifted; the
+  // recognizer auto-finalizing on a pause just appends to `finals` (and we keep listening while held).
+  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet, record, pushToTalk, holding: false, finals: [] as string[], audioUri: null as string | null, started: false };
 }
 
 // Fixed path so each standby recording overwrites the last one (no buildup in the cache).
@@ -139,7 +141,7 @@ export function extractWakeCommand(text: string): string | null {
 export type SessionEnd = { error?: string; durationMs: number; heardSpeech: boolean };
 
 export function useVoiceInput(
-  onFinal: (text: string) => void,
+  onFinal: (text: string, audioUri?: string | null) => void,
   onEnd?: (info: SessionEnd) => void,
   // When set and a session is started with { record: true }, the finished sentence is delivered
   // only if this returns true — used in standby to accept the owner's voice and ignore others.
@@ -158,6 +160,8 @@ export function useVoiceInput(
   }, [onFinal, onEnd, verifyAudio]);
 
   const session = useRef(newSession(false, 0));
+  // The exact options last passed to recognizer.start(), so 꾹-눌러-말하기 can restart after a pause.
+  const startOptsRef = useRef<Parameters<NonNullable<typeof recognizer>['start']>[0] | null>(null);
 
   useEffect(() => {
     if (!recognizer) return;
@@ -170,14 +174,36 @@ export function useVoiceInput(
         if (event.uri) session.current.audioUri = event.uri;
       }),
       recognizer.addListener('end', () => {
-        if (!session.current.started) return; // not our session (e.g. enrollment)
-        session.current.started = false;
-        setState((s) => (s === 'listening' ? 'idle' : s));
         const current = session.current;
+        if (!current.started) return; // not our session (e.g. enrollment)
+        // 꾹 눌러 말하기: 손가락이 아직 눌려 있는데 인식기가 (잠깐의 침묵으로) 멈춘 것뿐이면,
+        // 전송하지 말고 계속 듣는다. 이미 모은 말(finals)은 그대로 둔다.
+        if (current.pushToTalk && current.holding && !current.error && startOptsRef.current) {
+          const opts = startOptsRef.current;
+          setTimeout(() => {
+            if (session.current === current && current.holding && current.started) {
+              try { recognizer!.start(opts); } catch { /* ignore busy */ }
+            }
+          }, 120);
+          return;
+        }
+        current.started = false;
+        setState((s) => (s === 'listening' ? 'idle' : s));
         const finish = () => {
           const { startedAt, error, heardSpeech } = current;
           onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
         };
+        // 꾹 눌러 말하기: 손을 뗀 지금, 모은 말 전체 + 녹음 파일을 한 번만 전달(서버 받아쓰기용 uri 포함).
+        if (current.pushToTalk) {
+          const text = (current.finals.join(' ').trim() || current.lastText.trim());
+          const uri = current.audioUri;
+          current.delivered = true;
+          setTranscript('');
+          if (text || uri) onFinalRef.current(text, uri);
+          else if (!current.quiet) setError('잘 못 들었어요. 입력칸을 꾹 누르고 다시 말해 주세요.');
+          finish();
+          return;
+        }
         if (!current.delivered && current.lastText) {
           const text = current.lastText;
           const uri = current.audioUri;
@@ -202,25 +228,32 @@ export function useVoiceInput(
       }),
       recognizer.addListener('result', (event) => {
         if (!session.current.started) return; // not our session (e.g. enrollment)
+        const cur = session.current;
         const text = event.results[0]?.transcript ?? '';
-        if (text.trim()) {
-          session.current.heardSpeech = true;
-          session.current.lastText = text.trim();
-          setError('');
+        const trimmed = text.trim();
+        if (trimmed) { cur.heardSpeech = true; setError(''); }
+        // 꾹 눌러 말하기: 전송하지 않고, 지금까지 모은 말 + 현재 말을 화면에만 보여준다.
+        if (cur.pushToTalk) {
+          const live = [cur.finals.join(' '), trimmed].filter(Boolean).join(' ').trim();
+          setTranscript(live);
+          cur.lastText = live;
+          if (event.isFinal && trimmed) { cur.finals.push(trimmed); cur.lastText = cur.finals.join(' '); }
+          return;
         }
+        if (trimmed) cur.lastText = trimmed;
         setTranscript(text);
-        if (event.isFinal && text.trim() && !session.current.delivered) {
-          if (session.current.record) {
+        if (event.isFinal && trimmed && !cur.delivered) {
+          if (cur.record) {
             // Hold the sentence; it is verified against the voiceprint and delivered on 'end',
             // once the recorded audio file is ready.
-            session.current.lastText = text.trim();
+            cur.lastText = trimmed;
           } else {
-            session.current.delivered = true;
+            cur.delivered = true;
             setTranscript('');
-            onFinalRef.current(text.trim());
+            onFinalRef.current(trimmed);
             // Continuous sessions keep going after a final result; start collecting the next sentence.
-            session.current.delivered = false;
-            session.current.lastText = '';
+            cur.delivered = false;
+            cur.lastText = '';
           }
         }
       }),
@@ -252,15 +285,17 @@ export function useVoiceInput(
     return () => subs.forEach((s) => s.remove());
   }, []);
 
-  /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). `record` saves the audio for the voiceprint check. */
-  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean; record?: boolean } = {}) => {
+  /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). `record` saves the audio for the voiceprint check. `pushToTalk` holds everything until the finger lifts. */
+  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean; record?: boolean; pushToTalk?: boolean } = {}) => {
     if (!recognizer) return;
     stopSpeaking();
     // In standby a failed restart is handled by the caller; don't flash an error for every retry.
     if (!opts.quiet) setError('');
     setTranscript('');
-    session.current = newSession(!!opts.quiet, Date.now(), !!opts.record);
+    const record = !!opts.record || !!opts.pushToTalk; // 꾹 눌러 말하기는 서버 받아쓰기용으로 항상 녹음한다.
+    session.current = newSession(!!opts.quiet, Date.now(), record, !!opts.pushToTalk);
     session.current.started = true;
+    if (opts.pushToTalk) session.current.holding = true;
     const permission = await recognizer.requestPermissionsAsync();
     if (!permission.granted) {
       session.current.started = false;
@@ -268,10 +303,11 @@ export function useVoiceInput(
       setState('error');
       return;
     }
-    recognizer.start({
+    const sro = {
       lang: LANG,
       interimResults: true,
-      continuous: !!opts.continuous,
+      // 꾹 눌러 말하기는 손을 뗄 때까지 계속 들어야 하므로 항상 연속 모드.
+      continuous: !!opts.continuous || !!opts.pushToTalk,
       addsPunctuation: true,
       androidRecognitionServicePackage: androidService(),
       // Wait longer through pauses so Dorothy doesn't cut in while the user is still speaking.
@@ -281,13 +317,25 @@ export function useVoiceInput(
         EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 2000,
       },
       // Overwrites the same file each time, so recordings don't pile up in the cache.
-      recordingOptions: opts.record ? { persist: true, outputFileName: VOICE_FILE } : undefined,
-    });
+      recordingOptions: record ? { persist: true, outputFileName: VOICE_FILE } : undefined,
+    };
+    startOptsRef.current = sro;
+    recognizer.start(sro);
   }, []);
 
   const showError = useCallback((message: string) => {
     setError(message);
     setState('error');
+  }, []);
+
+  /** 꾹 눌러 말하기 시작(누르는 동안 녹음·대기, 전송 안 함). */
+  const pushStart = useCallback(() => start({ pushToTalk: true }), [start]);
+  /** 손을 뗐을 때: 더 듣지 말고 멈춰서 'end'에서 모은 말+녹음을 한 번 전달. */
+  const pushEnd = useCallback(() => {
+    if (session.current.pushToTalk && session.current.started) {
+      session.current.holding = false;
+      recognizer?.stop();
+    }
   }, []);
 
   const stop = useCallback(() => recognizer?.stop(), []);
@@ -298,7 +346,7 @@ export function useVoiceInput(
     setTranscript('');
   }, []);
 
-  return { state, transcript, error, start, stop, cancel, showError };
+  return { state, transcript, error, start, stop, cancel, showError, pushStart, pushEnd };
 }
 
 /**
