@@ -68,6 +68,8 @@ export default function Chat() {
   const [phIdx, setPhIdx] = useState(0);
   const [typing, setTyping] = useState(false); // 입력칸에 포커스됨(키보드 입력 중)
   const [transcribing, setTranscribing] = useState(false); // 손 뗀 뒤 서버로 받아쓰는 중
+  const [pendingVoice, setPendingVoice] = useState(''); // 받아쓰는 동안 먼저 보여줄 폰 인식 결과
+  const [ptt, setPtt] = useState(false); // 지금 '꾹 눌러 말하기' 중(손을 떼면 전송)
   const inputRef = useRef<TextInput>(null);
   const [aiSuggest, setAiSuggest] = useState<string[]>([]);
   const ruleSuggest = useMemo(
@@ -145,18 +147,19 @@ export default function Chat() {
         text = command;
       }
       if (phase.current !== 'off') phase.current = 'busy';
-      // 꾹 눌러 말하기(audioUri 있음): 회사 서버 Gemini로 정확히 받아쓰고, 안 되면 폰 인식 결과로 대체.
-      if (audioUri && companyConfigured()) {
+      // 꾹 눌러 말하기(audioUri 있음): '고급 받아쓰기'(기본 켜짐)면 회사 Gemini(빠른 경량 모델)로
+      // 받아쓴다. 폰 인식 결과를 바로 보여줘 기다림이 덜 느껴지게 하고, Gemini가 돌아오면 그 정확한
+      // 결과로 전송(실패/빈값이면 폰 결과로 대체). 꺼져 있으면 폰 결과를 손 떼자마자 바로 전송.
+      if (audioUri && companyConfigured() && getState().voiceHiAccuracy) {
+        setPendingVoice(text);
         setTranscribing(true);
         transcribeAudio(audioUri)
+          .catch(() => '')
           .then((better) => {
+            setTranscribing(false);
+            setPendingVoice('');
             const finalText = (better && better.trim()) || text;
-            setTranscribing(false);
             if (finalText.trim()) sendRef.current(finalText, true);
-          })
-          .catch(() => {
-            setTranscribing(false);
-            if (text.trim()) sendRef.current(text, true);
           });
         return;
       }
@@ -510,9 +513,11 @@ export default function Chat() {
                   : listeningFor.current === 'command'
                     ? '🎙️ 말씀하세요'
                     : '👂 대기 중 — "도로시야"라고 불러 주세요'
-                : listening
-                  ? '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요'
-                  : '🎙️ 버튼을 누르거나 대기 모드를 켜 보세요'}
+                : transcribing
+                  ? '✍️ 더 정확히 다듬는 중… (곧 보내요)'
+                  : listening
+                    ? (ptt ? '🎙️ 듣고 있어요… 손을 떼면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
+                    : '🎙️ 입력칸을 길게 눌러 말하거나, 대기 모드를 켜 보세요'}
             </Text>
           )}
           {canListen && (
@@ -574,7 +579,8 @@ export default function Chat() {
             <Input
               ref={inputRef}
               style={{ maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
-              value={listening ? voice.transcript : draft}
+              // 들을 땐 받아쓴 내용을 오버레이에서만 보여준다(입력칸에도 그리면 두 겹으로 겹침).
+              value={listening || transcribing ? '' : draft}
               onChangeText={setDraft}
               onFocus={() => setTyping(true)}
               onBlur={() => setTyping(false)}
@@ -589,14 +595,14 @@ export default function Chat() {
               <Pressable
                 style={StyleSheet.absoluteFill}
                 onPress={() => inputRef.current?.focus()}
-                onLongPress={() => { if (!busy && !standby && !listening && !transcribing) { tap(); voice.pushStart(); } }}
-                onPressOut={() => { if (listening) voice.pushEnd(); }}
+                onLongPress={() => { if (!busy && !standby && !listening && !transcribing) { tap(); setPtt(true); voice.pushStart(); } }}
+                onPressOut={() => { if (listening) voice.pushEnd(); setPtt(false); }}
                 delayLongPress={160}
                 accessibilityLabel="길게 눌러 말하기"
               >
                 <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 8 }}>
-                  <Text style={{ color: listening || transcribing ? t.accent : t.subtext, fontSize: 15 }} numberOfLines={1}>
-                    {transcribing ? '받아쓰는 중…' : listening ? (voice.transcript || '듣고 있어요… (떼면 전송)') : '길게 눌러 말하세요'}
+                  <Text style={{ color: listening || transcribing ? t.text : t.subtext, fontSize: 15 }} numberOfLines={3}>
+                    {transcribing ? (pendingVoice || '받아쓰는 중…') : listening ? (voice.transcript || '듣고 있어요… (손을 떼면 보내요)') : '길게 눌러 말하세요'}
                   </Text>
                 </View>
               </Pressable>
