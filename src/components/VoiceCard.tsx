@@ -46,7 +46,7 @@ export function VoiceCard() {
         <View style={{ flex: 1 }}>
           <Body>🧠 고급 받아쓰기 (회사 Gemini)</Body>
           <Body muted>
-            끄면(기본) 폰이 실시간으로 들은 대로 손 떼자마자 바로 전송돼 빨라요. 켜면 녹음을 회사 서버 Gemini로 보내 더 정확히 받아쓰지만 몇 초 더 걸려요(회사 연결 필요).
+            켜짐(기본): 녹음을 회사 서버 Gemini(빠른 경량 모델)로 보내 정확히 받아써요(회사 연결 필요). 끄면 폰이 실시간으로 들은 대로 손 떼자마자 바로 전송돼 가장 빠르지만 덜 정확해요.
           </Body>
         </View>
         <Switch
