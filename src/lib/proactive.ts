@@ -159,15 +159,27 @@ async function runProactiveCheck(): Promise<void> {
         AsyncStorage.getItem('dorothy.todoCandidates'),
       ]);
       const tasks: { dueAt?: string; done?: boolean; title: string }[] = tasksRaw ? JSON.parse(tasksRaw) : [];
-      const follows: { done?: boolean }[] = followRaw ? JSON.parse(followRaw) : [];
-      const cands: unknown[] = candRaw ? JSON.parse(candRaw) : [];
+      const follows: { done?: boolean; who?: string }[] = followRaw ? JSON.parse(followRaw) : [];
+      const cands: { title?: string }[] = candRaw ? JSON.parse(candRaw) : [];
       const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
       const due = tasks.filter((t) => !t.done && t.dueAt && new Date(t.dueAt).getTime() <= endToday.getTime());
-      const openFollows = follows.filter((f) => !f.done).length;
+      const openFollows = follows.filter((f) => !f.done);
+      // 건수만이 아니라 "무엇이" 남았는지 이름으로 짚어 준다(능동 판단력).
+      const firstOf = (titles: string[], label: string) => {
+        const t = titles.map((x) => (x || '').trim()).filter(Boolean);
+        return t.length ? `${label}: ${t[0]}${t.length > 1 ? ` 외 ${t.length - 1}건` : ''}` : '';
+      };
+      const nameList = (names: string[], max = 3) => {
+        const n = names.map((x) => (x || '').trim()).filter(Boolean);
+        if (!n.length) return '';
+        const head = n.slice(0, max).join('·');
+        return n.length > max ? `${head} 외 ${n.length - max}명` : head;
+      };
+      const followNames = nameList(openFollows.map((f) => f.who ?? ''));
       const parts = [
-        due.length ? `오늘까지 할 일 ${due.length}건` : '',
-        openFollows ? `회신할 사람 ${openFollows}명` : '',
-        cands.length ? `등록 대기 ${cands.length}건` : '',
+        firstOf(due.map((t) => t.title), '오늘까지'),
+        followNames ? `회신: ${followNames}` : '',
+        firstOf(cands.map((c) => c.title ?? ''), '등록 대기'),
         missed.length ? `부재중 ${missed.length}건` : '',
       ].filter(Boolean);
       if (parts.length) {

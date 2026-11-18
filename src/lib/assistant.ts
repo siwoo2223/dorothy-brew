@@ -666,6 +666,7 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
     `사용자 이름: ${profile.name || '(아직 모름)'}`,
     `Google 계정: ${googleEmails.length ? `${googleEmails.join(', ')} 연결됨 (캘린더·Gmail 도구는 연결된 모든 계정을 함께 봅니다)` : '연결 안 됨'}`,
     profile.about ? `사용자 자기소개:\n${profile.about}` : '',
+    state.chatSummary ? `지금까지 대화에서 알아둘 것(이전 대화 요약 — 최근 대화창 밖으로 밀려난 내용):\n${state.chatSummary}` : '',
     `기억 목록 (${memories.length}개):\n${memories.map((m) => `- [${m.id}] (${m.category}) ${m.content}`).join('\n') || '(없음)'}`,
     `진행 중인 할 일 (${open.length}개):\n${open.map(taskLine).join('\n') || '(없음)'}`,
     `회신·부탁 대기 (${openFollowups.length}개):\n${openFollowups.map((f) => `- [${f.id}] ${f.who} — ${f.what}${f.source ? ` (${f.source})` : ''}`).join('\n') || '(없음)'}`,
@@ -1014,6 +1015,53 @@ export async function chat(
   }
 
   return replies.join('\n\n') || '(응답이 비어 있어요. 다시 말씀해 주세요.)';
+}
+
+/** Turns kept verbatim in the live window; older turns get folded into chatSummary. */
+const SUMMARY_KEEP = HISTORY_TURNS;
+/** Only fold once this many out-of-window turns have accumulated (keeps the summary call rare). */
+const SUMMARY_BATCH = 12;
+
+/**
+ * 기억 연속성: 대화가 길어지면, 최근 창(SUMMARY_KEEP턴) 밖으로 밀려나 Claude에게 더는 전해지지 않는
+ * 이전 대화를 "대화 요약"으로 접어 보관한다. 요약은 buildContext를 통해 매 턴 맥락에 들어가므로,
+ * 수백 턴을 주고받아도 도로시가 앞선 맥락(사장이 부탁한 것·진행 중인 일·취향)을 잊지 않는다.
+ * 증분으로 새로 밀려난 턴만 기존 요약에 접어 넣어 비용을 아낀다. 화면이 쉴 때(응답 직후) 호출한다.
+ */
+export async function updateChatSummary(state: AppState, actions: StoreActions): Promise<void> {
+  if (state.model === 'local' || !state.apiKey) return;
+  const chat = state.chat ?? [];
+  const foldUpto = chat.length - SUMMARY_KEEP; // 이 인덱스 앞쪽 턴은 이미 창 밖
+  const start = state.chatSummaryUpto ?? 0;
+  if (foldUpto - start < SUMMARY_BATCH) return; // 아직 접을 만큼 쌓이지 않음
+  const slice = chat.slice(start, foldUpto);
+  if (!slice.length) return;
+  const convo = slice.map((t) => `${t.role === 'user' ? '사장' : '도로시'}: ${clean(t.text ?? '').slice(0, 500)}`).join('\n');
+  const client = createClient(state);
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    {
+      type: 'text',
+      text:
+        '당신은 개인 비서 "도로시"의 기억 정리기입니다. 아래 <기존요약>과 그 뒤로 새로 오간 <대화>를 합쳐, 사장(사용자)에 대해 ' +
+        '오래 기억할 가치가 있는 것만 담은 "갱신된 요약"을 한국어로 쓰세요. 포함할 것: 사장이 부탁했거나 기다리는 일, 진행 중인 작업과 그 맥락·결정, ' +
+        '드러난 취향·업무 방식·반복 패턴, 사람·거래처·프로젝트에 대한 사실. 뺄 것: 끝난 잡담, 한 번 쓰고 만 것, 이미 할 일/기억으로 저장됐을 사소한 것. ' +
+        '불릿 8~12줄 이내로 간결하게. 기존 요약 내용은 유지하되 겹치면 하나로 합치고, 더 이상 유효하지 않은 것은 뺍니다. 요약 본문만 출력하세요(머리말·설명 없이).',
+    },
+  ];
+  try {
+    const response = await client.beta.messages.create({
+      ...modelParams(state.model),
+      max_tokens: 900,
+      output_config: { effort: 'low' },
+      system,
+      messages: [{ role: 'user', content: `<기존요약>\n${state.chatSummary || '(아직 없음)'}\n</기존요약>\n\n<대화>\n${convo}\n</대화>` }],
+    });
+    if (response.stop_reason === 'refusal') return;
+    const text = textOf(response.content);
+    if (text) actions.setChatSummary(text, foldUpto);
+  } catch {
+    // best-effort: 실패하면 기존 요약을 그대로 둔다
+  }
 }
 
 /**
