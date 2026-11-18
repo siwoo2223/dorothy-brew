@@ -269,6 +269,13 @@ export function useVoiceInput(
           setState('idle');
           return;
         }
+        // 파일 기반 받아쓰기(통화 녹음 등)가 지워진 파일을 읽다 나는 "File not found"는, 같은 음성
+        // 모듈을 공유하는 입력창에서 빨간 오류로 뜰 일이 아니다(실제 마이크 입력과 무관). 조용히 넘긴다.
+        const msg = `${event.message || ''} ${event.error || ''}`.toLowerCase();
+        if (msg.includes('not found') || msg.includes('no such file') || msg.includes('enoent')) {
+          setState('idle');
+          return;
+        }
         const permission = event.error === 'not-allowed' || event.error === 'service-not-allowed';
         // In standby (quiet) the loop silently restarts on every ending, so a transient recognizer
         // glitch (busy/client/network/server) must NOT flash a red error — only a hard permission
