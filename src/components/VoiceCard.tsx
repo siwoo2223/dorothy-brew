@@ -41,6 +41,20 @@ export function VoiceCard() {
           );
         })}
       </View>
+      <View style={styles.hr} />
+      <View style={styles.toggleRow}>
+        <View style={{ flex: 1 }}>
+          <Body>🧠 고급 받아쓰기 (회사 Gemini)</Body>
+          <Body muted>
+            끄면(기본) 폰이 실시간으로 들은 대로 손 떼자마자 바로 전송돼 빨라요. 켜면 녹음을 회사 서버 Gemini로 보내 더 정확히 받아쓰지만 몇 초 더 걸려요(회사 연결 필요).
+          </Body>
+        </View>
+        <Switch
+          value={state.voiceHiAccuracy}
+          onValueChange={(on) => actions.setVoiceHiAccuracy(on)}
+          trackColor={{ true: t.accent }}
+        />
+      </View>
       {Platform.OS === 'android' && (
         <>
           <View style={styles.hr} />

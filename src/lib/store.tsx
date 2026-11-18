@@ -27,6 +27,7 @@ const KEYS = {
   speechRate: 'dorothy.speechRate',
   routines: 'dorothy.routines',
   standbyShortcut: 'dorothy.standbyShortcut',
+  voiceHiAccuracy: 'dorothy.voiceHiAccuracy',
   sailings: 'dorothy.sailings',
   todoRooms: 'dorothy.todoRooms',
   fxRooms: 'dorothy.fxRooms',
@@ -76,6 +77,8 @@ export type AppState = {
   weeklyReportDay: number | null;
   /** Keep a persistent lock-screen notification that opens straight into standby. Android only. */
   standbyShortcut: boolean;
+  /** 음성 받아쓰기를 회사 Gemini로(정확하지만 조금 느림). 끄면 폰 실시간 인식으로 바로 전송(빠름). */
+  voiceHiAccuracy: boolean;
   /** Booking/sailing schedules Dorothy read from the forwarder's photos (shown as calendar/list). */
   sailings: Sailing[];
   /** Room names (partial match) to watch for to-do/requests in KakaoTalk etc. Empty = off. */
@@ -110,6 +113,7 @@ const initialState: AppState = {
   companyToken: '',
   weeklyReportDay: null,
   standbyShortcut: false,
+  voiceHiAccuracy: false,
   sailings: [],
   todoRooms: [],
   fxRooms: ['손대손', '환전/호텔방'],
@@ -133,7 +137,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms, expenses] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms, expenses, voiceHiAccuracy] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -153,6 +157,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.speechRate),
         AsyncStorage.getItem(KEYS.routines),
         AsyncStorage.getItem(KEYS.standbyShortcut),
+        AsyncStorage.getItem(KEYS.voiceHiAccuracy),
         AsyncStorage.getItem(KEYS.sailings),
         AsyncStorage.getItem(KEYS.todoRooms),
         AsyncStorage.getItem(KEYS.todoCandidates),
@@ -179,6 +184,7 @@ function useStoreValue() {
         speechRate: speechRate ? JSON.parse(speechRate) : 1.05,
         routines: routines ? JSON.parse(routines) : [],
         standbyShortcut: standbyShortcut ? JSON.parse(standbyShortcut) : false,
+        voiceHiAccuracy: voiceHiAccuracy ? JSON.parse(voiceHiAccuracy) : false,
         sailings: sailings ? JSON.parse(sailings) : [],
         todoRooms: todoRooms ? JSON.parse(todoRooms) : [],
         todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
@@ -227,6 +233,7 @@ function useStoreValue() {
       setCompanyToken: (tkn: string) => update('companyToken', tkn.trim()),
       setWeeklyReportDay: (day: number | null) => update('weeklyReportDay', day),
       setStandbyShortcut: (on: boolean) => update('standbyShortcut', on),
+      setVoiceHiAccuracy: (on: boolean) => update('voiceHiAccuracy', on),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };

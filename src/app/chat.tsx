@@ -147,9 +147,10 @@ export default function Chat() {
         text = command;
       }
       if (phase.current !== 'off') phase.current = 'busy';
-      // 꾹 눌러 말하기(audioUri 있음): 폰 인식 결과를 바로 보여주고, 회사 Gemini가 3.5초 안에 더
-      // 정확히 주면 그걸로, 늦으면 폰 결과로 바로 전송(오래 기다리지 않게).
-      if (audioUri && companyConfigured()) {
+      // 꾹 눌러 말하기(audioUri 있음): '고급 받아쓰기'가 켜져 있을 때만 회사 Gemini로. 폰 인식 결과를
+      // 바로 보여주고, Gemini가 3.5초 안에 더 정확히 주면 그걸로, 늦으면 폰 결과로 바로 전송.
+      // 꺼져 있으면(기본) 폰 실시간 인식 결과를 손 떼자마자 바로 전송(클로드처럼 빠르게).
+      if (audioUri && companyConfigured() && getState().voiceHiAccuracy) {
         setPendingVoice(text);
         setTranscribing(true);
         const timeout = new Promise<string | null>((r) => setTimeout(() => r(null), 3500));
