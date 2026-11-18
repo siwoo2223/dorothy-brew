@@ -33,6 +33,8 @@ const KEYS = {
   fxRooms: 'dorothy.fxRooms',
   expenses: 'dorothy.expenses',
   todoCandidates: 'dorothy.todoCandidates',
+  chatSummary: 'dorothy.chatSummary',
+  chatSummaryUpto: 'dorothy.chatSummaryUpto',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -89,6 +91,10 @@ export type AppState = {
   todoCandidates: TodoCandidate[];
   /** 개인 지출 기록(주로 영수증 사진에서 읽어 저장). */
   expenses: Expense[];
+  /** 길어진 대화에서 최근 창(window) 밖으로 밀려난 이전 대화를 접어 둔 요약. 긴 대화에서도 맥락을 잃지 않게 한다. */
+  chatSummary: string;
+  /** chatSummary에 이미 반영된 앞쪽 대화 턴 수(증분 요약용). */
+  chatSummaryUpto: number;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -119,6 +125,8 @@ const initialState: AppState = {
   fxRooms: ['손대손', '환전/호텔방'],
   expenses: [],
   todoCandidates: [],
+  chatSummary: '',
+  chatSummaryUpto: 0,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -137,7 +145,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, sailings, todoRooms, todoCandidates, fxRooms, expenses, voiceHiAccuracy] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -163,6 +171,8 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.todoCandidates),
         AsyncStorage.getItem(KEYS.fxRooms),
         AsyncStorage.getItem(KEYS.expenses),
+        AsyncStorage.getItem(KEYS.chatSummary),
+        AsyncStorage.getItem(KEYS.chatSummaryUpto),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -190,6 +200,8 @@ function useStoreValue() {
         todoCandidates: todoCandidates ? JSON.parse(todoCandidates) : [],
         fxRooms: fxRooms ? JSON.parse(fxRooms) : initialState.fxRooms,
         expenses: expenses ? JSON.parse(expenses) : [],
+        chatSummary: chatSummary ? JSON.parse(chatSummary) : '',
+        chatSummaryUpto: chatSummaryUpto ? JSON.parse(chatSummaryUpto) : 0,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -505,7 +517,16 @@ function useStoreValue() {
       appendChat(turn: Omit<ChatTurn, 'id' | 'createdAt'>) {
         update('chat', [...ref.current.chat, { ...turn, id: newId(), createdAt: new Date().toISOString() }]);
       },
-      clearChat: () => update('chat', []),
+      /** Stores the rolling conversation summary and how many leading turns it already covers. */
+      setChatSummary: (summary: string, upto: number) => {
+        update('chatSummary', summary);
+        update('chatSummaryUpto', upto);
+      },
+      clearChat: () => {
+        update('chat', []);
+        update('chatSummary', '');
+        update('chatSummaryUpto', 0);
+      },
     };
     return a;
   }, [update]);

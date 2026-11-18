@@ -26,7 +26,7 @@ const copyOrSend = (raw: string) => {
 
 import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
-import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, weeklyReport } from '../lib/assistant';
+import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, updateChatSummary, weeklyReport } from '../lib/assistant';
 import { suggestPrompts } from '../lib/suggest';
 import { companyConfigured, transcribeAudio } from '../lib/company';
 import { planData } from '../lib/inbox';
@@ -111,8 +111,10 @@ export default function Chat() {
     suggestNextPrompts(getState())
       .then((s) => { if (!cancelled && s.length) { setAiSuggest(s); setPhIdx(0); } })
       .catch(() => {});
+    // 기억 연속성: 대화가 길어지면 창 밖으로 밀려난 이전 대화를 요약으로 접어 둔다(충분히 쌓였을 때만 실제 호출).
+    updateChatSummary(getState(), actions).catch(() => {});
     return () => { cancelled = true; };
-  }, [busy, state.chat.length, state.apiKey, state.model, getState]);
+  }, [busy, state.chat.length, state.apiKey, state.model, getState, actions]);
 
   // Standby ("대기 모드"): listen for "도로시야", answer aloud, take one follow-up, then wait again.
   // phase: wake = waiting for the name, command = listening for a request, busy = thinking/speaking.
