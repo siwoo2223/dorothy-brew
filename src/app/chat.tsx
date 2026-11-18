@@ -68,6 +68,7 @@ export default function Chat() {
   const [phIdx, setPhIdx] = useState(0);
   const [typing, setTyping] = useState(false); // 입력칸에 포커스됨(키보드 입력 중)
   const [transcribing, setTranscribing] = useState(false); // 손 뗀 뒤 서버로 받아쓰는 중
+  const [pendingVoice, setPendingVoice] = useState(''); // 받아쓰는 동안 먼저 보여줄 폰 인식 결과
   const [ptt, setPtt] = useState(false); // 지금 '꾹 눌러 말하기' 중(손을 떼면 전송)
   const inputRef = useRef<TextInput>(null);
   const [aiSuggest, setAiSuggest] = useState<string[]>([]);
@@ -146,18 +147,18 @@ export default function Chat() {
         text = command;
       }
       if (phase.current !== 'off') phase.current = 'busy';
-      // 꾹 눌러 말하기(audioUri 있음): 회사 서버 Gemini로 정확히 받아쓰고, 안 되면 폰 인식 결과로 대체.
+      // 꾹 눌러 말하기(audioUri 있음): 폰 인식 결과를 바로 보여주고, 회사 Gemini가 3.5초 안에 더
+      // 정확히 주면 그걸로, 늦으면 폰 결과로 바로 전송(오래 기다리지 않게).
       if (audioUri && companyConfigured()) {
+        setPendingVoice(text);
         setTranscribing(true);
-        transcribeAudio(audioUri)
+        const timeout = new Promise<string | null>((r) => setTimeout(() => r(null), 3500));
+        Promise.race([transcribeAudio(audioUri).catch(() => null), timeout])
           .then((better) => {
+            setTranscribing(false);
+            setPendingVoice('');
             const finalText = (better && better.trim()) || text;
-            setTranscribing(false);
             if (finalText.trim()) sendRef.current(finalText, true);
-          })
-          .catch(() => {
-            setTranscribing(false);
-            if (text.trim()) sendRef.current(text, true);
           });
         return;
       }
@@ -512,7 +513,7 @@ export default function Chat() {
                     ? '🎙️ 말씀하세요'
                     : '👂 대기 중 — "도로시야"라고 불러 주세요'
                 : transcribing
-                  ? '✍️ 받아쓰는 중…'
+                  ? '✍️ 더 정확히 다듬는 중… (곧 보내요)'
                   : listening
                     ? (ptt ? '🎙️ 듣고 있어요… 손을 떼면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
                     : '🎙️ 입력칸을 길게 눌러 말하거나, 대기 모드를 켜 보세요'}
@@ -600,7 +601,7 @@ export default function Chat() {
               >
                 <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 8 }}>
                   <Text style={{ color: listening || transcribing ? t.text : t.subtext, fontSize: 15 }} numberOfLines={3}>
-                    {transcribing ? '받아쓰는 중…' : listening ? (voice.transcript || '듣고 있어요… (손을 떼면 보내요)') : '길게 눌러 말하세요'}
+                    {transcribing ? (pendingVoice || '받아쓰는 중…') : listening ? (voice.transcript || '듣고 있어요… (손을 떼면 보내요)') : '길게 눌러 말하세요'}
                   </Text>
                 </View>
               </Pressable>

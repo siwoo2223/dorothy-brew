@@ -74,11 +74,15 @@ export async function transcribeAudio(audioUri: string): Promise<string> {
     const FileSystem = await import('expo-file-system/legacy');
     const base64 = await FileSystem.readAsStringAsync(audioUri, { encoding: FileSystem.EncodingType.Base64 });
     if (!base64) return '';
+    // 너무 오래 매달리지 않도록 타임아웃(초과하면 ''로 → 호출측이 폰 인식 결과로 보냄).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'X-Dorothy-Token': token, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ audio_base64: base64, mime: 'audio/wav' }),
-    });
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer));
     if (!res.ok) return '';
     const data = JSON.parse(await res.text());
     const text = typeof data?.text === 'string' ? data.text.trim() : '';
