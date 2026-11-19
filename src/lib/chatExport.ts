@@ -1,3 +1,5 @@
+import JSZip from 'jszip';
+
 import type { InboxMessage } from './inbox';
 
 /** Telegram Desktop "Export chat history" in JSON format: { name, messages: [{type,date,from,text}] }. */
@@ -81,4 +83,37 @@ export function parseChatExport(text: string, fileName = ''): { app: string; con
     if (last && line.trim() && !/^저장한 날짜|님과 카카오톡 대화$/.test(line)) last.text += `\n${line}`;
   }
   return { app, conversation, messages: messages.filter((x) => x.text.trim() && !Number.isNaN(x.time)) };
+}
+
+/**
+ * Reads a chat-export .zip (given as base64) and parses every chat file inside it — e.g. KakaoTalk's
+ * "대화 내용 저장" PC backup, which bundles one .txt per room (often in several backup subfolders).
+ * The room name comes from each file's own first line, so garbled zip filenames don't matter, and the
+ * native store dedupes identical messages, so duplicate backup folders are harmless. Returns the merged
+ * messages plus how many rooms parsed and how many files couldn't be read as a conversation.
+ */
+export async function parseChatZipBase64(base64: string): Promise<{ messages: InboxMessage[]; rooms: number; skipped: number }> {
+  const zip = await JSZip.loadAsync(base64, { base64: true });
+  const entries = Object.values(zip.files).filter((f) => !f.dir && /\.(txt|csv|json)$/i.test(f.name));
+  const messages: InboxMessage[] = [];
+  let rooms = 0;
+  let skipped = 0;
+  for (const entry of entries) {
+    let text: string;
+    try {
+      text = await entry.async('string');
+    } catch {
+      skipped++;
+      continue;
+    }
+    const name = entry.name.split('/').pop() || entry.name;
+    const parsed = parseChatExport(text, name);
+    if (parsed.messages.length) {
+      messages.push(...parsed.messages);
+      rooms++;
+    } else {
+      skipped++;
+    }
+  }
+  return { messages, rooms, skipped };
 }

@@ -4,7 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { parseChatExport } from '../lib/chatExport';
+import { parseChatExport, parseChatZipBase64 } from '../lib/chatExport';
 import { contactsGranted, requestContacts } from '../lib/contacts';
 import {
   clearMessages,
@@ -46,21 +46,31 @@ export function InboxCard() {
   }, []);
 
   const importExports = async () => {
-    const picked = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'application/json', 'application/octet-stream'], multiple: true, copyToCacheDirectory: true });
+    const picked = await DocumentPicker.getDocumentAsync({ type: ['text/*', 'application/json', 'application/zip', 'application/octet-stream'], multiple: true, copyToCacheDirectory: true });
     if (picked.canceled) return;
     setImporting(true);
     try {
       let added = 0;
       let skipped = 0;
+      let rooms = 0;
       for (const file of picked.assets) {
-        const parsed = parseChatExport(await FS.readAsStringAsync(file.uri), file.name);
-        if (!parsed.messages.length) skipped++;
-        added += await importMessages(parsed.messages);
+        if (/\.zip$/i.test(file.name) || file.mimeType === 'application/zip') {
+          // A whole KakaoTalk PC backup (.zip): one .txt per room, possibly in several backup folders.
+          const b64 = await FS.readAsStringAsync(file.uri, { encoding: FS.EncodingType.Base64 });
+          const r = await parseChatZipBase64(b64);
+          added += await importMessages(r.messages);
+          rooms += r.rooms;
+          skipped += r.skipped;
+        } else {
+          const parsed = parseChatExport(await FS.readAsStringAsync(file.uri), file.name);
+          if (parsed.messages.length) rooms++; else skipped++;
+          added += await importMessages(parsed.messages);
+        }
       }
       refresh();
       Alert.alert(
         '가져왔어요',
-        `새 메시지 ${added}개를 저장했어요.${skipped ? ` ${skipped}개 파일은 대화 형식을 알아보지 못했어요(카톡은 "텍스트만" 내보내기 파일을 골라 주세요).` : ''}`,
+        `방 ${rooms}개에서 새 메시지 ${added.toLocaleString()}개를 저장했어요.${skipped ? ` (${skipped}개 파일은 대화 형식을 못 읽어 건너뛰었어요.)` : ''}`,
       );
     } catch (e) {
       Alert.alert('가져오기 실패', e instanceof Error ? e.message : String(e));
@@ -116,15 +126,16 @@ export function InboxCard() {
       )}
       <Body muted>알림으로 온 메시지만 읽을 수 있어요. 알림을 꺼 둔 채팅방이나 내가 보낸 메시지는 볼 수 없어요.</Body>
 
-      <Body>💬 예전 대화 가져오기{history ? ` · 저장된 예전 메시지 ${history}개` : ''}</Body>
+      <Body>💬 예전 대화 가져오기{history ? ` · 저장된 예전 메시지 ${history.toLocaleString()}개` : ''}</Body>
       <Body muted>
-        과거 대화는 각 앱의 &quot;내보내기&quot; 파일로 가져와요. 여러 개 한 번에 고를 수 있어요.{'\n'}
-        • 카카오톡: 채팅방 → ≡ → ⚙️ → &quot;대화 내용 내보내기&quot; → &quot;텍스트만 보내기&quot; → 내 파일에 저장{'\n'}
-        • 텔레그램: PC(데스크톱) 앱 → 채팅 → ⋮ → &quot;Export chat history&quot; → 형식 &quot;JSON&quot; → 나온 result.json{'\n'}
+        과거 대화는 각 앱의 &quot;내보내기&quot;/&quot;저장&quot; 파일로 가져와요. txt 여러 개, 또는 PC 카톡 백업 &quot;zip 파일 통째로&quot; 한 번에 고르면 방 전체가 들어와요(중복은 자동으로 거름).{'\n'}
+        • PC 카카오톡(한 번에 많이): 각 대화방 → 메뉴 → &quot;대화 내용&quot; → &quot;전체 대화 내용 저장&quot; → 생긴 파일들을 압축(zip)해 폰으로 보내 이걸로 선택{'\n'}
+        • 폰 카카오톡: 채팅방 → ≡ → ⚙️ → &quot;대화 내용 내보내기&quot; → &quot;텍스트만 보내기&quot; → 내 파일에 저장{'\n'}
+        • 텔레그램: PC 앱 → 채팅 → ⋮ → &quot;Export chat history&quot; → 형식 &quot;JSON&quot;{'\n'}
         • WhatsApp: 채팅 → ⋮ → &quot;더보기&quot; → &quot;채팅 내보내기&quot;{'\n'}
-        • 바이버: 과거 대화를 파일로 내보내는 기능이 없어요. 대신 위 &quot;알림 읽기&quot;를 켜두면 앞으로 오는 바이버 메시지는 자동으로 모아요.
+        • 바이버: 과거 대화를 파일로 못 내보내요. 대신 위 &quot;알림 읽기&quot;를 켜두면 앞으로 오는 메시지는 자동으로 모아요.
       </Body>
-      <Button label={importing ? '가져오는 중…' : '대화 파일 가져오기'} variant="ghost" onPress={importExports} disabled={importing} />
+      <Button label={importing ? '가져오는 중… (많으면 잠시 걸려요)' : '대화 파일·zip 가져오기'} variant="ghost" onPress={importExports} disabled={importing} />
 
       <Body>📞 통화 기록: {status.calls ? '✅ 허용됨' : '꺼짐'}</Body>
       {!status.calls && (
