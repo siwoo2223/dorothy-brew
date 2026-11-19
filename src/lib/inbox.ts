@@ -144,9 +144,12 @@ const when = (ms: number) =>
   new Date(ms).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 /**
- * Fetches messages and filters them in JS: by keyword (native search), a time window (since/until),
- * and/or a room/sender name. Captured from notifications, so it is what arrived while the app had
- * notification access — not the full chat history, and it cannot tell whether the owner replied.
+ * Fetches messages and filters them in JS: by keyword, a time window (since/until), and/or a
+ * room/sender name. A keyword OR a room name runs the native search, which reads BOTH the live
+ * notification log AND the imported chat history (KakaoTalk exports) — so asking for a specific
+ * person's/room's past chat reaches the imported backup, not just the last day's notifications.
+ * Only a bare recent-window request (no keyword, no room) falls back to notifications alone.
+ * Note: notifications can't tell whether the owner replied; imported exports include both sides.
  */
 export async function collectMessages(opts: {
   keyword?: string;
@@ -157,7 +160,10 @@ export async function collectMessages(opts: {
 }): Promise<InboxMessage[]> {
   if (!native) return [];
   const limit = opts.limit ?? 500;
-  const base = opts.keyword ? await native.searchMessages(opts.keyword, opts.sinceMs, limit) : await native.getMessages(opts.sinceMs, limit);
+  // Search (both files) whenever we have any needle — a keyword, or the room name itself — so imported
+  // history is reachable. Combine keyword+room into one needle; the room post-filter below refines it.
+  const needle = (opts.keyword || opts.room || '').trim();
+  const base = needle ? await native.searchMessages(needle, opts.sinceMs, limit) : await native.getMessages(opts.sinceMs, limit);
   const until = opts.untilMs ?? Infinity;
   const room = opts.room?.trim().toLowerCase();
   return base.filter(
