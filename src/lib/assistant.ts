@@ -87,6 +87,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 영수증·결제 사진을 받으면(또는 "이거 지출에 넣어줘"처럼 말하면) 총액·통화(페소/원)·날짜·가게명을 꼼꼼히 읽어 add_expense로 지출 기록에 저장합니다. 사진에 없는 값은 지어내지 말고 null로 둡니다. 저장 후 "○○ ₱N 지출 기록했어요(지출 기록에서 볼 수 있어요)"처럼 한 줄로만 확인합니다. 여러 건이면 각각 저장합니다. 금액 단위(페소/원)가 애매하면 가게·화폐기호(₱/₩)로 판단하고, 그래도 모르면 짧게 한 번 물어봅니다. 지출 합계나 "이번 달 얼마 썼어"를 물으면 저장된 지출 기록으로 통화별·분류별로 정리해 답합니다(회사 회계가 아니라 개인 지출 기록 기준임을 덧붙입니다).
 - 사장이 항공권 요금·스케줄을 물으면(예: "세부→마닐라 11/26 비행기 얼마", "인천발 마닐라 언제 비행기 있어", "PR 필리핀항공 요금", "세부퍼시픽 5J 스케줄"), web_search로 공개된 요금·시간표를 찾아 정리합니다. 우선 볼 곳: Google Flights(google.com/travel/flights), 각 항공사 공식 — 필리핀항공 PAL(philippineairlines.com)·세부퍼시픽 5J(cebupacificair.com)·에어아시아(airasia.com), 그리고 Skyscanner·Kayak. 노선·출발/도착 시각·편명·대략 요금대를 출처와 함께 정리하되, 날짜·시각·요금은 찾은 그대로만 전하고 지어내지 않습니다(없으면 비워 둠). 반드시 한 줄 덧붙입니다: "검색 요금은 대략이고, 실제 결제 금액은 결제수단(내통장결제/카드)·좌석·프로모션에 따라 달라서, 결제 직전 화면 사진을 주시면 정확히 계산해 드려요." 항공사 사이트는 로그인·봇 차단·실시간 변동이 있어 제가 직접 열어 조회·결제는 못 한다고 솔직히 말합니다. 사장이 결제 화면·요금 사진을 주면 그 화면 기준으로 정확히 읽어 계산하고(1인/왕복/인원수), 포함 수하물·환불/변경 조건·결제수단별 차이·트립플렉스 같은 옵션 추가요금을 짚어 주며, 출발일이 가까우면 할 일/일정으로 등록할지 물어봅니다.
 - 추측하지 않습니다. 금액·미수금·무게·수치를 물으면 "~일 수 있어요 / 가능성이 커요 / 클 것 같아요" 같은 어림짐작을 하지 말고, company_quote(조회번호)로 실제 계산해서 정확한 숫자로 답합니다. 여러 건이면 핵심 몇 건을 실제로 계산해 숫자로 보여 주고, 다 계산해 줄지 물어봅니다. 도구로 당장 확인이 안 되는 건 "지금은 확인 안 됨"이라고 명확히 말하고 무엇을 하면 알 수 있는지(예: "견적을 뽑으면 정확히 나와요")만 전하되, 모르는 값을 추정치로 말하지 않습니다. "입금액 0" 같은 서버 값은 그 뜻(서버 정의)만 그대로 전하고 "실제로는 받았을 수도 있어요" 같은 억측은 덧붙이지 않습니다. 사장이 추측을 싫어하니, 확신이 서는 사실과 실제 계산값만 전합니다.
+- 회사 데이터·물량·숫자 질문은 끝까지 파고들어 "클로드처럼" 완결된 답을 줍니다. 되묻지 말고(예: "한 번 더 뽑아볼까요?" 금지) 당연한 다음 조회는 바로 실행합니다: company_shipments·company_quote·company_report·company_rows 등을 필요한 만큼 여러 번(여러 page·여러 조건) 호출해 실제로 집계하고, 항목별(고객·항차·상태·지역)로 박스 수(수량 qty 합)·중량·CBM을 계산해 표처럼 또는 그래프로 정리합니다. 서버가 바로 안 나누는 기준(예: "세부로 가는 것", 특정 고객군)은 아는 거래처 위치로 직접 분류합니다 — 기억의 거래처 명부와 방 이름의 (세부)·(마닐라)·(앙헬레스)·(클락) 등으로 어느 고객이 어느 지역인지 판단해 그 고객들 건만 합산합니다. 물류 상식 주의점도 짚습니다: 냉동은 CBM이 0으로 나올 수 있고(치수 미입력이라 정상), 항차 순서는 번호가 아니라 출항일(ETD) 기준으로 봐야 하며, 아직 입고 단계인 항차는 숫자가 더 늘 수 있어 확정이 아님을 덧붙입니다. 할 수 있는 조회를 먼저 다 해 본 뒤에도 확인이 안 되는 것만 "지금은 확인 안 됨"이라 하고, 지어내지 않습니다.
 - 페소/원 환율을 물으면 두 가지를 구분해서 알려 줍니다: ① 네이버 실시간 환율(web_search로 "네이버 필리핀 페소 환율" 등에서 ₩ per ₱1을 찾아 전함, 출처 네이버 명시), ② 단톡방 평균 환율(사장님이 자금·손익 페이지에서 볼 수 있는, 메시지 알림에 올라온 환율의 평균). 자금·손익 페이지에 이 둘이 '네이버 실시간'과 '단톡방 평균'으로 따로 표시된다고 안내합니다. 환율은 찾은 값만 전하고 지어내지 않으며, 못 찾으면 솔직히 말합니다.
 - 입고·컨테이너·지출처럼 사용자가 구글 시트로 관리하는 표를 물으면 read_sheet로 등록된 시트를 읽어 답합니다(어느 탭인지 모르면 tab을 비워 탭 목록을 먼저 확인하고, 숫자는 시트 값 그대로 전합니다).
 - "내일 할 일"을 정리할 때는 메시지·통화·캘린더·할 일을 함께 보고, 누가 무엇을 부탁했는지와 언제까지인지 짧게 적습니다. 부재중 전화는 회신할 사람으로 정리합니다. 확실한 할 일은 add_task로 등록하고(시각이 있으면 due_at), 애매한 것은 등록하지 말고 목록에서 확인을 부탁합니다.`;
@@ -925,6 +926,21 @@ export function describeError(error: unknown): string {
  * finishes, and returns her reply. Within the turn the message list is append-only, so thinking
  * blocks stay valid; only the final text is persisted between turns.
  */
+/**
+ * Casual turns run on cheap Haiku; company/data/analytical turns (or photos) auto-escalate to Opus so
+ * Dorothy matches a full Claude answer (deep aggregation, breakdowns, caveats). Only the default (haiku)
+ * is escalated — an explicit Opus or on-device(local) choice is respected.
+ */
+function pickModel(userText: string, state: AppState, hasImages: boolean): ModelChoice {
+  if (state.model !== 'haiku') return state.model;
+  if (hasImages) return 'opus'; // reading a receipt/booking/screenshot photo deserves the better model
+  const t = userText || '';
+  const heavy =
+    /(물량|박스|몇\s|몇개|얼마|cbm|중량|\dkg|kg\b|항차|출항|입항|세부|마닐라|앙헬|클락|보라카이|다바오|보홀|미수|견적|정산|수지|손익|분석|정리해|비교|합계|리스트|목록|frozen|dry|회신할|요약해|따져|계산)/i.test(t);
+  if (company.companyConfigured() && heavy) return 'opus';
+  return 'haiku';
+}
+
 export async function chat(
   userText: string,
   state: AppState,
@@ -943,6 +959,8 @@ export async function chat(
     return localChat(userText, state, opts);
   }
   const client = createClient(state);
+  // Company/data/analytical turns (and photos) run on Opus so Dorothy aggregates and reasons like a full Claude.
+  const model = pickModel(userText, state, !!opts.images?.length);
   const history = state.chat.slice(-HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
 
@@ -969,7 +987,7 @@ export async function chat(
   const contactsOn = await contacts.contactsGranted();
   const tools = [
     ...TOOLS,
-    webSearchTool(state.model, 5),
+    webSearchTool(model, 5),
     ...(googleEmails.length ? GOOGLE_TOOLS : []),
     ...(phone.messages ? [MESSAGE_TOOL] : []),
     ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
@@ -986,9 +1004,9 @@ export async function chat(
   const replies: string[] = [];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await client.beta.messages.create({
-      ...modelParams(state.model),
+      ...modelParams(model),
       max_tokens: 16000,
-      output_config: { effort: 'medium' },
+      output_config: { effort: model === 'opus' ? 'high' : 'medium' },
       system,
       tools,
       messages,
