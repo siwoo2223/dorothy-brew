@@ -64,8 +64,15 @@ async function get(params: Record<string, string>): Promise<string> {
   return text;
 }
 
-/** 회사 서버 Gemini로 음성(오디오 파일)을 정확히 받아쓴다. 실패하면 '' 반환(호출측이 폰 인식으로 대체). */
-export async function transcribeAudio(audioUri: string): Promise<string> {
+/**
+ * 받아쓰기 정확도용 용어 힌트: 사장님이 자주 쓰는 물류·업무 고유명사. Gemini에 함께 넘겨
+ * 비슷하게 들리는 말(예: '출항'을 '차량'으로)을 맞는 단어로 인식하게 한다.
+ */
+export const VOICE_VOCAB =
+  '출항, 입항, 입고, 통관, 통관사, 냉동, 냉장, 드라이, 항공, 항차, 선적, 부킹, 반입마감, 서류마감, CBM, 중량, 박스, 미수금, 견적, 정산, 송장, 송장번호, 조회번호, 노스포트, 마닐라, 세부, 클락, 앙헬레스, 보라카이, 다바오, 보홀, 컨테이너, 콘사이니, 리퍼, 페소, 환율, 테더, 기나글로벌, 기나, 손팀장, 양대리, 마진석부장, 한국지사, 윤사장님, 면장, 수출신고필증, 기적신고, FROZEN, DRY, KF 로지스틱스';
+
+/** 회사 서버 Gemini로 음성(오디오 파일)을 정확히 받아쓴다. 실패하면 '' 반환(호출측이 폰 인식으로 대체). vocab은 자주 쓰는 용어 힌트. */
+export async function transcribeAudio(audioUri: string, vocab?: string): Promise<string> {
   if (!endpointUrl || !token || !audioUri) return '';
   const url = endpointUrl.includes('dorothy_report.php')
     ? endpointUrl.replace('dorothy_report.php', 'dorothy_transcribe.php')
@@ -80,7 +87,7 @@ export async function transcribeAudio(audioUri: string): Promise<string> {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'X-Dorothy-Token': token, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ audio_base64: base64, mime: 'audio/wav' }),
+      body: JSON.stringify({ audio_base64: base64, mime: 'audio/wav', ...(vocab ? { vocab: vocab.slice(0, 2000) } : {}) }),
       signal: ctrl.signal,
     }).finally(() => clearTimeout(timer));
     if (!res.ok) return '';
