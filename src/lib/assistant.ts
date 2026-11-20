@@ -11,6 +11,7 @@ import * as recordings from './recordings';
 import * as sheets from './sheets';
 import { localComplete, LocalMessage } from './localBrain';
 import { serverComplete } from './serverBrain';
+import { createAndShareFile, type FileFormat } from './documents';
 import type { AppState, StoreActions } from './store';
 
 /**
@@ -93,6 +94,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다. 매일·매주처럼 "반복해서" 챙길 일을 요청하면 add_routine으로 반복 알림을 만들고(예: 매일 저녁 8시 개인톡 미회신 확인), 필요 없어지면 delete_routine으로 지웁니다. 한 번만 할 일은 add_task를 씁니다.
 - 사용자가 빠르게 한마디로 메모하듯 말하면(예: "내일 데니형 입금 확인", "조선치킨 견적 회신해야 돼", "우리 창고 비번 1234", "다음 주 금요일 홈마트 출항") 되묻지 말고 알맞은 곳에 바로 넣습니다 — 시각이 있는 약속·할 일은 add_task(시각 없으면 그대로), 사람에게 답장·처리할 것은 add_followup, 잊지 말아야 할 사실·정보는 add_memory. 그리고 "○○, 할 일로 등록했어요"처럼 한 줄로만 확인합니다(길게 되묻거나 설명하지 않음). 정말 어느 쪽인지 모를 때만 짧게 한 번 묻습니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
+- 사용자가 "워드/PDF/엑셀로 만들어 줘·파일로 줘·다운로드·보내게 해 줘"라고 하면 create_file 도구로 실제 파일을 만들어 공유창을 바로 엽니다. 견적서·보고서·안내문·긴 정리글은 pdf나 word(상대가 고칠 수 있게), 숫자·목록·표(지출 정리, 화물 목록, 거래처 표 등)는 excel을 씁니다. pdf·word는 content에 마크다운(제목 #, 굵게 **, 글머리표 -, 표는 | 열 | 줄)으로 본문을 또렷하게 쓰고, excel은 headers와 rows를 채웁니다. 만든 뒤 "○○.pdf 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알립니다. 어떤 형식일지 애매하면 짧게 한 번 묻되(예: "워드로 드릴까요, PDF로 드릴까요?"), 분명하면 바로 만듭니다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않습니다. (이 기능은 Claude 두뇌에서만 됩니다.)
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
 - Google 계정이 연결되어 있으면 일정은 calendar_list_events / calendar_create_event로, 메일은 gmail_search / gmail_read로 직접 확인합니다. 시간이 정해진 약속은 할 일 대신 캘린더에 넣는 것을 우선합니다.
 - 메일을 보낼 때는: 먼저 받는 사람·제목·내용을 사용자에게 보여주고 "이대로 보낼까요?"라고 물어봅니다. 사용자가 "보내 줘"처럼 분명히 동의하면 그때 gmail_send로 실제 전송합니다. 동의가 없거나 애매하면 gmail_create_draft로 임시보관함에만 저장합니다. 전송은 되돌릴 수 없으니 확인 없이 보내지 않습니다.
@@ -297,6 +299,27 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
         spent_at: { type: ['string', 'null'], description: '쓴 날짜 YYYY-MM-DD. 영수증에 있으면 그대로, 없으면 null.' },
       },
       required: ['amount', 'currency', 'category', 'memo', 'vendor', 'spent_at'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'create_file',
+    description:
+      '사용자가 요청한 내용을 실제 파일로 만들어 공유창(카카오톡·메일·저장 등)을 바로 연다. 견적서·정리표·보고서·목록 등을 "워드/PDF/엑셀 파일로 만들어 줘/보내 줘/다운로드"라고 하면 이 도구를 쓴다. ' +
+      'format: pdf=PDF, word=워드(.docx, 상대가 수정 가능), excel=엑셀(.xlsx, 표·계산용). ' +
+      'pdf·word는 content에 마크다운으로 본문을 쓴다(제목 #/##/###, 굵게 **글자**, 글머리표 - , 표는 | 열1 | 열2 | 줄로). ' +
+      'excel은 headers(머리글 배열)와 rows(각 행의 셀 배열)를 채운다(content 대신). 숫자는 숫자 그대로. ' +
+      '도구가 성공하면 "○○.pdf 파일 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알린다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않는다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        format: { type: 'string', enum: ['pdf', 'word', 'excel'], description: '파일 형식. pdf·word·excel 중 하나.' },
+        title: { type: 'string', description: '파일 이름/문서 제목(확장자 빼고). 예: "KF 견적서", "11월 지출 정리".' },
+        content: { type: ['string', 'null'], description: 'pdf·word의 본문(마크다운). excel이면 null.' },
+        headers: { type: ['array', 'null'], items: { type: 'string' }, description: 'excel 표의 머리글 행. pdf·word면 null.' },
+        rows: { type: ['array', 'null'], items: { type: 'array', items: { type: 'string' } }, description: 'excel 표의 각 데이터 행(셀 문자열 배열). pdf·word면 null.' },
+      },
+      required: ['format', 'title', 'content', 'headers', 'rows'],
       additionalProperties: false,
     },
   },
@@ -708,6 +731,25 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     case 'remember': {
       const m = actions.addMemory(String(input.category), String(input.content));
       return `저장됨 (id ${m.id})`;
+    }
+    case 'create_file': {
+      const format = (['pdf', 'word', 'excel'].includes(String(input.format)) ? input.format : 'pdf') as FileFormat;
+      const headers = Array.isArray(input.headers) ? (input.headers as unknown[]).map(String) : undefined;
+      const rows = Array.isArray(input.rows)
+        ? (input.rows as unknown[]).map((r) => (Array.isArray(r) ? (r as unknown[]).map(String) : [String(r)]))
+        : undefined;
+      try {
+        const name = await createAndShareFile({
+          format,
+          title: String(input.title ?? '도로시 문서'),
+          content: typeof input.content === 'string' ? input.content : undefined,
+          headers,
+          rows,
+        });
+        return `파일 "${name}" 만들었어요. 공유창에서 카카오톡·메일로 보내거나 저장할 수 있어요.`;
+      } catch (e) {
+        return `파일을 만들지 못했어요: ${describeError(e)}`;
+      }
     }
     case 'update_memory': {
       const patch: { category?: string; content?: string } = {};
