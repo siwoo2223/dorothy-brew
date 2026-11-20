@@ -28,7 +28,7 @@ import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
 import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, updateChatSummary, weeklyReport } from '../lib/assistant';
 import { suggestPrompts } from '../lib/suggest';
-import { companyConfigured, transcribeAudio } from '../lib/company';
+import { companyConfigured, transcribeAudio, VOICE_VOCAB } from '../lib/company';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
 import { useStore } from '../lib/store';
@@ -155,7 +155,9 @@ export default function Chat() {
       if (audioUri && companyConfigured() && getState().voiceHiAccuracy) {
         setPendingVoice(text);
         setTranscribing(true);
-        transcribeAudio(audioUri)
+        // 자주 쓰는 용어 + 사장님 이름을 힌트로 넘겨 받아쓰기 정확도를 높인다.
+        const nm = getState().profile.name?.trim();
+        transcribeAudio(audioUri, nm ? `${nm}, ${VOICE_VOCAB}` : VOICE_VOCAB)
           .catch(() => '')
           .then((better) => {
             setTranscribing(false);
