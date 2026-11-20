@@ -86,6 +86,8 @@ export default function Chat() {
   const list = useRef<FlatList>(null);
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
+  // Cancels the in-flight reply when the ⏹ stop button is pressed.
+  const abortRef = useRef<AbortController | null>(null);
   const router = useRouter();
   const params = useLocalSearchParams<{ voice?: string; plan?: string; call?: string; weekly?: string; company?: string; ask?: string }>();
   const canListen = voiceInputAvailable();
@@ -391,6 +393,9 @@ export default function Chat() {
     if (imgs.length) smooth();
     setImages([]);
     setBusy(true);
+    // A controller so the ⏹ stop button can cancel this reply mid-flight (like Claude's stop).
+    const controller = new AbortController();
+    abortRef.current = controller;
     // Sending my own message always jumps to the newest, even if I had scrolled up.
     atBottom.current = true;
     // Snapshot before appending so the new message is not sent twice.
@@ -404,18 +409,32 @@ export default function Chat() {
         extra,
         images: imgs.length ? imgs.map((i) => ({ base64: i.base64, mediaType: i.mediaType })) : undefined,
         onToken: (token) => setStreaming((s) => s + token),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return; // 사장이 ⏹ 로 멈춤 — 결과는 버린다
       setStreaming('');
       actions.appendChat({ role: 'assistant', text: reply });
       if (voiceReply) speak(reply, afterReply);
     } catch (e) {
+      if (controller.signal.aborted) return; // 멈춤에 따른 취소 오류는 조용히 무시
       const msg = describeError(e);
       actions.appendChat({ role: 'assistant', text: `⚠️ ${msg}` });
       if (voiceReply) speak(msg, afterReply);
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setStreaming('');
       setBusy(false);
     }
+  };
+
+  /** ⏹ 정지: 생성 중인 답을 즉시 취소하고 입력을 돌려준다(클로드의 멈춤처럼). */
+  const stop = () => {
+    tap();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stopSpeaking();
+    setStreaming('');
+    setBusy(false);
   };
 
   useEffect(() => {
@@ -616,15 +635,25 @@ export default function Chat() {
               </Pressable>
             )}
           </View>
-          {/* ↑ 전송 */}
-          <Pressable
-            onPress={() => { tap(); send(draft); }}
-            disabled={busy || listening || (!draft.trim() && images.length === 0)}
-            accessibilityLabel="전송"
-            style={[styles.round, { backgroundColor: t.accent, opacity: busy || listening || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}
-          >
-            <Text style={{ color: t.accentText, fontSize: 18, fontWeight: '800', marginTop: -1 }}>↑</Text>
-          </Pressable>
+          {/* 생성 중이면 ⏹ 정지(클로드처럼 멈출 수 있음), 아니면 ↑ 전송 */}
+          {busy ? (
+            <Pressable
+              onPress={stop}
+              accessibilityLabel="정지"
+              style={[styles.round, { backgroundColor: t.danger }]}
+            >
+              <View style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' }} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => { tap(); send(draft); }}
+              disabled={listening || (!draft.trim() && images.length === 0)}
+              accessibilityLabel="전송"
+              style={[styles.round, { backgroundColor: t.accent, opacity: listening || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}
+            >
+              <Text style={{ color: t.accentText, fontSize: 18, fontWeight: '800', marginTop: -1 }}>↑</Text>
+            </Pressable>
+          )}
         </View>
       </View>
       {state.chat.length > 0 && (
