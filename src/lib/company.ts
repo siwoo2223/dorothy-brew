@@ -99,6 +99,35 @@ export async function transcribeAudio(audioUri: string, vocab?: string): Promise
   }
 }
 
+/**
+ * AI 이미지 생성: 프롬프트를 회사 서버(Gemini 이미지 모델)로 보내 그림을 받아, 그 base64 PNG를
+ * 돌려준다. 실패하면 null. 회사 서버가 연결돼 있어야 한다.
+ */
+export async function generateImage(prompt: string): Promise<{ base64: string; mime: string } | null> {
+  if (!endpointUrl || !token || !prompt.trim()) return null;
+  const url = endpointUrl.includes('dorothy_report.php')
+    ? endpointUrl.replace('dorothy_report.php', 'dorothy_image.php')
+    : endpointUrl.replace(/[^/]*(\?.*)?$/, 'dorothy_image.php');
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000); // 이미지 생성은 느릴 수 있음
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Dorothy-Token': token, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ prompt: prompt.slice(0, 2000) }),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) return null;
+    const data = JSON.parse(await res.text());
+    if (data?.ok && typeof data.image_base64 === 'string' && data.image_base64) {
+      return { base64: data.image_base64, mime: typeof data.mime === 'string' ? data.mime : 'image/png' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetches the JSON summary (or the schema dump) as text, to hand straight to Claude. */
 export async function fetchCompanyReport(mode: 'report' | 'schema' = 'report'): Promise<string> {
   return get({ mode });

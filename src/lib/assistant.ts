@@ -11,7 +11,7 @@ import * as recordings from './recordings';
 import * as sheets from './sheets';
 import { localComplete, LocalMessage } from './localBrain';
 import { serverComplete } from './serverBrain';
-import { createAndShareFile, type FileFormat } from './documents';
+import { createAndShareFile, saveBase64Image, type FileFormat } from './documents';
 import type { AppState, StoreActions } from './store';
 
 /**
@@ -95,6 +95,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 사용자가 빠르게 한마디로 메모하듯 말하면(예: "내일 데니형 입금 확인", "조선치킨 견적 회신해야 돼", "우리 창고 비번 1234", "다음 주 금요일 홈마트 출항") 되묻지 말고 알맞은 곳에 바로 넣습니다 — 시각이 있는 약속·할 일은 add_task(시각 없으면 그대로), 사람에게 답장·처리할 것은 add_followup, 잊지 말아야 할 사실·정보는 add_memory. 그리고 "○○, 할 일로 등록했어요"처럼 한 줄로만 확인합니다(길게 되묻거나 설명하지 않음). 정말 어느 쪽인지 모를 때만 짧게 한 번 묻습니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
 - 사용자가 "워드/PDF/엑셀로 만들어 줘·파일로 줘·다운로드·보내게 해 줘"라고 하면 create_file 도구로 실제 파일을 만들어 공유창을 바로 엽니다. 견적서·보고서·안내문·긴 정리글은 pdf나 word(상대가 고칠 수 있게), 숫자·목록·표(지출 정리, 화물 목록, 거래처 표 등)는 excel을 씁니다. pdf·word는 content에 마크다운(제목 #, 굵게 **, 글머리표 -, 표는 | 열 | 줄)으로 본문을 또렷하게 쓰고, excel은 headers와 rows를 채웁니다. 만든 뒤 "○○.pdf 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알립니다. 어떤 형식일지 애매하면 짧게 한 번 묻되(예: "워드로 드릴까요, PDF로 드릴까요?"), 분명하면 바로 만듭니다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않습니다. (이 기능은 Claude 두뇌에서만 됩니다.)
+- 사용자가 "그림 그려 줘·이미지/로고/포스터 만들어 줘"처럼 새 그림을 원하면 generate_image 도구로 AI 그림을 만들고(회사 서버 Gemini 사용), 받은 파일 경로를 그대로 \`\`\`image 블록에 넣어 보여 줍니다. prompt는 그릴 내용을 구체적으로(화풍·색·구도·분위기) 적습니다. 실패하면 솔직히 알리고 다른 표현을 제안합니다. 회사 서버가 연결돼 있어야 쓸 수 있습니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
 - Google 계정이 연결되어 있으면 일정은 calendar_list_events / calendar_create_event로, 메일은 gmail_search / gmail_read로 직접 확인합니다. 시간이 정해진 약속은 할 일 대신 캘린더에 넣는 것을 우선합니다.
 - 메일을 보낼 때는: 먼저 받는 사람·제목·내용을 사용자에게 보여주고 "이대로 보낼까요?"라고 물어봅니다. 사용자가 "보내 줘"처럼 분명히 동의하면 그때 gmail_send로 실제 전송합니다. 동의가 없거나 애매하면 gmail_create_draft로 임시보관함에만 저장합니다. 전송은 되돌릴 수 없으니 확인 없이 보내지 않습니다.
@@ -594,6 +595,22 @@ const COMPANY_PHOTOS_TOOL: Anthropic.Beta.BetaToolUnion = {
   },
 };
 
+const GENERATE_IMAGE_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'generate_image',
+  description:
+    '회사 서버(Gemini)로 AI 그림/이미지를 만든다. "그림 그려 줘", "○○ 이미지 만들어 줘", "로고/포스터/썸네일 만들어 줘" 같은 요청에 쓴다. ' +
+    'prompt에는 그릴 내용을 구체적으로 영어 또는 한국어로 자세히 적는다(화풍·색·구도·분위기 포함하면 더 좋다). ' +
+    '성공하면 결과에 파일 경로가 오는데, 그 경로를 그대로 ```image 블록에 넣어 답한다(형식: {"urls":["<받은 경로>"],"caption":"무슨 그림인지"}). 경로는 받은 그대로만 쓰고 지어내지 않는다.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string', description: '그릴 그림을 구체적으로 묘사. 화풍·색·구도·분위기까지.' },
+    },
+    required: ['prompt'],
+    additionalProperties: false,
+  },
+};
+
 const CALL_SUMMARY_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'read_call_summaries',
   description:
@@ -731,6 +748,16 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
     case 'remember': {
       const m = actions.addMemory(String(input.category), String(input.content));
       return `저장됨 (id ${m.id})`;
+    }
+    case 'generate_image': {
+      const img = await company.generateImage(String(input.prompt ?? ''));
+      if (!img) return '이미지를 만들지 못했어요(서버가 거절했거나 연결 문제). 다른 표현으로 다시 시도해 보세요.';
+      try {
+        const uri = await saveBase64Image(img.base64, img.mime);
+        return `이미지를 만들었어요. 이 경로를 그대로 \`\`\`image 블록에 넣어 사용자에게 보여주세요: ${uri}`;
+      } catch (e) {
+        return `이미지는 만들었지만 저장에 실패했어요: ${describeError(e)}`;
+      }
     }
     case 'create_file': {
       const format = (['pdf', 'word', 'excel'].includes(String(input.format)) ? input.format : 'pdf') as FileFormat;
@@ -1061,7 +1088,7 @@ export async function chat(
     ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
     ...(phone.sms ? [SMS_TOOL] : []),
     ...(contactsOn ? [CONTACTS_TOOL] : []),
-    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_QUOTE_TOOL, COMPANY_SHIPMENTS_TOOL, COMPANY_PATTERN_TOOL, COMPANY_TABLES_TOOL, COMPANY_COLUMNS_TOOL, COMPANY_ROWS_TOOL, COMPANY_PHOTOS_TOOL] : []),
+    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_QUOTE_TOOL, COMPANY_SHIPMENTS_TOOL, COMPANY_PATTERN_TOOL, COMPANY_TABLES_TOOL, COMPANY_COLUMNS_TOOL, COMPANY_ROWS_TOOL, COMPANY_PHOTOS_TOOL, GENERATE_IMAGE_TOOL] : []),
     CALL_SUMMARY_TOOL,
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [

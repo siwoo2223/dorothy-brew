@@ -7,7 +7,8 @@ import { useTheme } from '../lib/theme';
 export function parseImageSpec(raw: string): { urls: string[]; caption?: string } | null {
   try {
     const o = JSON.parse(raw);
-    const urls = Array.isArray(o.urls) ? o.urls.filter((u: unknown) => typeof u === 'string' && /^https?:\/\//.test(u)) : [];
+    // http(s): 회사 사진, file://: 도로시가 만든(생성된) 이미지. 둘 다 허용한다.
+    const urls = Array.isArray(o.urls) ? o.urls.filter((u: unknown) => typeof u === 'string' && /^(https?:\/\/|file:\/\/)/.test(u)) : [];
     if (urls.length === 0) return null;
     return { urls, caption: o.caption ? String(o.caption) : undefined };
   } catch {
