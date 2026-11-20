@@ -1284,7 +1284,7 @@ export async function briefing(state: AppState): Promise<string> {
     {
       role: 'user',
       content:
-        '오늘의 브리핑을 해 줘. 맨 첫 줄은 "오늘의 핵심: …"으로, 오늘 가장 먼저·꼭 해야 할 단 하나(가장 급하거나 돈·신뢰가 걸린 것)를 한 문장으로 짚어 줘. 그다음 오늘 일정과 꼭 할 일, 기한이 지난 일, 이번 주에 다가오는 일, 답장이 필요해 보이는 메일, 기억 목록에서 오늘 챙기면 좋을 것(기념일, 건강, 목표 등)을 정리해 줘. ' +
+        '오늘의 브리핑을 해 줘. 맨 위에 "🔑 오늘 먼저 할 일"로, 지금 가장 급한 순서대로 최대 3가지를 각각 한 줄(무엇 + 왜 급한지)로 꼽아 줘 — 돈·신뢰·마감이 걸린 것 우선. 후보는: 회사에서 오늘 챙길 일(미수금, 이번 주 출항·입항, 7일 넘게 묶인 화물), 기한이 지났거나 오늘까지인 할 일, 회신 대기(답장할 사람), 밤사이 답장이 필요한 메시지·문자야. 실제 이름·숫자로 구체적으로(예: "도네누 미수 확인", "조선치킨에 견적 회신"), 지어내지 말고 아래 데이터·기억·할 일·회신 대기에 실제로 있는 것만 쓰고, 정말 급한 게 없으면 솔직히 "오늘 급한 건 없어요"라고 해. 그다음 오늘 일정과 꼭 할 일, 기한이 지난 일, 이번 주에 다가오는 일, 답장이 필요해 보이는 메일, 기억 목록에서 오늘 챙기면 좋을 것(기념일, 건강, 목표 등)을 정리해 줘. ' +
         '회사 현황(company_status)·오늘 챙길 일(company_attention)이 있으면 맨 위에 "회사" 소제목으로, 사장이 오늘 챙길 핵심만 몇 줄 넣어 줘. 특히 이번 주 출항·입항 예정 항차, 7일 넘게 묶인 화물, 오늘 신규·미처리, 이번 달 수지를 우선. 단순 전체 총계 나열은 하지 말고 오늘 의미 있는 것만. ' +
         '밤사이 폰에 온 것(overnight_phone_last_24h)이 있으면 "밤사이 온 것" 소제목으로, 답장이 필요한 메시지·문자, 놓친 부재중 전화, 중요한 안내(택배·예약·결제 등)만 골라 몇 줄로. 광고·스팸·단순 알림은 빼 줘. ' +
         '지금 있는 곳(current_location)이 있으면 그 지역, 없으면 기억 속 주소로 오늘 날씨도 찾아 줘. 짧은 소제목과 글머리표로, 휴대폰 한 화면에 들어오게.' +
@@ -1304,7 +1304,8 @@ export async function briefing(state: AppState): Promise<string> {
     const response = await client.beta.messages.create({
       ...modelParams(state.model),
       max_tokens: 8000,
-      output_config: { effort: 'low' },
+      // Briefing runs at most once a day; medium effort buys sharper "먼저 할 일" prioritization.
+      output_config: { effort: 'medium' },
       system,
       tools: [webSearchTool(state.model, 3)],
       messages,
