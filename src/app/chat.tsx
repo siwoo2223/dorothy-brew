@@ -26,6 +26,22 @@ const copyOrSend = (raw: string) => {
 
 import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
+
+/** 카톡식 답글의 인용 줄: 어떤 말에 답하는지 메시지 안에 작게 보여준다. */
+function QuoteBar({ reply, onLight }: { reply: { role: 'user' | 'assistant'; text: string }; onLight?: boolean }) {
+  const th = useTheme();
+  const bar = onLight ? 'rgba(255,255,255,0.65)' : th.accent;
+  const fg = onLight ? 'rgba(255,255,255,0.92)' : th.subtext;
+  return (
+    <View style={{ flexDirection: 'row', gap: 7, marginBottom: 5 }}>
+      <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: bar }} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: fg, fontSize: 11, fontWeight: '700' }}>{reply.role === 'user' ? '나' : '도로시'}</Text>
+        <Text numberOfLines={2} style={{ color: fg, fontSize: 12, lineHeight: 16 }}>{reply.text}</Text>
+      </View>
+    </View>
+  );
+}
 import { chat, describeError, PLAN_REQUEST, suggestNextPrompts, updateChatSummary, weeklyReport } from '../lib/assistant';
 import { suggestPrompts } from '../lib/suggest';
 import { companyConfigured, transcribeAudio, VOICE_VOCAB } from '../lib/company';
@@ -84,6 +100,8 @@ export default function Chat() {
   const [streaming, setStreaming] = useState('');
   // 오래된 대화는 화면에서 접어 둔다(두뇌는 요약으로 계속 기억). 탭하면 모두 펼침.
   const [showAllHistory, setShowAllHistory] = useState(false);
+  // 카톡식 답글: 지금 쓰는 메시지가 어떤 말에 대한 답장인지(없으면 null).
+  const [replyTo, setReplyTo] = useState<{ role: 'user' | 'assistant'; text: string } | null>(null);
   const COLLAPSE_AFTER = 30; // 이보다 많으면 접기
   const VISIBLE_RECENT = 20; // 접었을 때 화면에 남겨 둘 최근 메시지 수
   const hiddenCount = !showAllHistory && state.chat.length > COLLAPSE_AFTER ? state.chat.length - VISIBLE_RECENT : 0;
@@ -398,6 +416,9 @@ export default function Chat() {
     setDraft('');
     if (imgs.length) smooth();
     setImages([]);
+    // 카톡식 답글: 지금 답장 대상이 있으면 가져와 두고 입력칸은 비운다.
+    const replCtx = replyTo;
+    setReplyTo(null);
     setBusy(true);
     // A controller so the ⏹ stop button can cancel this reply mid-flight (like Claude's stop).
     const controller = new AbortController();
@@ -407,10 +428,12 @@ export default function Chat() {
     // Snapshot before appending so the new message is not sent twice.
     const snapshot = getState();
     const label = imgs.length ? `📷${imgs.length > 1 ? `×${imgs.length}` : ''} ${message || '사진'}` : message;
-    actions.appendChat({ role: 'user', text: label });
+    actions.appendChat({ role: 'user', text: label, replyTo: replCtx ?? undefined });
     const voiceReply = spoken || phase.current !== 'off';
+    // 답장 대상이 있으면 도로시가 어떤 말에 답하는지 알도록 인용을 앞에 붙인다(화면엔 깔끔한 인용 바로 표시).
+    const quoted = replCtx ? `(아래는 ${replCtx.role === 'user' ? '내' : '도로시'} 이전 메시지에 대한 답장이에요 — 인용: "${replCtx.text}")\n\n` : '';
     try {
-      const reply = await chat(message || '이 사진(들)에서 중요한 내용을 읽어서 정리해 줘.', snapshot, actions, {
+      const reply = await chat(quoted + (message || '이 사진(들)에서 중요한 내용을 읽어서 정리해 줘.'), snapshot, actions, {
         spoken: voiceReply,
         extra,
         images: imgs.length ? imgs.map((i) => ({ base64: i.base64, mediaType: i.mediaType })) : undefined,
@@ -516,18 +539,24 @@ export default function Chat() {
         }
         renderItem={({ item }) => {
           const mine = item.role === 'user';
+          // 길게 누르면 그 메시지에 답글(카톡처럼). 입력칸 위에 인용이 뜬다.
+          const onReply = () => { tap(); setReplyTo({ role: item.role, text: shareText(item.text).slice(0, 300) }); inputRef.current?.focus(); };
           if (mine) {
             return (
-              <View style={[styles.bubble, { alignSelf: 'flex-end', backgroundColor: t.userBubble }]}>
-                <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>{item.text}</Text>
-              </View>
+              <Pressable onLongPress={onReply} delayLongPress={250} style={{ alignSelf: 'flex-end', maxWidth: '86%' }}>
+                <View style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.userBubble }]}>
+                  {item.replyTo ? <QuoteBar reply={item.replyTo} onLight /> : null}
+                  <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>{item.text}</Text>
+                </View>
+              </Pressable>
             );
           }
           return (
             <View style={{ alignSelf: 'flex-start', maxWidth: '92%' }}>
-              <View style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+              <Pressable onLongPress={onReply} delayLongPress={250} style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+                {item.replyTo ? <QuoteBar reply={item.replyTo} /> : null}
                 <RichMessage text={item.text} color={t.text} />
-              </View>
+              </Pressable>
               <Pressable onPress={() => { tap(); copyOrSend(item.text); }} hitSlop={6} style={styles.copyBtn}>
                 <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>📋 복사 · 보내기</Text>
               </Pressable>
@@ -606,6 +635,18 @@ export default function Chat() {
           ))}
         </View>
       )}
+      {replyTo && (
+        <View style={[styles.replyPreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
+          <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: t.accent }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.accent, fontSize: 11, fontWeight: '700' }}>↩ {replyTo.role === 'user' ? '내 메시지' : '도로시'}에 답장</Text>
+            <Text numberOfLines={1} style={{ color: t.subtext, fontSize: 12 }}>{replyTo.text}</Text>
+          </View>
+          <Pressable onPress={() => { tap(); setReplyTo(null); }} hitSlop={8} style={{ padding: 4 }}>
+            <Text style={{ color: t.subtext, fontSize: 16 }}>✕</Text>
+          </Pressable>
+        </View>
+      )}
       <View style={[styles.composer, { borderTopColor: t.border, backgroundColor: t.bg }]}>
         <View style={[styles.pill, { backgroundColor: t.card, borderColor: t.border }]}>
           {/* ＋ 첨부: 사진/카메라 */}
@@ -675,6 +716,7 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
   copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 3 },
   olderPill: { alignSelf: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
+  replyPreview: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   composer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
   pill: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 28, paddingHorizontal: 6, paddingVertical: 5 },
   round: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
