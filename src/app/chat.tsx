@@ -66,7 +66,6 @@ export default function Chat() {
   const [busy, setBusy] = useState(false);
   // 입력창 제안: ① AI가 최근 대화·상황으로 '다음 지시'를 예측(클로드처럼), ② 안 되면 규칙 기반으로 대체.
   const [phIdx, setPhIdx] = useState(0);
-  const [typing, setTyping] = useState(false); // 입력칸에 포커스됨(키보드 입력 중)
   const [transcribing, setTranscribing] = useState(false); // 손 뗀 뒤 서버로 받아쓰는 중
   const [pendingVoice, setPendingVoice] = useState(''); // 받아쓰는 동안 먼저 보여줄 폰 인식 결과
   const [ptt, setPtt] = useState(false); // 지금 '꾹 눌러 말하기' 중(손을 떼면 전송)
@@ -83,6 +82,12 @@ export default function Chat() {
   const [images, setImages] = useState<Img[]>([]);
   // The phone brain streams its reply; show it as it is written.
   const [streaming, setStreaming] = useState('');
+  // 오래된 대화는 화면에서 접어 둔다(두뇌는 요약으로 계속 기억). 탭하면 모두 펼침.
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const COLLAPSE_AFTER = 30; // 이보다 많으면 접기
+  const VISIBLE_RECENT = 20; // 접었을 때 화면에 남겨 둘 최근 메시지 수
+  const hiddenCount = !showAllHistory && state.chat.length > COLLAPSE_AFTER ? state.chat.length - VISIBLE_RECENT : 0;
+  const visibleChat = hiddenCount > 0 ? state.chat.slice(-VISIBLE_RECENT) : state.chat;
   const list = useRef<FlatList>(null);
   // Whether the message list is scrolled to the bottom; gates auto-scroll (see FlatList below).
   const atBottom = useRef(true);
@@ -165,11 +170,12 @@ export default function Chat() {
             setTranscribing(false);
             setPendingVoice('');
             const finalText = (better && better.trim()) || text;
-            if (finalText.trim()) sendRef.current(finalText, true);
+            // 대기 모드(standby)에서만 음성으로 답한다. 채팅에서 🎤로 말한 건 글로 답한다.
+            if (finalText.trim()) sendRef.current(finalText, phase.current !== 'off');
           });
         return;
       }
-      if (text.trim()) sendRef.current(text, true);
+      if (text.trim()) sendRef.current(text, phase.current !== 'off');
     },
     (info) => {
       // The recognizer stops on silence or timeouts; in standby, quietly pick up listening again.
@@ -470,9 +476,19 @@ export default function Chat() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" automaticOffset>
       <FlatList
         ref={list}
-        data={state.chat}
+        data={visibleChat}
         keyExtractor={(m) => m.id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          hiddenCount > 0 ? (
+            <Pressable
+              onPress={() => { tap(); setShowAllHistory(true); }}
+              style={[styles.olderPill, { borderColor: t.border, backgroundColor: t.card }]}
+            >
+              <Text style={{ color: t.subtext, fontSize: 13 }}>📂 이전 대화 {hiddenCount}개 더 보기 · 도로시는 모두 기억하고 있어요</Text>
+            </Pressable>
+          ) : null
+        }
         // Android recycles list cells; with bubbles whose height grows while streaming, a recycled cell
         // can be drawn over its neighbour (text overlapping the 복사·보내기 button). Turning off clipping
         // keeps each row laid out on its own, which fixes that overlap.
@@ -544,7 +560,7 @@ export default function Chat() {
                   ? '✍️ 더 정확히 다듬는 중… (곧 보내요)'
                   : listening
                     ? (ptt ? '🎙️ 듣고 있어요… 손을 떼면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
-                    : '🎙️ 입력칸을 길게 눌러 말하거나, 대기 모드를 켜 보세요'}
+                    : '🎤 버튼을 꾹 눌러 말하거나, 글로 입력하거나, 대기 모드를 켜 보세요'}
             </Text>
           )}
           {canListen && (
@@ -601,50 +617,24 @@ export default function Chat() {
           >
             <Text style={{ fontSize: 22, color: t.text, marginTop: -2 }}>＋</Text>
           </Pressable>
-          {/* 입력칸: 평소엔 '길게 눌러 말하세요'(눌러서 입력도 가능), 꾹 누르면 그 자리에서 말하기 */}
-          <View style={{ flex: 1, justifyContent: 'center' }}>
-            <Input
-              ref={inputRef}
-              style={{ maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
-              // 들을 땐 받아쓴 내용을 오버레이에서만 보여준다(입력칸에도 그리면 두 겹으로 겹침).
-              value={listening || transcribing ? '' : draft}
-              onChangeText={setDraft}
-              onFocus={() => setTyping(true)}
-              onBlur={() => setTyping(false)}
-              placeholder={typing || !canListen ? (suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 말하기…') : ''}
-              editable={!listening}
-              multiline
-              onSubmitEditing={() => send(draft)}
-            />
-            {/* 입력 중이 아니고 글자도 없을 때: 입력칸 위에 '길게 눌러 말하기' 오버레이.
-                짧게 누르면 키보드로 입력, 꾹 누르면 그동안 듣고 떼면 자동 전송. */}
-            {canListen && !typing && !draft.trim() && (
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() => inputRef.current?.focus()}
-                onLongPress={() => { if (!busy && !standby && !listening && !transcribing) { tap(); setPtt(true); voice.pushStart(); } }}
-                onPressOut={() => { if (listening) voice.pushEnd(); setPtt(false); }}
-                delayLongPress={160}
-                accessibilityLabel="길게 눌러 말하기"
-              >
-                <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 8 }}>
-                  <Text style={{ color: listening || transcribing ? t.text : t.subtext, fontSize: 15 }} numberOfLines={3}>
-                    {transcribing ? (pendingVoice || '받아쓰는 중…') : listening ? (voice.transcript || '듣고 있어요… (손을 떼면 보내요)') : '길게 눌러 말하세요'}
-                  </Text>
-                </View>
-              </Pressable>
-            )}
-          </View>
-          {/* 생성 중이면 ⏹ 정지(클로드처럼 멈출 수 있음), 아니면 ↑ 전송 */}
+          {/* 입력칸: 탭하면 바로 키보드로 글을 쓸 수 있어요. 음성은 오른쪽 🎤 버튼으로 분리. */}
+          <Input
+            ref={inputRef}
+            style={{ flex: 1, maxHeight: 120, paddingTop: 10, paddingBottom: 10, borderWidth: 0, backgroundColor: 'transparent' }}
+            // 듣는 중엔 받아쓴 말을 입력칸에 그대로 보여준다(끝나면 전송).
+            value={listening ? voice.transcript : transcribing ? (pendingVoice || '받아쓰는 중…') : draft}
+            onChangeText={setDraft}
+            placeholder={listening ? '' : suggestions.length ? `예) ${suggestions[phIdx % suggestions.length]}` : '도로시에게 메시지…'}
+            editable={!listening && !transcribing}
+            multiline
+            onSubmitEditing={() => send(draft)}
+          />
+          {/* 오른쪽: 생성 중 ⏹ 정지 · 글이 있으면 ↑ 전송 · 비어 있으면 🎤 꾹 눌러 말하기 */}
           {busy ? (
-            <Pressable
-              onPress={stop}
-              accessibilityLabel="정지"
-              style={[styles.round, { backgroundColor: t.danger }]}
-            >
+            <Pressable onPress={stop} accessibilityLabel="정지" style={[styles.round, { backgroundColor: t.danger }]}>
               <View style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' }} />
             </Pressable>
-          ) : (
+          ) : draft.trim() || images.length > 0 || !canListen ? (
             <Pressable
               onPress={() => { tap(); send(draft); }}
               disabled={listening || (!draft.trim() && images.length === 0)}
@@ -652,6 +642,15 @@ export default function Chat() {
               style={[styles.round, { backgroundColor: t.accent, opacity: listening || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}
             >
               <Text style={{ color: t.accentText, fontSize: 18, fontWeight: '800', marginTop: -1 }}>↑</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPressIn={() => { if (!standby && !listening && !transcribing) { tap(); setPtt(true); voice.pushStart(); } }}
+              onPressOut={() => { if (listening) voice.pushEnd(); setPtt(false); }}
+              accessibilityLabel="꾹 눌러 말하기"
+              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.border, opacity: ptt ? 0.7 : 1 }]}
+            >
+              <Text style={{ fontSize: 18 }}>🎤</Text>
             </Pressable>
           )}
         </View>
@@ -675,6 +674,7 @@ const styles = StyleSheet.create({
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
   copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 3 },
+  olderPill: { alignSelf: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
   composer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
   pill: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 28, paddingHorizontal: 6, paddingVertical: 5 },
   round: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
