@@ -976,6 +976,8 @@ export async function chat(
     extra?: string;
     /** Photo(s)/screenshot(s) the user attached to this turn (Claude can see them; the local model cannot). */
     images?: { base64: string; mediaType: string }[];
+    /** Lets the UI cancel a reply in progress (the ⏹ stop button), like Claude's stop. */
+    signal?: AbortSignal;
   } = {},
 ): Promise<string> {
   if (isOffline(state)) {
@@ -1027,14 +1029,17 @@ export async function chat(
 
   const replies: string[] = [];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await client.beta.messages.create({
-      ...modelParams(model),
-      max_tokens: 16000,
-      output_config: { effort: model === 'opus' ? 'high' : 'medium' },
-      system,
-      tools,
-      messages,
-    });
+    const response = await client.beta.messages.create(
+      {
+        ...modelParams(model),
+        max_tokens: 16000,
+        output_config: { effort: model === 'opus' ? 'high' : 'medium' },
+        system,
+        tools,
+        messages,
+      },
+      { signal: opts.signal },
+    );
 
     if (response.stop_reason === 'refusal') {
       return '죄송해요, 이 요청은 도와드리기 어려워요.';
