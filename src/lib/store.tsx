@@ -7,6 +7,7 @@ import { cancelReminder, scheduleReminder, scheduleRepeatingReminder } from './n
 import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
+import type { ServerBrainConfig } from './serverBrain';
 import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
 
 const KEYS = {
@@ -36,6 +37,7 @@ const KEYS = {
   chatSummary: 'dorothy.chatSummary',
   chatSummaryUpto: 'dorothy.chatSummaryUpto',
   autoUpgrade: 'dorothy.autoUpgrade',
+  serverBrain: 'dorothy.serverBrain',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -98,6 +100,8 @@ export type AppState = {
   chatSummaryUpto: number;
   /** 기본 두뇌(haiku)일 때, 회사·숫자·사진처럼 어려운 질문은 자동으로 고급(Opus)으로 올릴지. 끄면 항상 저렴한 두뇌(비용 절약). */
   autoUpgrade: boolean;
+  /** 사장님이 직접 운영하는 서버/컴퓨터의 오픈 모델(OpenAI 호환) 연결 설정. url이 비면 미설정. */
+  serverBrain: ServerBrainConfig;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -131,6 +135,7 @@ const initialState: AppState = {
   chatSummary: '',
   chatSummaryUpto: 0,
   autoUpgrade: true,
+  serverBrain: { url: '', model: '', key: '' },
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -149,7 +154,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -178,6 +183,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.chatSummary),
         AsyncStorage.getItem(KEYS.chatSummaryUpto),
         AsyncStorage.getItem(KEYS.autoUpgrade),
+        AsyncStorage.getItem(KEYS.serverBrain),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -208,6 +214,7 @@ function useStoreValue() {
         chatSummary: chatSummary ? JSON.parse(chatSummary) : '',
         chatSummaryUpto: chatSummaryUpto ? JSON.parse(chatSummaryUpto) : 0,
         autoUpgrade: autoUpgrade ? JSON.parse(autoUpgrade) : true,
+        serverBrain: serverBrain ? JSON.parse(serverBrain) : initialState.serverBrain,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -253,6 +260,8 @@ function useStoreValue() {
       setStandbyShortcut: (on: boolean) => update('standbyShortcut', on),
       setVoiceHiAccuracy: (on: boolean) => update('voiceHiAccuracy', on),
       setAutoUpgrade: (on: boolean) => update('autoUpgrade', on),
+      setServerBrain: (config: ServerBrainConfig) =>
+        update('serverBrain', { url: config.url.trim(), model: config.model.trim(), key: config.key.trim() }),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };
