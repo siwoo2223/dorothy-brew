@@ -35,6 +35,7 @@ const KEYS = {
   todoCandidates: 'dorothy.todoCandidates',
   chatSummary: 'dorothy.chatSummary',
   chatSummaryUpto: 'dorothy.chatSummaryUpto',
+  autoUpgrade: 'dorothy.autoUpgrade',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -95,6 +96,8 @@ export type AppState = {
   chatSummary: string;
   /** chatSummary에 이미 반영된 앞쪽 대화 턴 수(증분 요약용). */
   chatSummaryUpto: number;
+  /** 기본 두뇌(haiku)일 때, 회사·숫자·사진처럼 어려운 질문은 자동으로 고급(Opus)으로 올릴지. 끄면 항상 저렴한 두뇌(비용 절약). */
+  autoUpgrade: boolean;
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -127,6 +130,7 @@ const initialState: AppState = {
   todoCandidates: [],
   chatSummary: '',
   chatSummaryUpto: 0,
+  autoUpgrade: true,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -145,7 +149,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -173,6 +177,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.expenses),
         AsyncStorage.getItem(KEYS.chatSummary),
         AsyncStorage.getItem(KEYS.chatSummaryUpto),
+        AsyncStorage.getItem(KEYS.autoUpgrade),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -202,6 +207,7 @@ function useStoreValue() {
         expenses: expenses ? JSON.parse(expenses) : [],
         chatSummary: chatSummary ? JSON.parse(chatSummary) : '',
         chatSummaryUpto: chatSummaryUpto ? JSON.parse(chatSummaryUpto) : 0,
+        autoUpgrade: autoUpgrade ? JSON.parse(autoUpgrade) : true,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -246,6 +252,7 @@ function useStoreValue() {
       setWeeklyReportDay: (day: number | null) => update('weeklyReportDay', day),
       setStandbyShortcut: (on: boolean) => update('standbyShortcut', on),
       setVoiceHiAccuracy: (on: boolean) => update('voiceHiAccuracy', on),
+      setAutoUpgrade: (on: boolean) => update('autoUpgrade', on),
 
       async addTask(input: { title: string; dueAt?: string; notes?: string }): Promise<Task> {
         const task: Task = { id: newId(), done: false, createdAt: new Date().toISOString(), ...input };

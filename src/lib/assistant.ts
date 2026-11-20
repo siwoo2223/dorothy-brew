@@ -933,6 +933,7 @@ export function describeError(error: unknown): string {
  */
 function pickModel(userText: string, state: AppState, hasImages: boolean): ModelChoice {
   if (state.model !== 'haiku') return state.model;
+  if (state.autoUpgrade === false) return 'haiku'; // 사장이 비용 절약으로 자동 승급을 꺼 둠
   if (hasImages) return 'opus'; // reading a receipt/booking/screenshot photo deserves the better model
   const t = userText || '';
   const heavy =

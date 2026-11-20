@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { ReactNode, useState } from 'react';
-import { Alert, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, View } from 'react-native';
+import { Alert, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, UIManager, View } from 'react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -195,6 +195,17 @@ function ModelCard() {
         })}
       </View>
       <Body muted>{current.note}</Body>
+      {state.model === 'haiku' && (
+        <View style={styles.upgradeRow}>
+          <View style={{ flex: 1 }}>
+            <Body>🧠 똑똑한 질문은 자동으로 고급 두뇌</Body>
+            <Body muted>
+              켜짐(기본): 회사 물량·숫자·분석·사진처럼 어려운 질문만 자동으로 Opus(고급)로 올려 클로드처럼 정확히 답해요(그 질문만 비용↑). 끄면 항상 빠르고 저렴한 Haiku로만 답해 가장 아껴 써요.
+            </Body>
+          </View>
+          <Switch value={state.autoUpgrade} onValueChange={(on) => actions.setAutoUpgrade(on)} trackColor={{ true: t.accent }} />
+        </View>
+      )}
       <LocalBrainPanel />
     </Card>
   );
@@ -255,4 +266,5 @@ const styles = StyleSheet.create({
   sectionBody: { gap: 12 },
   hours: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   hour: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8 },
+  upgradeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
 });
