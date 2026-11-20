@@ -454,6 +454,10 @@ export default function Chat() {
         data={state.chat}
         keyExtractor={(m) => m.id}
         contentContainerStyle={styles.list}
+        // Android recycles list cells; with bubbles whose height grows while streaming, a recycled cell
+        // can be drawn over its neighbour (text overlapping the 복사·보내기 button). Turning off clipping
+        // keeps each row laid out on its own, which fixes that overlap.
+        removeClippedSubviews={false}
         // Only auto-scroll when the user is already at the bottom, so scrolling up to read earlier
         // messages isn't yanked back down by streaming text or a keyboard-driven relayout.
         onScroll={(e) => {
@@ -641,7 +645,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 20, fontWeight: '700' },
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
-  copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 1 },
+  copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 3 },
   composer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
   pill: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 28, paddingHorizontal: 6, paddingVertical: 5 },
   round: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
