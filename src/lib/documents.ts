@@ -177,6 +177,19 @@ const MIME: Record<FileFormat, { mime: string; uti: string }> = {
 };
 
 /**
+ * Writes a base64 image to a persistent local file and returns its uri, so a generated image can be
+ * shown in chat (via an ```image block) without storing the big base64 in the chat history itself.
+ */
+export async function saveBase64Image(base64: string, mime = 'image/png'): Promise<string> {
+  const ext = mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';
+  const dir = (FS.documentDirectory ?? FS.cacheDirectory ?? '') + 'dorothy-images/';
+  await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+  const uri = `${dir}img-${Date.now()}-${Math.floor(Math.random() * 1e6)}.${ext}`;
+  await FS.writeAsStringAsync(uri, base64, { encoding: FS.EncodingType.Base64 });
+  return uri;
+}
+
+/**
  * Builds the requested file and opens the system share sheet. `content` is Markdown (for pdf/word);
  * `headers`/`rows` are the table (for excel). Returns the file name shown to the user.
  */
