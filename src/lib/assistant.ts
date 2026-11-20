@@ -10,16 +10,26 @@ import * as location from './location';
 import * as recordings from './recordings';
 import * as sheets from './sheets';
 import { localComplete, LocalMessage } from './localBrain';
+import { serverComplete } from './serverBrain';
 import type { AppState, StoreActions } from './store';
 
-/** 'local' runs an open model on the phone (free, private, offline); the others call Claude. */
-export type ModelChoice = 'local' | 'haiku' | 'opus';
-type ClaudeChoice = Exclude<ModelChoice, 'local'>;
+/**
+ * 'local' runs an open model on the phone; 'server' runs an open model on the owner's own computer/
+ * server (both free, private, no Claude); 'haiku'/'opus' call Claude. 'local' and 'server' are the
+ * two "offline" brains — no tools, no background intelligence.
+ */
+export type ModelChoice = 'local' | 'server' | 'haiku' | 'opus';
+type ClaudeChoice = Exclude<ModelChoice, 'local' | 'server'>;
 
 const LOCAL_PERSONA = `당신은 "도로시", 한 사람만을 위한 개인 비서입니다. 지금은 사용자의 휴대폰 안에서 직접 동작하고 있어서 대화 내용이 밖으로 나가지 않습니다.
 - 반드시 자연스러운 한국어로, 따뜻하고 간결하게 2~5문장 안에서 답합니다.
 - 아래 "기억 목록"과 "할 일"은 사용자에 대한 사실입니다. 관련 있을 때만 활용하고, 모르는 것은 지어내지 말고 모른다고 말합니다.
 - 지금 모드에서는 인터넷 검색, 캘린더·메일 확인, 할 일·기억 자동 저장을 직접 할 수 없습니다. 그런 일이 필요하면 "설정에서 두뇌를 Claude로 바꾸면 할 수 있어요"라고 짧게 안내합니다.`;
+
+const SERVER_PERSONA = `당신은 "도로시", 한 사람만을 위한 개인 비서입니다. 지금은 사장님이 직접 운영하는 서버/컴퓨터 안의 두뇌로 동작하고 있어서, 대화 내용이 외부 업체로 나가지 않습니다(사장님만의 AI).
+- 반드시 자연스러운 한국어로, 따뜻하고 간결하게 답합니다.
+- 아래 "기억 목록"과 "할 일"은 사용자에 대한 사실입니다. 관련 있을 때만 활용하고, 모르는 것은 지어내지 말고 모른다고 말합니다.
+- 지금 모드에서는 인터넷 검색, 캘린더·메일 확인, 회사 서버 조회, 할 일·기억 자동 저장을 직접 할 수 없습니다. 그런 일이 필요하면 "설정에서 두뇌를 Claude로 바꾸면 할 수 있어요"라고 짧게 안내합니다.`;
 
 /**
  * Haiku is the everyday default: roughly 40x cheaper than Opus and good enough for a personal assistant.
@@ -44,19 +54,32 @@ function webSearchTool(choice: ModelChoice, maxUses: number): Anthropic.Beta.Bet
 
 const LOCAL_HISTORY_TURNS = 8;
 
-/** A turn handled entirely on the phone: no tools, a short history, the same memories and tasks. */
-async function localChat(userText: string, state: AppState, opts: { spoken?: boolean; onToken?: (t: string) => void; extra?: string }) {
+/** The two brains that run without Claude: on the phone, or on the owner's own server. */
+function isOffline(state: AppState): boolean {
+  return state.model === 'local' || state.model === 'server';
+}
+function offlinePersona(state: AppState): string {
+  return state.model === 'server' ? SERVER_PERSONA : LOCAL_PERSONA;
+}
+/** Routes an offline completion to the on-device model or the owner's server. */
+function offlineComplete(state: AppState, messages: LocalMessage[], onToken?: (t: string) => void, maxTokens = 600): Promise<string> {
+  if (state.model === 'server') return serverComplete(state.serverBrain, messages, maxTokens, onToken);
+  return localComplete(messages, onToken, maxTokens);
+}
+
+/** A turn handled by an offline brain (phone or own server): no tools, a short history, the same memories and tasks. */
+async function offlineChat(userText: string, state: AppState, opts: { spoken?: boolean; onToken?: (t: string) => void; extra?: string }) {
   const history = state.chat.slice(-LOCAL_HISTORY_TURNS);
   while (history.length && history[0].role !== 'user') history.shift();
   const messages: LocalMessage[] = [
-    { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+    { role: 'system', content: `${offlinePersona(state)}\n\n${buildContext(state)}` },
     ...history.map((t) => ({ role: t.role, content: t.text })),
     {
       role: 'user',
       content: [userText, opts.extra, opts.spoken ? '(음성 대화예요. 목록 없이 짧은 구어체로 답해 주세요.)' : ''].filter(Boolean).join('\n\n'),
     },
   ];
-  return (await localComplete(messages, opts.onToken, opts.extra ? 900 : 600)) || '(응답이 비어 있어요. 다시 말씀해 주세요.)';
+  return (await offlineComplete(state, messages, opts.onToken, opts.extra ? 900 : 600)) || '(응답이 비어 있어요. 다시 말씀해 주세요.)';
 }
 const HISTORY_TURNS = 40;
 const MAX_TOOL_ROUNDS = 8;
@@ -955,9 +978,9 @@ export async function chat(
     images?: { base64: string; mediaType: string }[];
   } = {},
 ): Promise<string> {
-  if (state.model === 'local') {
-    if (opts.images?.length) return '사진은 폰 안의 두뇌로는 못 봐요. 설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.';
-    return localChat(userText, state, opts);
+  if (isOffline(state)) {
+    if (opts.images?.length) return '사진은 내 두뇌(폰·내 서버)로는 못 봐요. 설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.';
+    return offlineChat(userText, state, opts);
   }
   const client = createClient(state);
   // Company/data/analytical turns (and photos) run on Opus so Dorothy aggregates and reasons like a full Claude.
@@ -1051,7 +1074,7 @@ const SUMMARY_BATCH = 12;
  * 증분으로 새로 밀려난 턴만 기존 요약에 접어 넣어 비용을 아낀다. 화면이 쉴 때(응답 직후) 호출한다.
  */
 export async function updateChatSummary(state: AppState, actions: StoreActions): Promise<void> {
-  if (state.model === 'local' || !state.apiKey) return;
+  if (isOffline(state) || !state.apiKey) return;
   const chat = state.chat ?? [];
   const foldUpto = chat.length - SUMMARY_KEEP; // 이 인덱스 앞쪽 턴은 이미 창 밖
   const start = state.chatSummaryUpto ?? 0;
@@ -1099,7 +1122,7 @@ export type DetectedTodo = { title: string; who: string; dueAt: string | null; r
  * which the owner approves or ignores (never auto-registered). The original text is not stored.
  */
 export async function detectTodos(state: AppState, blob: string, nowIso: string): Promise<DetectedTodo[]> {
-  if (state.model === 'local' || !state.apiKey) return [];
+  if (isOffline(state) || !state.apiKey) return [];
   const client = createClient(state);
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
     {
@@ -1143,7 +1166,7 @@ export async function detectTodos(state: AppState, blob: string, nowIso: string)
 }
 
 export async function triageAlerts(state: AppState, contextBlob: string): Promise<string[]> {
-  if (state.model === 'local' || !state.apiKey) return [];
+  if (isOffline(state) || !state.apiKey) return [];
   const client = createClient(state);
   const system: Anthropic.Beta.BetaTextBlockParam[] = [
     {
@@ -1182,7 +1205,7 @@ export async function triageAlerts(state: AppState, contextBlob: string): Promis
  * "병합되면 알려줘")을 우선한다. 로컬 두뇌/키 없음/실패 시 빈 배열 → 호출측이 규칙 기반으로 대체.
  */
 export async function suggestNextPrompts(state: AppState): Promise<string[]> {
-  if (state.model === 'local' || !state.apiKey) return [];
+  if (isOffline(state) || !state.apiKey) return [];
   const open = (state.tasks ?? []).filter((t) => !t.done);
   const now = Date.now();
   const overdue = open.filter((t) => t.dueAt && new Date(t.dueAt).getTime() < now).length;
@@ -1232,10 +1255,11 @@ export async function suggestNextPrompts(state: AppState): Promise<string[]> {
 
 /** A short morning briefing built from tasks and memories, with live info (weather, news) when useful. */
 export async function briefing(state: AppState): Promise<string> {
-  if (state.model === 'local') {
-    return localComplete(
+  if (isOffline(state)) {
+    return offlineComplete(
+      state,
       [
-        { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+        { role: 'system', content: `${offlinePersona(state)}\n\n${buildContext(state)}` },
         { role: 'user', content: '오늘의 브리핑을 해 줘. 오늘 꼭 할 일, 기한이 지난 일, 이번 주에 다가오는 일, 기억 목록에서 오늘 챙기면 좋을 것을 짧은 소제목과 글머리표로 정리해 줘.' },
       ],
       undefined,
@@ -1342,10 +1366,11 @@ function companySnapshot(reportJson: string): { total: number; inProgress: numbe
  * on the phone brain.
  */
 export async function weeklyReport(state: AppState): Promise<string> {
-  if (state.model === 'local' || !state.apiKey) {
-    return localComplete(
+  if (isOffline(state) || !state.apiKey) {
+    return offlineComplete(
+      state,
       [
-        { role: 'system', content: `${LOCAL_PERSONA}\n\n${buildContext(state)}` },
+        { role: 'system', content: `${offlinePersona(state)}\n\n${buildContext(state)}` },
         { role: 'user', content: '지난 한 주를 돌아보는 주간 리포트를 써 줘. 완료한 일, 남은 일, 다음 주에 챙길 것을 짧게 정리해 줘.' },
       ],
       undefined,

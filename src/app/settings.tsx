@@ -24,6 +24,7 @@ import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
+import { ServerBrainCard } from '../components/ServerBrainCard';
 import { VoiceCard } from '../components/VoiceCard';
 import { VoicePickerCard } from '../components/VoicePickerCard';
 import { VoiceMatchCard } from '../components/VoiceMatchCard';
@@ -76,6 +77,7 @@ export default function Settings() {
           <WorkspaceField />
         </Card>
         <ModelCard />
+        <ServerBrainCard />
       </Section>
 
       <Section icon="🎙️" title="음성">
@@ -171,6 +173,11 @@ const MODEL_OPTIONS = [
   },
   { value: 'haiku', label: 'Claude Haiku', note: '빠르고 아주 저렴해요. 검색·캘린더·메일·자동 기억까지 다 해요.' },
   { value: 'opus', label: 'Claude Opus', note: '가장 똑똑하지만 약 40배 비싸요. 복잡한 고민이나 긴 글이 필요할 때만.' },
+  {
+    value: 'server',
+    label: '🖥️ 내 서버 두뇌',
+    note: '내 컴퓨터·서버에 올린 오픈 모델로 답해요(나만의 AI). 데이터가 밖으로 안 나가고 비용도 없어요. 아래 "내 서버 두뇌"에서 주소를 먼저 넣어 주세요. 검색·캘린더·자동 기억은 아직 못 해요.',
+  },
 ] as const;
 
 function ModelCard() {

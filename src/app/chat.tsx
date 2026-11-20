@@ -367,7 +367,7 @@ export default function Chat() {
   };
 
   const chooseImage = () => {
-    if (state.model === 'local') {
+    if (state.model === 'local' || state.model === 'server') {
       Alert.alert('사진은 Claude 두뇌에서', '설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.');
       return;
     }
