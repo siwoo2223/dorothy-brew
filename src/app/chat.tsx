@@ -24,6 +24,9 @@ const copyOrSend = (raw: string) => {
   if (text) Share.share({ message: text }).catch(() => {});
 };
 
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+
 import { Input } from '../components/ui';
 import { RichMessage } from '../components/RichMessage';
 
@@ -47,6 +50,7 @@ import { suggestPrompts } from '../lib/suggest';
 import { companyConfigured, transcribeAudio, VOICE_VOCAB } from '../lib/company';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
+import type { ChatTurn } from '../lib/types';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
 import { extractWakeCommand, speak, stopSpeaking, useVoiceInput, voiceInputAvailable } from '../lib/voice';
@@ -102,6 +106,9 @@ export default function Chat() {
   const [showAllHistory, setShowAllHistory] = useState(false);
   // 카톡식 답글: 지금 쓰는 메시지가 어떤 말에 대한 답장인지(없으면 null).
   const [replyTo, setReplyTo] = useState<{ role: 'user' | 'assistant'; text: string } | null>(null);
+  // '🖼️ 이미지': 캡처할 메시지(화면 밖에서 카드로 그려 PNG로 담는다). null이면 캡처 안 함.
+  const [imageTarget, setImageTarget] = useState<ChatTurn | null>(null);
+  const shotRef = useRef<View>(null);
   const COLLAPSE_AFTER = 30; // 이보다 많으면 접기
   const VISIBLE_RECENT = 20; // 접었을 때 화면에 남겨 둘 최근 메시지 수
   const hiddenCount = !showAllHistory && state.chat.length > COLLAPSE_AFTER ? state.chat.length - VISIBLE_RECENT : 0;
@@ -456,6 +463,25 @@ export default function Chat() {
     }
   };
 
+  /** 🖼️ 메시지(견적·표·그래프 포함)를 화면 밖 카드로 그려 PNG로 캡처하고 공유창을 연다. */
+  const saveAsImage = (item: ChatTurn) => {
+    tap();
+    setImageTarget(item);
+    // 카드가 화면 밖에서 그려지고(그래프는 onLayout로 폭을 잡음) 나서 캡처한다.
+    setTimeout(async () => {
+      try {
+        const uri = await captureRef(shotRef, { format: 'png', quality: 1 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', UTI: 'public.png', dialogTitle: '이미지로 저장' });
+        }
+      } catch (e) {
+        Alert.alert('이미지 저장 오류', e instanceof Error ? e.message : String(e));
+      } finally {
+        setImageTarget(null);
+      }
+    }, 350);
+  };
+
   /** ⏹ 정지: 생성 중인 답을 즉시 취소하고 입력을 돌려준다(클로드의 멈춤처럼). */
   const stop = () => {
     tap();
@@ -557,9 +583,14 @@ export default function Chat() {
                 {item.replyTo ? <QuoteBar reply={item.replyTo} /> : null}
                 <RichMessage text={item.text} color={t.text} />
               </Pressable>
-              <Pressable onPress={() => { tap(); copyOrSend(item.text); }} hitSlop={6} style={styles.copyBtn}>
-                <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>📋 복사 · 보내기</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row' }}>
+                <Pressable onPress={() => { tap(); copyOrSend(item.text); }} hitSlop={6} style={styles.copyBtn}>
+                  <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>📋 복사 · 보내기</Text>
+                </Pressable>
+                <Pressable onPress={() => saveAsImage(item)} hitSlop={6} style={styles.copyBtn}>
+                  <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>🖼️ 이미지</Text>
+                </Pressable>
+              </View>
             </View>
           );
         }}
@@ -573,6 +604,21 @@ export default function Chat() {
           ) : null
         }
       />
+      {/* 화면 밖에서 메시지를 카드로 그려 PNG로 캡처한다(🖼️ 이미지 버튼). 레이아웃엔 영향 없음. */}
+      {imageTarget && (
+        <View style={{ position: 'absolute', left: -9999, top: 0 }} pointerEvents="none">
+          <View ref={shotRef} collapsable={false} style={{ width: 360, backgroundColor: t.card, padding: 18, gap: 10 }}>
+            {imageTarget.role === 'user' ? (
+              <Text style={{ color: t.text, fontSize: 15, lineHeight: 22 }}>{imageTarget.text}</Text>
+            ) : (
+              <RichMessage text={imageTarget.text} color={t.text} />
+            )}
+            <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border, paddingTop: 8, marginTop: 2 }}>
+              <Text style={{ color: t.subtext, fontSize: 11 }}>🤖 도로시</Text>
+            </View>
+          </View>
+        </View>
+      )}
       {(voice.error || canListen) && (
         <View style={[styles.voiceBar, { borderTopColor: t.border }]}>
           {voice.error ? (
