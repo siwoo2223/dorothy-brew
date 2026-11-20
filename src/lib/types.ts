@@ -115,4 +115,6 @@ export type ChatTurn = {
   role: 'user' | 'assistant';
   text: string;
   createdAt: string;
+  /** 카톡식 답글: 이 메시지가 어떤 말에 대한 답장인지(인용 표시용). */
+  replyTo?: { role: 'user' | 'assistant'; text: string };
 };
