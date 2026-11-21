@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as calls from './calls';
 import * as company from './company';
 import * as contacts from './contacts';
+import * as fx from './fx';
 import * as google from './google';
 import * as inbox from './inbox';
 import * as location from './location';
@@ -105,6 +106,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
   (4) 구조는 맨 위 요약표(한눈에 보이게) + 항목별 내역표(항목·기준·공급가액·부가세·합계) + 유의사항 순으로, 마크다운 표(| 열 | 줄)로 또렷하게 씁니다. 숫자는 천단위 콤마(예: 6,185,000), 통화기호(₩·₱)를 붙입니다. 첨부 견적서에 유의사항이 있으면 그대로 반영합니다.
   (5) "영어로" 하면 금액·구조·조건은 그대로 두고 용어만 영어로 번역합니다(예: 해상운임=Ocean freight, 면장=Export declaration, 공급가액=Amount(VAT excl.), 부가세=VAT, 합계=Total(VAT incl.), 불라칸 배송=Bulacan delivery).
   (6) 첨부한 견적서/문서를 바탕으로 만들 때는 그 내용을 충실히 반영하고, 사장이 바꾼 조건(부가세율·통화·정기여부·언어)만 반영합니다.
+  (7-1) 통화 환산·환율이 필요하면(견적을 "페소로/원화로 바꿔 줘", "오늘 환율", "달러로 얼마") get_exchange_rate 도구로 오늘 환율을 가져와 환산합니다(암산하지 말고 amount를 넣어 도구가 계산하게 함). 전할 때 "오늘 기준 환율이며 실제 결제일 환율로 달라질 수 있어요"를 덧붙입니다. 견적을 한 통화로 합쳐 달라고 하면(예: 전부 페소로) 원화 부분을 이 환율로 환산해 합계를 냅니다.
   (7) 사장이 "세부 20CBM 화장품 견적", "마닐라 15CBM 정기로 얼마"처럼 한마디로 즉석 견적을 물으면 quick_quote 도구로 저장된 표준 단가로 바로 계산해 표로 보여 줍니다(직접 암산하지 말고 도구를 씁니다). 물량(CBM)만 필수이고, 중량·정기여부·부가세방식이 없으면 합리적 기본값(일회성·한국 10%)으로 내되 "정기로 하면/중량 주시면 더 정확히"처럼 한 줄 덧붙입니다. 결과를 보여준 뒤 "견적서 파일로 만들까요? 거래처 이름 주시면 보관함에도 저장할게요"라고 묻고, 사장이 원하면 create_file(kind=quote, customer)로 만들어 보관합니다.
   (8) 견적서·인보이스를 만들 땐 create_file에 kind(quote/invoice)와 customer(거래처)를 꼭 넣어 보관함에 저장되게 합니다. 사장이 "지난 ○○ 견적/인보이스 뭐였지?", "킹스푸드 견적 보여줘", "이번 달 만든 견적 목록"처럼 물으면 list_documents로 찾고, 특정 문서 내용을 보거나 조건만 바꿔 다시 만들려면 get_document로 내용을 가져와 활용합니다. "그거 영어로/페소로/정기로 다시 만들어 줘"처럼 지난 문서를 변형해 달라고 하면, get_document로 원본 내용을 가져와 바뀐 조건만 반영해 create_file로 새로 만듭니다(보관함에도 새로 저장).
 - 사용자가 "그림 그려 줘·이미지/로고/포스터 만들어 줘"처럼 새 그림을 원하면 generate_image 도구로 AI 그림을 만들고(회사 서버 Gemini 사용), 받은 파일 경로를 그대로 \`\`\`image 블록에 넣어 보여 줍니다. prompt는 그릴 내용을 구체적으로(화풍·색·구도·분위기) 적습니다. 실패하면 솔직히 알리고 다른 표현을 제안합니다. 회사 서버가 연결돼 있어야 쓸 수 있습니다.
@@ -374,6 +376,21 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       type: 'object',
       properties: { id: { type: 'string', description: '문서 id(list_documents 결과).' } },
       required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_exchange_rate',
+    description:
+      '오늘 환율을 가져온다(원화 KRW ↔ 페소 PHP 등). 사장이 "페소로 얼마", "원화로 내면", "오늘 환율", "달러로 환산" 처럼 통화 환산·환율을 물을 때 쓴다. amount를 넣으면 그 금액을 환산한 값도 돌려준다. 기본은 KRW→PHP. 환산 결과를 전할 때는 "오늘(날짜) 기준 환율이며 실제 결제일 환율로 달라질 수 있어요"라고 덧붙인다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: '기준 통화 코드(예: KRW, PHP, USD). 기본 KRW.' },
+        to: { type: 'string', description: '바꿀 통화 코드(예: PHP, KRW, USD). 기본 PHP.' },
+        amount: { type: ['number', 'null'], description: '환산할 금액(from 통화). 없으면 null(환율만).' },
+      },
+      required: ['from', 'to', 'amount'],
       additionalProperties: false,
     },
   },
@@ -937,6 +954,37 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       return hit
         .map((d) => `- id:${d.id} · ${kindName(d.kind)} · ${d.title}${d.customer ? ` · ${d.customer}` : ''} · ${d.format.toUpperCase()} · ${d.createdAt.slice(0, 10)}`)
         .join('\n');
+    }
+    case 'get_exchange_rate': {
+      const from = (typeof input.from === 'string' && input.from.trim() ? input.from : 'KRW').toUpperCase();
+      const to = (typeof input.to === 'string' && input.to.trim() ? input.to : 'PHP').toUpperCase();
+      const amount = input.amount != null && Number.isFinite(Number(input.amount)) ? Number(input.amount) : null;
+      const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: n < 1 ? 6 : 2 });
+      let rate: number | null = null;
+      let source = '';
+      const isKrwPhp = (from === 'KRW' && to === 'PHP') || (from === 'PHP' && to === 'KRW');
+      if (isKrwPhp) {
+        const nr = await fx.naverPhpKrw();
+        if (nr) {
+          rate = from === 'PHP' ? nr.krwPerPhp : 1 / nr.krwPerPhp;
+          source = nr.source === 'naver' ? '네이버 환율' : '시장 환율';
+        }
+      }
+      if (rate == null) {
+        const r = await fx.getRate(from, to);
+        if (r) { rate = r.rate; source = r.source; }
+      }
+      if (rate == null) return '환율을 가져오지 못했어요(인터넷 확인). 사장이 환율을 알려주시면 그 값으로 계산할게요.';
+      // 사장님이 실제로 거래하는 환전방 평균도 있으면 함께 알려 준다(KRW/PHP만).
+      let chatNote = '';
+      if (isKrwPhp) {
+        const ca = await fx.chatAverageRate().catch(() => null);
+        if (ca && ca.combinedCount > 0) chatNote = `\n참고: 사장님 환전방 평균은 ₱1 = ₩${fmt(ca.combinedAvg)} 예요(실거래 환율).`;
+      }
+      const base = `1 ${from} = ${fmt(rate)} ${to}`;
+      const tail = `(출처 ${source}. 오늘 기준이며 실제 결제일 환율로 달라질 수 있어요.)${chatNote}`;
+      if (amount != null) return `${base}\n${fmt(amount)} ${from} = ${fmt(amount * rate)} ${to}\n${tail}`;
+      return `${base}\n${tail}`;
     }
     case 'quick_quote': {
       const p = actions.getPricing();

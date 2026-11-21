@@ -162,3 +162,41 @@ export async function chatAverageRate(days = 14): Promise<ChatRate> {
   if (!rooms.length) return null;
   return { rooms, combinedAvg: all.reduce((s, x) => s + x, 0) / all.length, combinedCount: all.length };
 }
+
+/**
+ * 범용 환율(아무 통화쌍, 예: KRW→PHP, USD→PHP). KRW↔PHP는 naverPhpKrw()가 더 정확하니
+ * get_exchange_rate 도구에서 그쪽을 먼저 쓰고, 그 외 통화에 이 함수를 쓴다. 무료·키 없는 API 두 곳.
+ */
+export type FxRate = { from: string; to: string; rate: number; date: string; source: string };
+
+const _rateCache: Record<string, { at: number; v: FxRate }> = {};
+
+export async function getRate(from: string, to: string): Promise<FxRate | null> {
+  const f = (from || '').toUpperCase();
+  const t = (to || '').toUpperCase();
+  if (!f || !t) return null;
+  if (f === t) return { from: f, to: t, rate: 1, date: '', source: 'same' };
+  const key = `${f}_${t}`;
+  const c = _rateCache[key];
+  if (c && Date.now() - c.at < 3 * 60 * 60 * 1000) return c.v;
+
+  const sources: { url: string; pick: (j: any) => { rate: number; date: string; src: string } | null }[] = [
+    { url: `https://open.er-api.com/v6/latest/${encodeURIComponent(f)}`, pick: (j) => (j?.result === 'success' && num(j?.rates?.[t]) > 0 ? { rate: num(j.rates[t]), date: String(j?.time_last_update_utc ?? '').slice(0, 16), src: 'open.er-api.com' } : null) },
+    { url: `https://api.frankfurter.app/latest?base=${encodeURIComponent(f)}&symbols=${encodeURIComponent(t)}`, pick: (j) => (num(j?.rates?.[t]) > 0 ? { rate: num(j.rates[t]), date: String(j?.date ?? ''), src: 'frankfurter.app (ECB)' } : null) },
+  ];
+  for (const s of sources) {
+    try {
+      const r = await fetch(s.url, { headers: { Accept: 'application/json' } });
+      if (!r.ok) continue;
+      const hit = s.pick(await r.json());
+      if (hit) {
+        const v: FxRate = { from: f, to: t, rate: hit.rate, date: hit.date, source: hit.src };
+        _rateCache[key] = { at: Date.now(), v };
+        return v;
+      }
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
