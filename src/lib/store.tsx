@@ -8,7 +8,7 @@ import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ServerBrainConfig } from './serverBrain';
-import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, SavedDoc, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -38,6 +38,7 @@ const KEYS = {
   chatSummaryUpto: 'dorothy.chatSummaryUpto',
   autoUpgrade: 'dorothy.autoUpgrade',
   serverBrain: 'dorothy.serverBrain',
+  documents: 'dorothy.documents',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -102,6 +103,8 @@ export type AppState = {
   autoUpgrade: boolean;
   /** 사장님이 직접 운영하는 서버/컴퓨터의 오픈 모델(OpenAI 호환) 연결 설정. url이 비면 미설정. */
   serverBrain: ServerBrainConfig;
+  /** 도로시가 만들어 보관한 견적서·인보이스 등 문서(거래처별로 다시 찾아봄). */
+  documents: SavedDoc[];
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -136,6 +139,7 @@ const initialState: AppState = {
   chatSummaryUpto: 0,
   autoUpgrade: true,
   serverBrain: { url: '', model: '', key: '' },
+  documents: [],
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -154,7 +158,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -184,6 +188,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.chatSummaryUpto),
         AsyncStorage.getItem(KEYS.autoUpgrade),
         AsyncStorage.getItem(KEYS.serverBrain),
+        AsyncStorage.getItem(KEYS.documents),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -215,6 +220,7 @@ function useStoreValue() {
         chatSummaryUpto: chatSummaryUpto ? JSON.parse(chatSummaryUpto) : 0,
         autoUpgrade: autoUpgrade ? JSON.parse(autoUpgrade) : true,
         serverBrain: serverBrain ? JSON.parse(serverBrain) : initialState.serverBrain,
+        documents: documents ? JSON.parse(documents) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -389,6 +395,18 @@ function useStoreValue() {
         for (const s of ref.current.sailings) for (const nid of s.reminderIds ?? []) await cancelReminder(nid);
         update('sailings', []);
       },
+
+      // ── 견적서·인보이스 보관함 ──
+      addDocument(input: Omit<SavedDoc, 'id' | 'createdAt'>): SavedDoc {
+        const doc: SavedDoc = { id: newId(), createdAt: new Date().toISOString(), ...input };
+        update('documents', [doc, ...ref.current.documents].slice(0, 500));
+        return doc;
+      },
+      deleteDocument(id: string) {
+        update('documents', ref.current.documents.filter((d) => d.id !== id));
+      },
+      /** 최신 보관 문서 목록(도구에서 실시간으로 조회). */
+      getDocuments: (): SavedDoc[] => ref.current.documents,
 
       // ── 개인 지출 기록(영수증 등) ──
       addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {

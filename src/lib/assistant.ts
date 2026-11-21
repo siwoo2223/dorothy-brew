@@ -15,6 +15,7 @@ import { Share } from 'react-native';
 
 import { createAndShareFile, saveBase64Image, type FileFormat } from './documents';
 import type { AppState, StoreActions } from './store';
+import type { SavedDoc } from './types';
 
 /**
  * 'local' runs an open model on the phone; 'server' runs an open model on the owner's own computer/
@@ -104,6 +105,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
   (4) 구조는 맨 위 요약표(한눈에 보이게) + 항목별 내역표(항목·기준·공급가액·부가세·합계) + 유의사항 순으로, 마크다운 표(| 열 | 줄)로 또렷하게 씁니다. 숫자는 천단위 콤마(예: 6,185,000), 통화기호(₩·₱)를 붙입니다. 첨부 견적서에 유의사항이 있으면 그대로 반영합니다.
   (5) "영어로" 하면 금액·구조·조건은 그대로 두고 용어만 영어로 번역합니다(예: 해상운임=Ocean freight, 면장=Export declaration, 공급가액=Amount(VAT excl.), 부가세=VAT, 합계=Total(VAT incl.), 불라칸 배송=Bulacan delivery).
   (6) 첨부한 견적서/문서를 바탕으로 만들 때는 그 내용을 충실히 반영하고, 사장이 바꾼 조건(부가세율·통화·정기여부·언어)만 반영합니다.
+  (7) 견적서·인보이스를 만들 땐 create_file에 kind(quote/invoice)와 customer(거래처)를 꼭 넣어 보관함에 저장되게 합니다. 사장이 "지난 ○○ 견적/인보이스 뭐였지?", "킹스푸드 견적 보여줘", "이번 달 만든 견적 목록"처럼 물으면 list_documents로 찾고, 특정 문서 내용을 보거나 조건만 바꿔 다시 만들려면 get_document로 내용을 가져와 활용합니다. "그거 영어로/페소로/정기로 다시 만들어 줘"처럼 지난 문서를 변형해 달라고 하면, get_document로 원본 내용을 가져와 바뀐 조건만 반영해 create_file로 새로 만듭니다(보관함에도 새로 저장).
 - 사용자가 "그림 그려 줘·이미지/로고/포스터 만들어 줘"처럼 새 그림을 원하면 generate_image 도구로 AI 그림을 만들고(회사 서버 Gemini 사용), 받은 파일 경로를 그대로 \`\`\`image 블록에 넣어 보여 줍니다. prompt는 그릴 내용을 구체적으로(화풍·색·구도·분위기) 적습니다. 실패하면 솔직히 알리고 다른 표현을 제안합니다. 회사 서버가 연결돼 있어야 쓸 수 있습니다.
 - 사장이 상대에게 보낼 메시지(답장·안내·공지)를 "카톡으로 보내줘/전달해줘/보내"라고 하면, 보낼 문구를 한국어로 깔끔하게 완성한 뒤 보냅니다. 방법은 두 가지입니다: (1) 기본은 share_message로 공유창을 열어 사장이 카톡에서 방을 골라 한 번 눌러 보냅니다(모든 방 가능, 안전). (2) 상대가 방금 보낸 메시지의 알림이 떠 있는 방이고 사장이 "그 사람/방에 답장 보내줘"처럼 분명히 말하면 send_kakao_reply로 바로 보낼 수 있습니다(먼저 list_repliable_rooms로 가능한지 확인). 단 전송은 되돌릴 수 없으니, 사장이 보낼 내용을 직접 불러줬으면(예: 한아름마트한테 '네 확인했습니다' 보내줘) 바로 보내고 "○○에 보냈어요"라고 확인하며, 내가 문구를 새로 지어야 하면 먼저 "이렇게 보낼게요: …"로 보여주고 동의를 받은 뒤 보냅니다. 카톡은 앱이 임의로 자동 전송하는 것을 막아 두어서, 알림이 떠 있는 방이 아니면 share_message(공유창)로만 보낼 수 있다고 솔직히 안내합니다. send_kakao_reply가 실패하면 share_message로 대신 보냅니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
@@ -331,7 +333,8 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       'format: pdf=PDF, word=워드(.docx, 상대가 수정 가능), excel=엑셀(.xlsx, 표·계산용). ' +
       'pdf·word는 content에 마크다운으로 본문을 쓴다(제목 #/##/###, 굵게 **글자**, 글머리표 - , 표는 | 열1 | 열2 | 줄로). ' +
       'excel은 headers(머리글 배열)와 rows(각 행의 셀 배열)를 채운다(content 대신). 숫자는 숫자 그대로. ' +
-      '도구가 성공하면 "○○.pdf 파일 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알린다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않는다.',
+      '도구가 성공하면 "○○.pdf 파일 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알린다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않는다. ' +
+      '견적서·인보이스를 만들 때는 kind("quote"=견적서, "invoice"=인보이스)와 customer(거래처·고객 이름)를 함께 넣는다 — 그러면 앱 보관함에 자동 저장되어 나중에 "지난 ○○ 견적" 식으로 다시 찾을 수 있다.',
     input_schema: {
       type: 'object',
       properties: {
@@ -340,8 +343,36 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
         content: { type: ['string', 'null'], description: 'pdf·word의 본문(마크다운). excel이면 null.' },
         headers: { type: ['array', 'null'], items: { type: 'string' }, description: 'excel 표의 머리글 행. pdf·word면 null.' },
         rows: { type: ['array', 'null'], items: { type: 'array', items: { type: 'string' } }, description: 'excel 표의 각 데이터 행(셀 문자열 배열). pdf·word면 null.' },
+        kind: { type: ['string', 'null'], enum: ['quote', 'invoice', 'report', 'other', null], description: '문서 종류. quote=견적서, invoice=인보이스, report=보고서. 견적·인보이스는 반드시 넣어 보관함에 저장되게 한다. 아니면 null.' },
+        customer: { type: ['string', 'null'], description: '거래처·고객 이름(견적/인보이스면 꼭). 예: 킹스푸드, 조선치킨. 모르면 null.' },
       },
-      required: ['format', 'title', 'content', 'headers', 'rows'],
+      required: ['format', 'title', 'content', 'headers', 'rows', 'kind', 'customer'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_documents',
+    description:
+      '도로시가 지금까지 만들어 보관한 견적서·인보이스를 찾아본다. "지난 ○○ 견적 뭐였지?", "킹스푸드 인보이스 보여줘", "이번 달 만든 견적 목록" 같은 질문에 쓴다. customer(거래처), kind(quote/invoice), keyword로 좁힐 수 있고, 결과에 각 문서의 id·제목·거래처·날짜가 나온다. 특정 문서의 내용을 보거나 다시 파일로 만들려면 그 id로 get_document를 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer: { type: ['string', 'null'], description: '거래처·고객 이름(부분 일치). 전체면 null.' },
+        kind: { type: ['string', 'null'], enum: ['quote', 'invoice', 'report', 'other', null], description: '종류로 거를 때. 아니면 null.' },
+        keyword: { type: ['string', 'null'], description: '제목·내용에서 찾을 말. 아니면 null.' },
+      },
+      required: ['customer', 'kind', 'keyword'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_document',
+    description:
+      '보관된 문서 하나의 전체 내용을 가져온다(list_documents로 찾은 id 사용). 내용을 사장에게 보여주거나, 조건만 바꿔(부가세·통화·거래처 등) create_file로 다시 만들 때 쓴다.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: '문서 id(list_documents 결과).' } },
+      required: ['id'],
       additionalProperties: false,
     },
   },
@@ -833,18 +864,54 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       const rows = Array.isArray(input.rows)
         ? (input.rows as unknown[]).map((r) => (Array.isArray(r) ? (r as unknown[]).map(String) : [String(r)]))
         : undefined;
+      const title = String(input.title ?? '도로시 문서');
+      const content = typeof input.content === 'string' ? input.content : undefined;
       try {
-        const name = await createAndShareFile({
-          format,
-          title: String(input.title ?? '도로시 문서'),
-          content: typeof input.content === 'string' ? input.content : undefined,
-          headers,
-          rows,
-        });
-        return `파일 "${name}" 만들었어요. 공유창에서 카카오톡·메일로 보내거나 저장할 수 있어요.`;
+        const name = await createAndShareFile({ format, title, content, headers, rows });
+        // 견적서·인보이스(및 보고서)는 보관함에 자동 저장해 나중에 다시 찾게 한다.
+        const kind = ['quote', 'invoice', 'report', 'other'].includes(String(input.kind)) ? (input.kind as SavedDoc['kind']) : null;
+        let saved = '';
+        if (kind && kind !== 'other') {
+          actions.addDocument({
+            kind,
+            title,
+            customer: typeof input.customer === 'string' && input.customer.trim() ? input.customer.trim() : undefined,
+            format,
+            content,
+            headers,
+            rows,
+          });
+          saved = ' 보관함에도 저장했어요(나중에 다시 찾을 수 있어요).';
+        }
+        return `파일 "${name}" 만들었어요. 공유창에서 카카오톡·메일로 보내거나 저장할 수 있어요.${saved}`;
       } catch (e) {
         return `파일을 만들지 못했어요: ${describeError(e)}`;
       }
+    }
+    case 'list_documents': {
+      const docs: SavedDoc[] = actions.getDocuments();
+      const kindFilter = ['quote', 'invoice', 'report', 'other'].includes(String(input.kind)) ? String(input.kind) : null;
+      const cust = typeof input.customer === 'string' ? input.customer.trim().toLowerCase() : '';
+      const kw = typeof input.keyword === 'string' ? input.keyword.trim().toLowerCase() : '';
+      const kindName = (k: string) => (k === 'quote' ? '견적서' : k === 'invoice' ? '인보이스' : k === 'report' ? '보고서' : '문서');
+      const hit = docs.filter((d) => {
+        if (kindFilter && d.kind !== kindFilter) return false;
+        if (cust && !(d.customer ?? '').toLowerCase().includes(cust)) return false;
+        if (kw && !(`${d.title} ${d.customer ?? ''} ${d.content ?? ''}`.toLowerCase().includes(kw))) return false;
+        return true;
+      }).slice(0, 40);
+      if (!hit.length) return '보관된 문서 중 조건에 맞는 게 없어요.';
+      return hit
+        .map((d) => `- id:${d.id} · ${kindName(d.kind)} · ${d.title}${d.customer ? ` · ${d.customer}` : ''} · ${d.format.toUpperCase()} · ${d.createdAt.slice(0, 10)}`)
+        .join('\n');
+    }
+    case 'get_document': {
+      const d = actions.getDocuments().find((x) => x.id === String(input.id));
+      if (!d) return '해당 id의 문서가 없어요. list_documents로 먼저 찾아 주세요.';
+      if (d.format === 'excel') {
+        return `제목: ${d.title}\n거래처: ${d.customer ?? '-'}\n형식: 엑셀\n머리글: ${(d.headers ?? []).join(' | ')}\n행 수: ${(d.rows ?? []).length}\n(다시 만들려면 이 머리글·행으로 create_file을 쓰세요.)`;
+      }
+      return `제목: ${d.title}\n거래처: ${d.customer ?? '-'}\n형식: ${d.format.toUpperCase()}\n작성일: ${d.createdAt.slice(0, 10)}\n\n${d.content ?? '(내용 없음)'}`;
     }
     case 'update_memory': {
       const patch: { category?: string; content?: string } = {};

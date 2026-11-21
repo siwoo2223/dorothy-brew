@@ -131,8 +131,9 @@ export default function Settings() {
         <Card>
           <Title>내 데이터</Title>
           <Body muted>
-            기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 지출 {state.expenses.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
+            기억 {state.memories.length}개 · 할 일 {state.tasks.length}개 · 문서 {state.documents.length}개 · 지출 {state.expenses.length}개 · 대화 {state.chat.length}개. 모두 이 기기에만 저장되고, 대화할 때만 Claude에 전송돼요.
           </Body>
+          <Button label="📄 내 견적·인보이스 보기" variant="ghost" onPress={() => router.navigate('/documents')} />
           <Button label="🧾 내 지출 기록 보기" variant="ghost" onPress={() => router.navigate('/expenses')} />
           <Button
             label="대화 기록 지우기"
