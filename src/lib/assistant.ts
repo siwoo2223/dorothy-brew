@@ -8,6 +8,7 @@ import * as fx from './fx';
 import * as google from './google';
 import * as inbox from './inbox';
 import { syncCarrierSchedule } from './sailingSync';
+import { planShipment } from './schedulePlan';
 import * as location from './location';
 import * as recordings from './recordings';
 import * as sheets from './sheets';
@@ -127,6 +128,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 부킹/출항 스케줄 사진을 받으면(기나글로벌 등 포워더가 카톡으로 사진으로 보냄), 사진을 꼼꼼히 읽어 배별로 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(보통 부산 또는 인천 → 마닐라 노스포트)·서류마감·반입마감(CY closing)·출항일(ETD)·도착일(ETA)을 표로 깔끔히 정리합니다. 사진에 없는 값은 비워 두고 지어내지 않습니다(날짜·번호를 추측하지 않음). 그런 다음 각 배를 add_sailing으로 출항 스케줄(캘린더/리스트)에 저장합니다(배마다 한 번씩, 날짜는 YYYY-MM-DD, 없는 값은 null). 저장 후 "스케줄에 N척 저장했어요(스케줄 탭에서 캘린더·리스트로 볼 수 있어요). 서류마감·반입마감·출항 하루 전에 자동으로 알려드릴게요"처럼 알립니다 — add_sailing으로 저장하면 각 마감·출항 하루 전 오전 9시에 알림이 자동 예약되므로, 그 알림을 위해 add_task를 또 만들지는 않습니다(사장이 다른 시각 알림을 원하면 그때만 add_task). 여러 배면 가까운 마감부터 정리합니다.
 - 사장이 선사/출항 스케줄을 물으면(예: "이번 주 출항 스케줄", "다음 냉동 항차 언제", "KMTC·HMM·ONE 배 언제", "배 스케줄 보여줘"), 회사가 연결돼 있으면 **먼저 company_schedule로 KF 자체 출항 스케줄(서버 실시간)**을 읽어 항차별 선사·루트·출항일·도착일을 가까운 출항부터 표로 정리합니다 — 이게 KF 실제 스케줄이라 공개 웹보다 정확하고, 서버가 늘 최신으로 자동 갱신됩니다. 특정 항차의 단계·세부는 company_lookup으로 봅니다. KF에 아직 안 올라온 항차나 일반 선사 주기·먼 미래는 그다음 web_search로 보완합니다(아래).
 - "출항 스케줄 최신으로/업데이트/새로고침", "부산→마닐라 선편(eKMTC·ONE·HMM) 자동으로 받아와" 같은 요청이면 sync_sailing_schedule로 PC가 매일 수집해 서버에 쌓아 둔 선편을 도로시 출항 스케줄에 공급·갱신합니다(중복 없이 추가/변경, 마감·출항 알림 자동). 결과(추가/변경 수)를 알리고 스케줄 탭을 안내합니다. 이건 '선사 사이트에서 긁어온 선편'이고, company_schedule은 'KF 자체 확정 항차(DRY/FROZEN/AIR)'라 서로 다릅니다 — 질문이 어느 쪽인지 보고 고릅니다.
+- 사장이 마감·출항일을 주며 "작업 언제까지 해야 돼"를 물으면(예: "12월 2일 마감, 3일 작업", "7일 출항인데 언제까지 작업", "이 항차 일정 잡아줘") plan_shipment_schedule로 출항일/마감에서 거꾸로 주말·한국 공휴일을 빼고 서류마감·반입마감·작업 시작/완료일을 영업일로 역산해 안내합니다. 냉동(리퍼)/드라이 컨테이너를 알면 함께 넣습니다(리퍼는 예냉·전원 때문에 더 일찍). 날짜는 "12월 7일"이면 가까운 미래 연도의 YYYY-MM-DD로 바꿔 넣습니다. 결과에 '건너뛴 공휴일'이 나오면 "공휴일이 맞는지 확인해 주세요"라고 덧붙이고, 사장이 원하면 그 날짜들을 할 일(add_task)·알림으로 등록합니다.
 - (공개 웹 스케줄 보완) KF 서버에 없을 때만, web_search로 무료 스케줄 사이트에서 찾아 정리합니다. 우선 볼 곳: SeaRates(searates.com/schedules), Traqo(traqocontainer.com), Fluent Cargo(fluentcargo.com), 그리고 각 선사 공식 — KMTC(ekmtc.com)·Sinokor(ebiz.sinokor.co.kr)·HMM(hmm21.com)·ONE(one-line.com). 선사·주기·소요일·보이는 출항일을 정리하되, 출처 사이트를 짧게 밝히고, 날짜는 찾은 그대로만 전하며 지어내지 않습니다. 못 찾으면 솔직히 "지금은 못 찾았어요"라고 합니다. 그리고 "무료 사이트는 대략의 선사·주기이고, 정확한 이번 출항·마감은 기나(콜로더)가 주는 스케줄 사진이 제일 정확해요"라고 한 줄 덧붙입니다. 환적(T/S) 서비스면 직항이 아님을 짚어 줍니다.
 - 영수증·결제 사진을 받으면(또는 "이거 지출에 넣어줘"처럼 말하면) 총액·통화(페소/원)·날짜·가게명을 꼼꼼히 읽어 add_expense로 지출 기록에 저장합니다. 사진에 없는 값은 지어내지 말고 null로 둡니다. 저장 후 "○○ ₱N 지출 기록했어요(지출 기록에서 볼 수 있어요)"처럼 한 줄로만 확인합니다. 여러 건이면 각각 저장합니다. 금액 단위(페소/원)가 애매하면 가게·화폐기호(₱/₩)로 판단하고, 그래도 모르면 짧게 한 번 물어봅니다. 지출 합계나 "이번 달 얼마 썼어"를 물으면 저장된 지출 기록으로 통화별·분류별로 정리해 답합니다(회사 회계가 아니라 개인 지출 기록 기준임을 덧붙입니다).
 - 사장이 항공권 요금·스케줄을 물으면(예: "세부→마닐라 11/26 비행기 얼마", "인천발 마닐라 언제 비행기 있어", "PR 필리핀항공 요금", "세부퍼시픽 5J 스케줄"), web_search로 공개된 요금·시간표를 찾아 정리합니다. 우선 볼 곳: Google Flights(google.com/travel/flights), 각 항공사 공식 — 필리핀항공 PAL(philippineairlines.com)·세부퍼시픽 5J(cebupacificair.com)·에어아시아(airasia.com), 그리고 Skyscanner·Kayak. 노선·출발/도착 시각·편명·대략 요금대를 출처와 함께 정리하되, 날짜·시각·요금은 찾은 그대로만 전하고 지어내지 않습니다(없으면 비워 둠). 반드시 한 줄 덧붙입니다: "검색 요금은 대략이고, 실제 결제 금액은 결제수단(내통장결제/카드)·좌석·프로모션에 따라 달라서, 결제 직전 화면 사진을 주시면 정확히 계산해 드려요." 항공사 사이트는 로그인·봇 차단·실시간 변동이 있어 제가 직접 열어 조회·결제는 못 한다고 솔직히 말합니다. 사장이 결제 화면·요금 사진을 주면 그 화면 기준으로 정확히 읽어 계산하고(1인/왕복/인원수), 포함 수하물·환불/변경 조건·결제수단별 차이·트립플렉스 같은 옵션 추가요금을 짚어 주며, 출발일이 가까우면 할 일/일정으로 등록할지 물어봅니다.
@@ -394,6 +396,24 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
         amount: { type: ['number', 'null'], description: '환산할 금액(from 통화). 없으면 null(환율만).' },
       },
       required: ['from', 'to', 'amount'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'plan_shipment_schedule',
+    description:
+      '출항일(ETD) 또는 마감일에서 거꾸로, 주말·한국 공휴일을 빼고 "언제까지 작업·반입·서류를 해야 하는지"를 영업일로 역산해 안내한다. 사장이 "12월 2일 마감, 3일 작업", "7일 출항인데 언제까지 작업해야 돼", "이 항차 작업 일정 잡아줘"처럼 물으면 쓴다. 냉동(리퍼)/드라이 컨테이너 여부도 넣으면 함께 안내한다. ' +
+      '날짜는 YYYY-MM-DD로 변환해 넣고(사장이 "12월 7일"이라 하면 올해/가까운 미래 연도로), 결과를 그대로 보여준 뒤 필요하면 할 일/알림으로 등록할지 묻는다. 결과에 "건너뛴 공휴일"이 보이면 사장이 확인하도록 한 줄 덧붙인다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        etd: { type: ['string', 'null'], description: '출항일 YYYY-MM-DD. 마감만 알면 null.' },
+        cutoff: { type: ['string', 'null'], description: '마감일(반입/작업) YYYY-MM-DD. 출항일만 알면 null.' },
+        work_days: { type: ['integer', 'null'], description: '작업에 걸리는 영업일 수(기본 1).' },
+        container: { type: ['string', 'null'], enum: ['reefer', 'dry', null], description: 'reefer=냉동(리퍼), dry=드라이. 모르면 null.' },
+        extra_holidays: { type: ['array', 'null'], items: { type: 'string' }, description: '추가로 쉬는 날(YYYY-MM-DD)들. 사장이 "그날도 쉬어"라고 하면. 아니면 null.' },
+      },
+      required: ['etd', 'cutoff', 'work_days', 'container', 'extra_holidays'],
       additionalProperties: false,
     },
   },
@@ -1005,6 +1025,16 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       const tail = `(출처 ${source}. 오늘 기준이며 실제 결제일 환율로 달라질 수 있어요.)${chatNote}`;
       if (amount != null) return `${base}\n${fmt(amount)} ${from} = ${fmt(amount * rate)} ${to}\n${tail}`;
       return `${base}\n${tail}`;
+    }
+    case 'plan_shipment_schedule': {
+      const extra = Array.isArray(input.extra_holidays) ? (input.extra_holidays as unknown[]).map(String) : undefined;
+      return planShipment({
+        etd: typeof input.etd === 'string' ? input.etd : undefined,
+        cutoff: typeof input.cutoff === 'string' ? input.cutoff : undefined,
+        workDays: input.work_days != null ? Number(input.work_days) : undefined,
+        container: input.container === 'reefer' || input.container === 'dry' ? input.container : null,
+        extraHolidays: extra,
+      });
     }
     case 'quick_quote': {
       const p = actions.getPricing();
