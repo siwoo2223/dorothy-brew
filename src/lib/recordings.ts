@@ -67,8 +67,15 @@ export async function getCallSummaries(): Promise<CallSummary[]> {
 }
 async function appendSummary(entry: CallSummary) {
   const list = await getCallSummaries();
+  // 같은 녹음(파일명)은 한 번만 저장한다 — 로컬 백업 경로와 드라이브 경로가 겹쳐 같은 통화가
+  // 두 번 요약·저장되던 문제를 막는다.
+  if (list.some((s) => s.name === entry.name)) return;
   list.push(entry);
   await AsyncStorage.setItem(KEYS.summaries, JSON.stringify(list.slice(-200)));
+}
+/** 이미 요약이 저장된 녹음 파일명 집합(두 경로가 중복 처리하지 않게 공유). */
+async function summarizedNames(): Promise<Set<string>> {
+  return new Set((await getCallSummaries()).map((s) => s.name));
 }
 export async function clearCallSummaries() { await AsyncStorage.removeItem(KEYS.summaries); }
 
@@ -182,6 +189,7 @@ export async function backupNow(onProgress?: (p: Progress) => void): Promise<Bac
 
   const res: BackupResult = { total: files.length, uploaded: 0, deleted: 0, skipped: 0, failed: 0, freedBytes: 0, summarized: 0 };
   const wantSummary = cfg.summarize && (await gemini.geminiConfigured());
+  const alreadySummarized = wantSummary ? await summarizedNames() : new Set<string>();
 
   for (let i = 0; i < files.length; i++) {
     const uri = files[i];
@@ -203,13 +211,14 @@ export async function backupNow(onProgress?: (p: Progress) => void): Promise<Bac
 
       // Summarize with Gemini before uploading/deleting, so Dorothy remembers what the call was about.
       // A summary failure never blocks the backup.
-      if (wantSummary && size > 0 && size <= SUMMARIZE_MAX_BYTES) {
+      if (wantSummary && size > 0 && size <= SUMMARIZE_MAX_BYTES && !alreadySummarized.has(name)) {
         try {
           const summary = await summarizeLocalRecording(uri, base64, name);
           await appendSummary({ id: `${Date.now()}-${i}`, name, at: new Date().toISOString(), summary });
+          alreadySummarized.add(name);
           res.summarized++;
         } catch {
-          // leave it; the audio still gets backed up and the user can retry later
+          // leave it; the audio still gets backed up and the Drive backfill pass retries it later.
         }
       }
 
@@ -248,6 +257,15 @@ export async function autoBackupIfDue(): Promise<void> {
   } catch {
     // silent — the Settings card is where errors are shown
   }
+  // 과거·실패한 요약 따라잡기: 드라이브에 올라와 있는데 아직 요약 안 된 녹음을 매번 소량씩 처리한다
+  // (배터리 최적화로 앱이 쉬다가 켜져도 결국 다 요약되게). 이미 요약된 건 건너뛰어 비용이 안 든다.
+  if (cfg.summarize) {
+    try {
+      await summarizeDriveFolder(undefined, 6);
+    } catch {
+      // silent
+    }
+  }
 }
 
 export type DriveSummaryProgress = { index: number; total: number; name: string };
@@ -270,18 +288,20 @@ async function saveDriveSummarized(ids: Set<string>) {
  * summarized with Gemini, and saves them so Dorothy remembers past calls too. Idempotent: a file
  * summarized before is skipped next time.
  */
-export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress) => void): Promise<DriveSummaryResult> {
+export async function summarizeDriveFolder(onProgress?: (p: DriveSummaryProgress) => void, maxFiles = Infinity): Promise<DriveSummaryResult> {
   if (!(await gemini.geminiConfigured())) throw new Error('먼저 Gemini 키를 넣어 주세요 (설정 → 통화 녹음 백업).');
   if (!(await google.driveReady())) throw new Error('먼저 구글을 연결해 주세요.');
   const folderId = await google.ensureDriveFolder(DRIVE_FOLDER);
   const files = await google.listDriveFolderAudio(folderId);
   const done = await loadDriveSummarized();
+  const names = await summarizedNames(); // 로컬 백업 경로가 이미 요약한 건 다시 안 한다(중복·낭비 방지).
   const res: DriveSummaryResult = { total: files.length, summarized: 0, skipped: 0, failed: 0 };
 
   let consecutiveFails = 0;
   for (let i = 0; i < files.length; i++) {
+    if (res.summarized >= maxFiles) break; // 한 번에 처리할 양 제한(자동 백필 때 배터리·시간 고려).
     const f = files[i];
-    if (done.has(f.id)) { res.skipped++; continue; }
+    if (done.has(f.id) || names.has(f.name)) { res.skipped++; done.add(f.id); continue; }
     if (f.size > SUMMARIZE_MAX_BYTES) { res.skipped++; done.add(f.id); continue; }
     onProgress?.({ index: i + 1, total: files.length, name: f.name });
     let tmp: string | null = null;
