@@ -118,3 +118,22 @@ export type ChatTurn = {
   /** 카톡식 답글: 이 메시지가 어떤 말에 대한 답장인지(인용 표시용). */
   replyTo?: { role: 'user' | 'assistant'; text: string };
 };
+
+/** 도로시가 만들어 보관하는 견적서·인보이스 등 문서. 거래처별로 다시 찾아볼 수 있다. */
+export type SavedDoc = {
+  id: string;
+  createdAt: string;
+  /** 문서 종류: 견적서/인보이스/보고서/기타. */
+  kind: 'quote' | 'invoice' | 'report' | 'other';
+  /** 파일 이름/제목. */
+  title: string;
+  /** 거래처·고객 이름(있으면). */
+  customer?: string;
+  /** 파일 형식. */
+  format: 'pdf' | 'word' | 'excel';
+  /** pdf·word 본문(마크다운). 다시 파일로 만들거나 내용을 보여줄 때 쓴다. */
+  content?: string;
+  /** excel 표 머리글·행. */
+  headers?: string[];
+  rows?: string[][];
+};
