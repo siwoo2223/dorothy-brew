@@ -138,6 +138,11 @@ export async function fetchCompanyAttention(): Promise<string> {
   return get({ mode: 'attention' });
 }
 
+/** KF 자체 출항 스케줄(항차 목록): 항차코드·선사(mode)·차수·루트·출항일·도착일 등. 서버가 실시간으로 갱신. */
+export async function fetchCompanyVoyages(): Promise<string> {
+  return get({ mode: 'voyages' });
+}
+
 /**
  * Looks up one entity:
  *  - voyage:   query = voyage code (AIR/FROZEN/DRY + number, e.g. 'FROZEN17')
