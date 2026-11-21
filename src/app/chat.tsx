@@ -50,6 +50,9 @@ import { suggestPrompts } from '../lib/suggest';
 import { companyConfigured, transcribeAudio, VOICE_VOCAB } from '../lib/company';
 import { planData } from '../lib/inbox';
 import { deleteRecording, isOwner } from '../lib/speaker';
+import * as DocumentPicker from 'expo-document-picker';
+
+import { readAttachment, type Attached } from '../lib/fileRead';
 import type { ChatTurn } from '../lib/types';
 import { useStore } from '../lib/store';
 import { useTheme } from '../lib/theme';
@@ -100,6 +103,8 @@ export default function Chat() {
   const emptyPicks = suggestions.slice(0, 5);
   // Photo(s)/screenshot(s) attached to the next message (Claude can read them).
   const [images, setImages] = useState<Img[]>([]);
+  // 파일 첨부(PDF·엑셀·워드·텍스트 등). PDF는 Claude가 직접 읽고, 나머지는 내용을 뽑아 전달.
+  const [files, setFiles] = useState<Attached[]>([]);
   // The phone brain streams its reply; show it as it is written.
   const [streaming, setStreaming] = useState('');
   // 오래된 대화는 화면에서 접어 둔다(두뇌는 요약으로 계속 기억). 탭하면 모두 펼침.
@@ -399,6 +404,29 @@ export default function Chat() {
     }
   };
 
+  /** 📎 파일 첨부: PDF·엑셀·워드·텍스트 등을 골라 읽어 둔다(보내면 도로시가 내용을 본다). */
+  const pickFile = async () => {
+    if (state.model === 'local' || state.model === 'server') {
+      Alert.alert('파일은 Claude 두뇌에서', '설정에서 두뇌를 Claude로 바꾸면 PDF·엑셀·문서를 읽을 수 있어요.');
+      return;
+    }
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true });
+      if (res.canceled || !res.assets?.length) return;
+      const read: Attached[] = [];
+      for (const a of res.assets.slice(0, 5)) {
+        try {
+          read.push(await readAttachment(a.uri, a.name ?? '파일', a.mimeType ?? undefined));
+        } catch (e) {
+          Alert.alert('파일을 읽지 못했어요', `${a.name ?? '파일'}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (read.length) { smooth(); setFiles((prev) => [...prev, ...read].slice(0, 5)); }
+    } catch (e) {
+      Alert.alert('파일 오류', e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const chooseImage = () => {
     if (state.model === 'local' || state.model === 'server') {
       Alert.alert('사진은 Claude 두뇌에서', '설정에서 두뇌를 Claude로 바꾸면 사진을 읽을 수 있어요.');
@@ -415,14 +443,16 @@ export default function Chat() {
   const send = async (text: string, spoken = false, extra?: string) => {
     const message = text.trim();
     const imgs = images;
-    if ((!message && imgs.length === 0) || busy) return;
+    const atts = files;
+    if ((!message && imgs.length === 0 && atts.length === 0) || busy) return;
     if (state.model !== 'local' && !state.apiKey) {
       Alert.alert('API 키 필요', '설정 탭에서 Claude API 키를 먼저 입력해 주세요.');
       return;
     }
     setDraft('');
-    if (imgs.length) smooth();
+    if (imgs.length || atts.length) smooth();
     setImages([]);
+    setFiles([]);
     // 카톡식 답글: 지금 답장 대상이 있으면 가져와 두고 입력칸은 비운다.
     const replCtx = replyTo;
     setReplyTo(null);
@@ -434,16 +464,26 @@ export default function Chat() {
     atBottom.current = true;
     // Snapshot before appending so the new message is not sent twice.
     const snapshot = getState();
-    const label = imgs.length ? `📷${imgs.length > 1 ? `×${imgs.length}` : ''} ${message || '사진'}` : message;
+    const fileTag = atts.length ? `📎${atts.length > 1 ? `×${atts.length}` : ''} ` : '';
+    const imgTag = imgs.length ? `📷${imgs.length > 1 ? `×${imgs.length}` : ''} ` : '';
+    const label = `${imgTag}${fileTag}${message || (imgs.length ? '사진' : atts.length ? atts.map((a) => a.name).join(', ') : '')}`;
     actions.appendChat({ role: 'user', text: label, replyTo: replCtx ?? undefined });
     const voiceReply = spoken || phase.current !== 'off';
     // 답장 대상이 있으면 도로시가 어떤 말에 답하는지 알도록 인용을 앞에 붙인다(화면엔 깔끔한 인용 바로 표시).
     const quoted = replCtx ? `(아래는 ${replCtx.role === 'user' ? '내' : '도로시'} 이전 메시지에 대한 답장이에요 — 인용: "${replCtx.text}")\n\n` : '';
+    // 텍스트로 뽑은 파일(엑셀·워드·txt 등)은 메시지 앞에 내용으로 붙이고, PDF는 문서블록으로 보낸다.
+    const textFiles = atts.filter((a): a is Extract<Attached, { kind: 'text' }> => a.kind === 'text');
+    const pdfFiles = atts.filter((a): a is Extract<Attached, { kind: 'pdf' }> => a.kind === 'pdf');
+    const fileBlock = textFiles.length
+      ? textFiles.map((a) => `<첨부파일 이름="${a.name}">\n${a.text}\n</첨부파일>`).join('\n\n') + '\n\n'
+      : '';
+    const defaultAsk = imgs.length ? '이 사진(들)에서 중요한 내용을 읽어서 정리해 줘.' : atts.length ? '첨부한 파일을 읽고 중요한 내용을 정리해 줘.' : '';
     try {
-      const reply = await chat(quoted + (message || '이 사진(들)에서 중요한 내용을 읽어서 정리해 줘.'), snapshot, actions, {
+      const reply = await chat(quoted + fileBlock + (message || defaultAsk), snapshot, actions, {
         spoken: voiceReply,
         extra,
         images: imgs.length ? imgs.map((i) => ({ base64: i.base64, mediaType: i.mediaType })) : undefined,
+        documents: pdfFiles.length ? pdfFiles.map((p) => ({ name: p.name, base64: p.base64 })) : undefined,
         onToken: (token) => setStreaming((s) => s + token),
         signal: controller.signal,
       });
@@ -502,6 +542,7 @@ export default function Chat() {
     Alert.alert('첨부', '무엇을 보여드릴까요?', [
       { text: '🖼️ 사진 보여주기', onPress: () => chooseImage() },
       { text: '📷 카메라로 찍기', onPress: () => router.push('/camera') },
+      { text: '📎 파일 (PDF·엑셀·문서)', onPress: () => pickFile() },
       { text: '🧾 영수증', onPress: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
       { text: '취소', style: 'cancel' },
     ]);
@@ -667,6 +708,21 @@ export default function Chat() {
           <Text style={{ color: t.subtext, fontSize: 12 }}>사진 {images.length}장 · 전송하면 읽어요</Text>
         </View>
       )}
+      {files.length > 0 && (
+        <View style={[styles.imagePreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
+          <View style={{ flexDirection: 'row', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+            {files.map((f, i) => (
+              <View key={f.name + i} style={[styles.fileChip, { borderColor: t.border, backgroundColor: t.card }]}>
+                <Text style={{ color: t.text, fontSize: 12 }} numberOfLines={1}>{f.kind === 'pdf' ? '📄' : '📑'} {f.name}</Text>
+                <Pressable onPress={() => { tap(); smooth(); setFiles((prev) => prev.filter((_, k) => k !== i)); }} hitSlop={8}>
+                  <Text style={{ color: t.subtext, fontSize: 13, fontWeight: '800' }}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+          <Text style={{ color: t.subtext, fontSize: 12 }}>파일 {files.length}개 · 전송하면 읽어요</Text>
+        </View>
+      )}
       {images.length === 0 && !listening && (
         <View style={[styles.quickRow, { backgroundColor: t.bg }]}>
           {QUICK.map((q) => (
@@ -721,12 +777,12 @@ export default function Chat() {
             <Pressable onPress={stop} accessibilityLabel="정지" style={[styles.round, { backgroundColor: t.danger }]}>
               <View style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' }} />
             </Pressable>
-          ) : draft.trim() || images.length > 0 || !canListen ? (
+          ) : draft.trim() || images.length > 0 || files.length > 0 || !canListen ? (
             <Pressable
               onPress={() => { tap(); send(draft); }}
-              disabled={listening || (!draft.trim() && images.length === 0)}
+              disabled={listening || (!draft.trim() && images.length === 0 && files.length === 0)}
               accessibilityLabel="전송"
-              style={[styles.round, { backgroundColor: t.accent, opacity: listening || (!draft.trim() && images.length === 0) ? 0.4 : 1 }]}
+              style={[styles.round, { backgroundColor: t.accent, opacity: listening || (!draft.trim() && images.length === 0 && files.length === 0) ? 0.4 : 1 }]}
             >
               <Text style={{ color: t.accentText, fontSize: 18, fontWeight: '800', marginTop: -1 }}>↑</Text>
             </Pressable>
@@ -762,6 +818,7 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
   copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 3 },
   olderPill: { alignSelf: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 4 },
+  fileChip: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 220, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 },
   replyPreview: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   composer: { padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
   pill: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, borderWidth: StyleSheet.hairlineWidth, borderRadius: 28, paddingHorizontal: 6, paddingVertical: 5 },

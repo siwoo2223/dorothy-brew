@@ -1045,6 +1045,8 @@ export async function chat(
     extra?: string;
     /** Photo(s)/screenshot(s) the user attached to this turn (Claude can see them; the local model cannot). */
     images?: { base64: string; mediaType: string }[];
+    /** PDF file(s) the user attached this turn — Claude reads them as document blocks. */
+    documents?: { name: string; base64: string }[];
     /** Lets the UI cancel a reply in progress (the ⏹ stop button), like Claude's stop. */
     signal?: AbortSignal;
   } = {},
@@ -1068,6 +1070,11 @@ export async function chat(
         ...(opts.images ?? []).map((img) => ({
           type: 'image' as const,
           source: { type: 'base64' as const, media_type: img.mediaType as 'image/jpeg', data: img.base64 },
+        })),
+        ...(opts.documents ?? []).map((doc) => ({
+          type: 'document' as const,
+          source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: doc.base64 },
+          title: doc.name,
         })),
         { type: 'text', text: clean(userText) },
         ...(opts.extra ? [{ type: 'text' as const, text: clean(opts.extra) }] : []),
