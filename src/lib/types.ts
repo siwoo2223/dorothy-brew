@@ -65,7 +65,17 @@ export type Sailing = {
   etd?: string;
   /** 도착일 ETA(YYYY-MM-DD). */
   eta?: string;
+  /** 선박명(e.g. "SAWASDEE SUNRISE"). 자동 수집분에서 채워진다. */
+  vessel?: string;
+  /** 서비스 레인(e.g. "JPH"). */
+  service?: string;
+  /** 소요일(부산→마닐라). 직항 3일 vs 환적 13일처럼 핵심 비교값. */
+  transitDays?: number;
+  /** 환적(T/S)이면 true, 직항(Direct)이면 false. */
+  transship?: boolean;
   note?: string;
+  /** 어디서 왔는지: 'auto'=선사 사이트 자동 수집, 'manual'=사진/직접 등록. */
+  source?: 'auto' | 'manual';
   /** Local-notification ids for the auto reminders (day before cutoffs/ETD), so they can be cancelled. */
   reminderIds?: string[];
   createdAt: string;

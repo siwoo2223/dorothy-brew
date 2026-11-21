@@ -1,8 +1,10 @@
-import { useNavigation } from 'expo-router';
-import { useLayoutEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from 'expo-router';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Card } from '../components/ui';
+import { companyConfigured } from '../lib/company';
+import { syncCarrierSchedule } from '../lib/sailingSync';
 import { useStore } from '../lib/store';
 import type { Sailing } from '../lib/types';
 import { useTheme } from '../lib/theme';
@@ -22,10 +24,40 @@ export default function Schedule() {
   const [mode, setMode] = useState<'list' | 'calendar'>('list');
   const [cursor, setCursor] = useState(() => new Date());
   const [selected, setSelected] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const lastSync = useRef(0);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: '출항 스케줄' });
   }, [navigation]);
+
+  const doSync = useCallback(async (silent: boolean) => {
+    if (!companyConfigured() || syncing) return;
+    setSyncing(true);
+    try {
+      const r = await syncCarrierSchedule(actions);
+      lastSync.current = Date.now();
+      if (!silent) {
+        Alert.alert(
+          '선사 스케줄 갱신',
+          r.total === 0
+            ? '서버에 아직 자동 수집된 선편이 없어요. (PC 수집이 아직 안 돌았을 수 있어요)'
+            : `새로 ${r.added}건 · 변경 ${r.updated}건 반영했어요 (총 ${r.total}건 확인).`,
+        );
+      }
+    } catch (e) {
+      if (!silent) Alert.alert('갱신 실패', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [actions, syncing]);
+
+  // 화면에 들어올 때 자동 동기화(10분에 한 번까지). 서버가 매일 수집해 둔 최신 선편을 조용히 받아 온다.
+  useFocusEffect(
+    useCallback(() => {
+      if (companyConfigured() && Date.now() - lastSync.current > 10 * 60 * 1000) doSync(true);
+    }, [doSync]),
+  );
 
   // Group sailings by their primary date (YYYY-MM-DD).
   const byDate = useMemo(() => {
@@ -49,23 +81,30 @@ export default function Schedule() {
       { text: '삭제', style: 'destructive', onPress: () => actions.deleteSailing(s.id) },
     ]);
 
-  const Toggle = (
-    <View style={[styles.toggle, { borderColor: t.border }]}>
-      {(['list', 'calendar'] as const).map((m) => (
-        <Pressable key={m} onPress={() => setMode(m)} style={[styles.toggleBtn, mode === m && { backgroundColor: t.accent }]}>
-          <Text style={{ color: mode === m ? t.accentText : t.text, fontWeight: '700', fontSize: 13 }}>{m === 'list' ? '📋 리스트' : '📅 캘린더'}</Text>
+  const Header = (
+    <View style={styles.headerRow}>
+      <View style={[styles.toggle, { borderColor: t.border }]}>
+        {(['list', 'calendar'] as const).map((m) => (
+          <Pressable key={m} onPress={() => setMode(m)} style={[styles.toggleBtn, mode === m && { backgroundColor: t.accent }]}>
+            <Text style={{ color: mode === m ? t.accentText : t.text, fontWeight: '700', fontSize: 13 }}>{m === 'list' ? '📋 리스트' : '📅 캘린더'}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {companyConfigured() && (
+        <Pressable onPress={() => doSync(false)} disabled={syncing} style={[styles.refresh, { borderColor: t.border, backgroundColor: t.card }]}>
+          {syncing ? <ActivityIndicator size="small" color={t.accent} /> : <Text style={{ color: t.accent, fontSize: 13, fontWeight: '700' }}>🔄 선사 새로고침</Text>}
         </Pressable>
-      ))}
+      )}
     </View>
   );
 
   if (sailings.length === 0) {
     return (
       <ScrollView contentContainerStyle={styles.container}>
-        {Toggle}
+        {Header}
         <Card>
           <Body muted>
-            아직 저장된 출항 스케줄이 없어요. 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 선사·항차·마감·출항일을 읽어 여기에 저장해요.
+            아직 저장된 출항 스케줄이 없어요. 위 **🔄 선사 새로고침**을 누르면 서버에 매일 자동 수집된 부산→마닐라 선편을 불러와요. 또는 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 선사·항차·마감·출항일을 읽어 여기에 저장해요.
           </Body>
         </Card>
       </ScrollView>
@@ -74,7 +113,7 @@ export default function Schedule() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {Toggle}
+      {Header}
       {mode === 'list' ? (
         sortedList.map((s) => <SailingCard key={s.id} s={s} t={t} onDelete={() => remove(s)} />)
       ) : (
@@ -94,11 +133,17 @@ function SailingCard({ s, t, onDelete }: { s: Sailing; t: ReturnType<typeof useT
   return (
     <View style={[styles.sail, { backgroundColor: t.card, borderColor: t.border }]}>
       <View style={styles.sailTop}>
-        <Text style={{ color: t.text, fontSize: 16, fontWeight: '800' }}>
-          {s.carrier}{s.voyageNo ? ` · ${s.voyageNo}` : ''}
-        </Text>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Text style={{ color: t.text, fontSize: 16, fontWeight: '800' }}>
+            {s.carrier}{s.voyageNo ? ` · ${s.voyageNo}` : ''}
+          </Text>
+          {s.transship === false && <Badge text="직항" bg="#2E7D5B" />}
+          {s.transship === true && <Badge text="환적" bg="#C9792E" />}
+          {s.source === 'auto' && <Badge text="자동" bg={t.border} fg={t.subtext} />}
+        </View>
         <Pressable onPress={onDelete} hitSlop={8}><Text style={{ color: t.subtext, fontSize: 18 }}>×</Text></Pressable>
       </View>
+      {!!s.vessel && <Text style={{ color: t.text, fontSize: 13 }}>🚢 {s.vessel}{s.service ? ` · ${s.service}` : ''}{s.transitDays != null ? ` · ${s.transitDays}일` : ''}</Text>}
       {(s.from || s.to) && <Text style={{ color: t.text, fontSize: 14 }}>{[s.from, s.to].filter(Boolean).join(' → ')}</Text>}
       <View style={styles.tags}>
         {tag('서류마감', s.docCutoff, true)}
@@ -107,6 +152,14 @@ function SailingCard({ s, t, onDelete }: { s: Sailing; t: ReturnType<typeof useT
         {tag('도착', s.eta)}
       </View>
       {!!s.note && <Text style={{ color: t.subtext, fontSize: 12 }}>{s.note}</Text>}
+    </View>
+  );
+}
+
+function Badge({ text, bg, fg = '#fff' }: { text: string; bg: string; fg?: string }) {
+  return (
+    <View style={{ backgroundColor: bg, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+      <Text style={{ color: fg, fontSize: 10, fontWeight: '800' }}>{text}</Text>
     </View>
   );
 }
@@ -175,7 +228,9 @@ function CalendarView({
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 10 },
-  toggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, padding: 3, alignSelf: 'center', gap: 3 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' },
+  refresh: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, minWidth: 110, alignItems: 'center' },
+  toggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, padding: 3, gap: 3 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 11 },
   sail: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 5 },
   sailTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
