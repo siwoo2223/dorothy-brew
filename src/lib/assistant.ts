@@ -105,7 +105,8 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
   (4) 구조는 맨 위 요약표(한눈에 보이게) + 항목별 내역표(항목·기준·공급가액·부가세·합계) + 유의사항 순으로, 마크다운 표(| 열 | 줄)로 또렷하게 씁니다. 숫자는 천단위 콤마(예: 6,185,000), 통화기호(₩·₱)를 붙입니다. 첨부 견적서에 유의사항이 있으면 그대로 반영합니다.
   (5) "영어로" 하면 금액·구조·조건은 그대로 두고 용어만 영어로 번역합니다(예: 해상운임=Ocean freight, 면장=Export declaration, 공급가액=Amount(VAT excl.), 부가세=VAT, 합계=Total(VAT incl.), 불라칸 배송=Bulacan delivery).
   (6) 첨부한 견적서/문서를 바탕으로 만들 때는 그 내용을 충실히 반영하고, 사장이 바꾼 조건(부가세율·통화·정기여부·언어)만 반영합니다.
-  (7) 견적서·인보이스를 만들 땐 create_file에 kind(quote/invoice)와 customer(거래처)를 꼭 넣어 보관함에 저장되게 합니다. 사장이 "지난 ○○ 견적/인보이스 뭐였지?", "킹스푸드 견적 보여줘", "이번 달 만든 견적 목록"처럼 물으면 list_documents로 찾고, 특정 문서 내용을 보거나 조건만 바꿔 다시 만들려면 get_document로 내용을 가져와 활용합니다. "그거 영어로/페소로/정기로 다시 만들어 줘"처럼 지난 문서를 변형해 달라고 하면, get_document로 원본 내용을 가져와 바뀐 조건만 반영해 create_file로 새로 만듭니다(보관함에도 새로 저장).
+  (7) 사장이 "세부 20CBM 화장품 견적", "마닐라 15CBM 정기로 얼마"처럼 한마디로 즉석 견적을 물으면 quick_quote 도구로 저장된 표준 단가로 바로 계산해 표로 보여 줍니다(직접 암산하지 말고 도구를 씁니다). 물량(CBM)만 필수이고, 중량·정기여부·부가세방식이 없으면 합리적 기본값(일회성·한국 10%)으로 내되 "정기로 하면/중량 주시면 더 정확히"처럼 한 줄 덧붙입니다. 결과를 보여준 뒤 "견적서 파일로 만들까요? 거래처 이름 주시면 보관함에도 저장할게요"라고 묻고, 사장이 원하면 create_file(kind=quote, customer)로 만들어 보관합니다.
+  (8) 견적서·인보이스를 만들 땐 create_file에 kind(quote/invoice)와 customer(거래처)를 꼭 넣어 보관함에 저장되게 합니다. 사장이 "지난 ○○ 견적/인보이스 뭐였지?", "킹스푸드 견적 보여줘", "이번 달 만든 견적 목록"처럼 물으면 list_documents로 찾고, 특정 문서 내용을 보거나 조건만 바꿔 다시 만들려면 get_document로 내용을 가져와 활용합니다. "그거 영어로/페소로/정기로 다시 만들어 줘"처럼 지난 문서를 변형해 달라고 하면, get_document로 원본 내용을 가져와 바뀐 조건만 반영해 create_file로 새로 만듭니다(보관함에도 새로 저장).
 - 사용자가 "그림 그려 줘·이미지/로고/포스터 만들어 줘"처럼 새 그림을 원하면 generate_image 도구로 AI 그림을 만들고(회사 서버 Gemini 사용), 받은 파일 경로를 그대로 \`\`\`image 블록에 넣어 보여 줍니다. prompt는 그릴 내용을 구체적으로(화풍·색·구도·분위기) 적습니다. 실패하면 솔직히 알리고 다른 표현을 제안합니다. 회사 서버가 연결돼 있어야 쓸 수 있습니다.
 - 사장이 상대에게 보낼 메시지(답장·안내·공지)를 "카톡으로 보내줘/전달해줘/보내"라고 하면, 보낼 문구를 한국어로 깔끔하게 완성한 뒤 보냅니다. 방법은 두 가지입니다: (1) 기본은 share_message로 공유창을 열어 사장이 카톡에서 방을 골라 한 번 눌러 보냅니다(모든 방 가능, 안전). (2) 상대가 방금 보낸 메시지의 알림이 떠 있는 방이고 사장이 "그 사람/방에 답장 보내줘"처럼 분명히 말하면 send_kakao_reply로 바로 보낼 수 있습니다(먼저 list_repliable_rooms로 가능한지 확인). 단 전송은 되돌릴 수 없으니, 사장이 보낼 내용을 직접 불러줬으면(예: 한아름마트한테 '네 확인했습니다' 보내줘) 바로 보내고 "○○에 보냈어요"라고 확인하며, 내가 문구를 새로 지어야 하면 먼저 "이렇게 보낼게요: …"로 보여주고 동의를 받은 뒤 보냅니다. 카톡은 앱이 임의로 자동 전송하는 것을 막아 두어서, 알림이 떠 있는 방이 아니면 share_message(공유창)로만 보낼 수 있다고 솔직히 안내합니다. send_kakao_reply가 실패하면 share_message로 대신 보냅니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
@@ -373,6 +374,27 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       type: 'object',
       properties: { id: { type: 'string', description: '문서 id(list_documents 결과).' } },
       required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'quick_quote',
+    description:
+      '사장이 "세부 20CBM 화장품 견적", "마닐라 15CBM 드라이 정기로 얼마" 처럼 한마디로 견적을 물으면, 저장된 표준 단가로 즉석 견적을 계산한다(설정 → 요율에서 사장이 저장). W/M(CBM·kg 중 큰 값)·면장·픽업·현지배송·부가세까지 정확히 계산해 표로 돌려준다. ' +
+      '중량(kg)을 모르면 비워 두면 CBM 기준으로 내고 "실제 총중량으로 최종확정" 안내가 붙는다. 결과를 사장에게 보여준 뒤, 원하면 create_file로 견적서 파일을 만들고(kind=quote, customer 포함) 보관함에 저장한다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cbm: { type: 'number', description: '물량(CBM).' },
+        kg: { type: ['number', 'null'], description: '총중량(kg). 모르면 null.' },
+        item: { type: ['string', 'null'], description: '품목(화장품·드라이 등). 모르면 null.' },
+        destination: { type: ['string', 'null'], description: '도착지(세부·마닐라·불라칸 등). 모르면 null.' },
+        recurring: { type: 'boolean', description: '정기 물량 단가면 true, 일회성이면 false.' },
+        vat_mode: { type: 'string', enum: ['korea', 'ph', 'none'], description: 'korea=한국 지출(한국비용 한국세율·현지 12%), ph=전부 필리핀 지출(전 항목 12%), none=부가세 제외.' },
+        ph_delivery_override: { type: ['number', 'null'], description: '현지 배송비(페소)를 이번만 다르게 쓸 때. 아니면 null(저장값 사용).' },
+        customer: { type: ['string', 'null'], description: '거래처 이름(있으면).' },
+      },
+      required: ['cbm', 'kg', 'item', 'destination', 'recurring', 'vat_mode', 'ph_delivery_override', 'customer'],
       additionalProperties: false,
     },
   },
@@ -815,6 +837,17 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
     `회신·부탁 대기 (${openFollowups.length}개):\n${openFollowups.map((f) => `- [${f.id}] ${f.who} — ${f.what}${f.source ? ` (${f.source})` : ''}`).join('\n') || '(없음)'}`,
     `반복 알림 (${(routines ?? []).length}개):\n${(routines ?? []).map(routineLine).join('\n') || '(없음)'}`,
     recentlyDone.length ? `최근 완료한 일:\n${recentlyDone.map(taskLine).join('\n')}` : '',
+    (() => {
+      const p = state.pricing;
+      if (!p) return '';
+      return (
+        `표준 견적 단가(즉석 견적용 — 정확한 계산은 quick_quote 도구를 쓰고, 이 값은 참고용):\n` +
+        `- 해상운임 W/M(둘 중 큰 값): 일회성 CBM당 ₩${p.cbmOnce.toLocaleString('en-US')} / kg당 ₩${p.kgOnce.toLocaleString('en-US')}, 정기 CBM당 ₩${p.cbmRegular.toLocaleString('en-US')} / kg당 ₩${p.kgRegular.toLocaleString('en-US')}\n` +
+        `- 면장 ₩${p.exportDecl.toLocaleString('en-US')}, 한국 픽업 ₩${p.koreaPickup.toLocaleString('en-US')}, 현지 배송 기본 ₱${p.phDelivery.toLocaleString('en-US')}\n` +
+        `- 부가세: 한국 ${p.vatKoreaPct}%, 필리핀 ${p.vatPhPct}%` +
+        (p.note ? `\n- 메모: ${p.note}` : '')
+      );
+    })(),
   ]
     .filter(Boolean)
     .join('\n\n'));
@@ -904,6 +937,49 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       return hit
         .map((d) => `- id:${d.id} · ${kindName(d.kind)} · ${d.title}${d.customer ? ` · ${d.customer}` : ''} · ${d.format.toUpperCase()} · ${d.createdAt.slice(0, 10)}`)
         .join('\n');
+    }
+    case 'quick_quote': {
+      const p = actions.getPricing();
+      const won = (n: number) => '₩' + Math.round(n).toLocaleString('en-US');
+      const peso = (n: number) => '₱' + Math.round(n).toLocaleString('en-US');
+      const cbm = Math.max(0, Number(input.cbm) || 0);
+      const kg = input.kg != null && Number.isFinite(Number(input.kg)) ? Number(input.kg) : null;
+      const recurring = !!input.recurring;
+      const vatMode = ['korea', 'ph', 'none'].includes(String(input.vat_mode)) ? String(input.vat_mode) : 'korea';
+      const phDelivery = input.ph_delivery_override != null && Number.isFinite(Number(input.ph_delivery_override)) ? Number(input.ph_delivery_override) : p.phDelivery;
+      const rateCbm = recurring ? p.cbmRegular : p.cbmOnce;
+      const rateKg = recurring ? p.kgRegular : p.kgOnce;
+      const byCbm = cbm * rateCbm;
+      const byKg = kg != null ? kg * rateKg : 0;
+      const freight = Math.max(byCbm, byKg);
+      const basis = kg != null && byKg > byCbm ? `kg 기준(${kg.toLocaleString('en-US')}kg × ${won(rateKg)})` : `CBM 기준(${cbm} × ${won(rateCbm)})`;
+      const koreaSupply = freight + p.exportDecl + p.koreaPickup;
+      const koreaVatPct = vatMode === 'none' ? 0 : vatMode === 'ph' ? p.vatPhPct : p.vatKoreaPct;
+      const phVatPct = vatMode === 'none' ? 0 : p.vatPhPct;
+      const koreaVat = koreaSupply * koreaVatPct / 100;
+      const phVat = phDelivery * phVatPct / 100;
+      const dest = typeof input.destination === 'string' && input.destination.trim() ? input.destination.trim() : '필리핀';
+      const item = typeof input.item === 'string' && input.item.trim() ? input.item.trim() : '';
+      const lines = [
+        `⚡ 즉석 견적 — 서울 → ${dest}${item ? ` · ${item}` : ''}`,
+        `물량 ${cbm} CBM${kg != null ? ` · 중량 ${kg.toLocaleString('en-US')}kg` : ' (중량 미정)'} · ${recurring ? '정기 단가' : '일회성 단가'}`,
+        '',
+        `[한국 구간 · 부가세 ${koreaVatPct}%]`,
+        `| 항목 | 공급가 | 부가세 | 합계 |`,
+        `| --- | --- | --- | --- |`,
+        `| 해상운임 (${basis}) | ${won(freight)} | ${won(freight * koreaVatPct / 100)} | ${won(freight * (1 + koreaVatPct / 100))} |`,
+        `| 면장 | ${won(p.exportDecl)} | ${won(p.exportDecl * koreaVatPct / 100)} | ${won(p.exportDecl * (1 + koreaVatPct / 100))} |`,
+        `| 한국 픽업 | ${won(p.koreaPickup)} | ${won(p.koreaPickup * koreaVatPct / 100)} | ${won(p.koreaPickup * (1 + koreaVatPct / 100))} |`,
+        `| **한국 합계** | **${won(koreaSupply)}** | **${won(koreaVat)}** | **${won(koreaSupply + koreaVat)}** |`,
+        '',
+        `[필리핀 구간 · 부가세 ${phVatPct}%]`,
+        `| 항목 | 공급가 | 부가세 | 합계 |`,
+        `| --- | --- | --- | --- |`,
+        `| 현지 배송 (${dest}) | ${peso(phDelivery)} | ${peso(phVat)} | ${peso(phDelivery + phVat)} |`,
+        '',
+        kg == null ? '※ 중량 미정 — CBM 기준 추정이며, 실제 총중량(gross weight)으로 최종 확정됩니다(W/M: CBM·kg 중 큰 값).' : '※ W/M: CBM 기준과 kg 기준 중 큰 값으로 계산했습니다.',
+      ];
+      return lines.join('\n') + '\n\n(이대로 견적서 파일로 만들까요? 거래처 이름을 주시면 보관함에도 저장할게요.)';
     }
     case 'get_document': {
       const d = actions.getDocuments().find((x) => x.id === String(input.id));
