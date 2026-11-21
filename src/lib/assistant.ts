@@ -7,6 +7,7 @@ import * as contacts from './contacts';
 import * as fx from './fx';
 import * as google from './google';
 import * as inbox from './inbox';
+import { syncCarrierSchedule } from './sailingSync';
 import * as location from './location';
 import * as recordings from './recordings';
 import * as sheets from './sheets';
@@ -125,6 +126,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 회사(KF LOGISTICS)의 전체 운영 현황(합계·상태별 건수·매출·수지 등)을 물으면 company_report로 서버에서 최신 수치를 읽어 답합니다. 특정 항차가 "어디까지 왔는지/어느 단계인지", 특정 고객 현황, 특정 조회번호 화물의 위치를 물으면 company_lookup으로 그 하나를 조회합니다(항차는 냉동=FROZEN·드라이=DRY·항공=AIR로 코드를 만들어 넣습니다. 예: "17차 냉동"→FROZEN17). 특정 화물의 영수증·견적 금액이 얼마인지, 미수금이 얼마인지 물으면 company_quote(조회번호)로 실제 영수증과 같은 계산 결과를 읽어 총액·계산 근거(중량/CBM 어느 쪽으로 적용됐는지)·미수금을 전합니다(단가 미설정이면 그렇게 안내). "이번 달 출항 화물 전부", "배송중 목록", "특정 고객 화물 다", "DRY35 화물 목록"처럼 화물을 조건으로 여러 건 보려 하면 company_shipments(status·code·q·from·to·page)로 목록을 가져와, 각 건의 조회번호·고객·품목·부피(cbm)·중량(weight_kg)·상태·날짜를 정리합니다(50건씩, 많으면 조건을 좁히거나 page를 넘깁니다). 박스 개수를 세거나 합칠 때는 품목 줄(행) 수가 아니라 각 줄의 수량(qty) 합계로 셉니다 — 입고 박스번호가 범위(예: "113-59~60"=2박스, "113-107~116"=10박스)로 묶여 있어 한 줄이 여러 박스일 수 있기 때문입니다. "몇 박스"를 물으면 수량 합계로 답하고, 품목 가짓수(줄 수)와 혼동하지 않습니다. 수량 합계와 품목 줄 수가 다르면 "박스 N개(품목 M줄)"처럼 둘 다 짚어 줍니다. 사장이 "오늘 뭐부터 해야 해/이번 주 출항·입항 뭐 있어/오래 멈춘 화물 있어"처럼 오늘 챙길 일을 물으면 company_attention으로 가져와, 급한 것부터 짧게 정리합니다. 사장이 "나 보통 언제 바빠/내 업무 패턴/요즘 뭐 많이 해/무슨 요일이 바빠"처럼 자기 업무 리듬을 물으면 company_pattern으로 활동 기록을 분석해, 주 활동 시간대·바쁜 요일·주로 하는 일을 짧게 전합니다(서버 시계 기준이고 전화·카톡 등 시스템 밖 활동은 빠졌다고 덧붙입니다). 위 전용 도구로 답이 안 나오는 "그 외 사이트 데이터"(지출·비용·정산, 급여, 창고·재고, 무역, 고객 상세·연락처·거래이력, 입고 상세 등)를 물으면, company_tables로 어떤 표가 있는지 보고 → company_columns로 그 표의 열을 확인한 뒤 → company_rows로 실제 값을 읽어 답합니다(읽기 전용, 사이트 전체를 볼 수 있음). 표 이름이 애매하면 먼저 company_tables로 후보를 찾고, 날짜/번호가 있으면 order로 최신순 정렬하거나 q로 검색합니다. 비밀번호·토큰 같은 민감 정보는 서버가 막아 둬서 안 보입니다. 숫자·날짜는 받은 그대로 전하고 지어내지 않으며, 금액 단위가 불분명하면 단위를 단정하지 말고 "서버 값 기준"이라고 덧붙입니다. 특정 화물의 입고 사진을 보고 싶어 하면 company_photos(조회번호)로 사진 URL을 가져와, 답변에 \`\`\`image 블록으로 넣어 앱이 사진을 띄우게 합니다(형식: {"urls":["받은 url","..."],"caption":"무슨 사진인지"}). url 은 받은 그대로만 쓰고, 사진이 없으면 없다고 말합니다. 이 모든 회사 자료는 조회 전용이라 회사 데이터를 바꾸지는 못합니다.
 - 부킹/출항 스케줄 사진을 받으면(기나글로벌 등 포워더가 카톡으로 사진으로 보냄), 사진을 꼼꼼히 읽어 배별로 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(보통 부산 또는 인천 → 마닐라 노스포트)·서류마감·반입마감(CY closing)·출항일(ETD)·도착일(ETA)을 표로 깔끔히 정리합니다. 사진에 없는 값은 비워 두고 지어내지 않습니다(날짜·번호를 추측하지 않음). 그런 다음 각 배를 add_sailing으로 출항 스케줄(캘린더/리스트)에 저장합니다(배마다 한 번씩, 날짜는 YYYY-MM-DD, 없는 값은 null). 저장 후 "스케줄에 N척 저장했어요(스케줄 탭에서 캘린더·리스트로 볼 수 있어요). 서류마감·반입마감·출항 하루 전에 자동으로 알려드릴게요"처럼 알립니다 — add_sailing으로 저장하면 각 마감·출항 하루 전 오전 9시에 알림이 자동 예약되므로, 그 알림을 위해 add_task를 또 만들지는 않습니다(사장이 다른 시각 알림을 원하면 그때만 add_task). 여러 배면 가까운 마감부터 정리합니다.
 - 사장이 선사/출항 스케줄을 물으면(예: "이번 주 출항 스케줄", "다음 냉동 항차 언제", "KMTC·HMM·ONE 배 언제", "배 스케줄 보여줘"), 회사가 연결돼 있으면 **먼저 company_schedule로 KF 자체 출항 스케줄(서버 실시간)**을 읽어 항차별 선사·루트·출항일·도착일을 가까운 출항부터 표로 정리합니다 — 이게 KF 실제 스케줄이라 공개 웹보다 정확하고, 서버가 늘 최신으로 자동 갱신됩니다. 특정 항차의 단계·세부는 company_lookup으로 봅니다. KF에 아직 안 올라온 항차나 일반 선사 주기·먼 미래는 그다음 web_search로 보완합니다(아래).
+- "출항 스케줄 최신으로/업데이트/새로고침", "부산→마닐라 선편(eKMTC·ONE·HMM) 자동으로 받아와" 같은 요청이면 sync_sailing_schedule로 PC가 매일 수집해 서버에 쌓아 둔 선편을 도로시 출항 스케줄에 공급·갱신합니다(중복 없이 추가/변경, 마감·출항 알림 자동). 결과(추가/변경 수)를 알리고 스케줄 탭을 안내합니다. 이건 '선사 사이트에서 긁어온 선편'이고, company_schedule은 'KF 자체 확정 항차(DRY/FROZEN/AIR)'라 서로 다릅니다 — 질문이 어느 쪽인지 보고 고릅니다.
 - (공개 웹 스케줄 보완) KF 서버에 없을 때만, web_search로 무료 스케줄 사이트에서 찾아 정리합니다. 우선 볼 곳: SeaRates(searates.com/schedules), Traqo(traqocontainer.com), Fluent Cargo(fluentcargo.com), 그리고 각 선사 공식 — KMTC(ekmtc.com)·Sinokor(ebiz.sinokor.co.kr)·HMM(hmm21.com)·ONE(one-line.com). 선사·주기·소요일·보이는 출항일을 정리하되, 출처 사이트를 짧게 밝히고, 날짜는 찾은 그대로만 전하며 지어내지 않습니다. 못 찾으면 솔직히 "지금은 못 찾았어요"라고 합니다. 그리고 "무료 사이트는 대략의 선사·주기이고, 정확한 이번 출항·마감은 기나(콜로더)가 주는 스케줄 사진이 제일 정확해요"라고 한 줄 덧붙입니다. 환적(T/S) 서비스면 직항이 아님을 짚어 줍니다.
 - 영수증·결제 사진을 받으면(또는 "이거 지출에 넣어줘"처럼 말하면) 총액·통화(페소/원)·날짜·가게명을 꼼꼼히 읽어 add_expense로 지출 기록에 저장합니다. 사진에 없는 값은 지어내지 말고 null로 둡니다. 저장 후 "○○ ₱N 지출 기록했어요(지출 기록에서 볼 수 있어요)"처럼 한 줄로만 확인합니다. 여러 건이면 각각 저장합니다. 금액 단위(페소/원)가 애매하면 가게·화폐기호(₱/₩)로 판단하고, 그래도 모르면 짧게 한 번 물어봅니다. 지출 합계나 "이번 달 얼마 썼어"를 물으면 저장된 지출 기록으로 통화별·분류별로 정리해 답합니다(회사 회계가 아니라 개인 지출 기록 기준임을 덧붙입니다).
 - 사장이 항공권 요금·스케줄을 물으면(예: "세부→마닐라 11/26 비행기 얼마", "인천발 마닐라 언제 비행기 있어", "PR 필리핀항공 요금", "세부퍼시픽 5J 스케줄"), web_search로 공개된 요금·시간표를 찾아 정리합니다. 우선 볼 곳: Google Flights(google.com/travel/flights), 각 항공사 공식 — 필리핀항공 PAL(philippineairlines.com)·세부퍼시픽 5J(cebupacificair.com)·에어아시아(airasia.com), 그리고 Skyscanner·Kayak. 노선·출발/도착 시각·편명·대략 요금대를 출처와 함께 정리하되, 날짜·시각·요금은 찾은 그대로만 전하고 지어내지 않습니다(없으면 비워 둠). 반드시 한 줄 덧붙입니다: "검색 요금은 대략이고, 실제 결제 금액은 결제수단(내통장결제/카드)·좌석·프로모션에 따라 달라서, 결제 직전 화면 사진을 주시면 정확히 계산해 드려요." 항공사 사이트는 로그인·봇 차단·실시간 변동이 있어 제가 직접 열어 조회·결제는 못 한다고 솔직히 말합니다. 사장이 결제 화면·요금 사진을 주면 그 화면 기준으로 정확히 읽어 계산하고(1인/왕복/인원수), 포함 수하물·환불/변경 조건·결제수단별 차이·트립플렉스 같은 옵션 추가요금을 짚어 주며, 출발일이 가까우면 할 일/일정으로 등록할지 물어봅니다.
@@ -592,6 +594,14 @@ const COMPANY_ATTENTION_TOOL: Anthropic.Beta.BetaToolUnion = {
 };
 
 /** Added with company_report. KF's own sailing schedule (voyages list) from the server — always live. */
+/** Pulls the auto-collected carrier sailings from the server into the 출항 스케줄 (with reminders). */
+const SYNC_SAILINGS_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'sync_sailing_schedule',
+  description:
+    '선사 사이트에서 매일 자동 수집돼 회사 서버에 쌓인 부산→마닐라 선편(eKMTC·ONE·HMM)을 읽어 도로시의 "출항 스케줄"로 공급·갱신한다. "출항 스케줄 업데이트해줘/최신으로 갱신/배 스케줄 새로고침" 같은 요청에 쓴다. 중복 없이(선사+항차 기준) 추가/갱신하고, 마감·출항 하루 전 알림도 자동 예약된다. 결과(추가/갱신 수)를 한 줄로 알리고, 스케줄 탭에서 볼 수 있다고 안내한다.',
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
 const COMPANY_SCHEDULE_TOOL: Anthropic.Beta.BetaToolUnion = {
   name: 'company_schedule',
   description:
@@ -1194,6 +1204,11 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       return await company.fetchCompanyAttention();
     case 'company_schedule':
       return await company.fetchCompanyVoyages();
+    case 'sync_sailing_schedule': {
+      const r = await syncCarrierSchedule(actions);
+      if (r.total === 0) return '서버에 아직 자동 수집된 선편이 없어요(PC 수집이 아직 안 돌았거나 테이블이 비었어요). 나중에 다시 시도해 주세요.';
+      return `출항 스케줄을 갱신했어요 — 새로 ${r.added}건, 변경 ${r.updated}건 반영(총 ${r.total}건 확인). 스케줄 탭에서 보실 수 있고, 마감·출항 하루 전 알림도 예약돼요.`;
+    }
     case 'company_lookup':
       return await company.fetchCompanyLookup(
         input.type as 'voyage' | 'customer' | 'tracking',
@@ -1366,7 +1381,7 @@ export async function chat(
     ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
     ...(phone.sms ? [SMS_TOOL] : []),
     ...(contactsOn ? [CONTACTS_TOOL] : []),
-    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_SCHEDULE_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_QUOTE_TOOL, COMPANY_SHIPMENTS_TOOL, COMPANY_PATTERN_TOOL, COMPANY_TABLES_TOOL, COMPANY_COLUMNS_TOOL, COMPANY_ROWS_TOOL, COMPANY_PHOTOS_TOOL, GENERATE_IMAGE_TOOL] : []),
+    ...(company.companyConfigured() ? [COMPANY_TOOL, COMPANY_ATTENTION_TOOL, COMPANY_SCHEDULE_TOOL, SYNC_SAILINGS_TOOL, COMPANY_LOOKUP_TOOL, COMPANY_QUOTE_TOOL, COMPANY_SHIPMENTS_TOOL, COMPANY_PATTERN_TOOL, COMPANY_TABLES_TOOL, COMPANY_COLUMNS_TOOL, COMPANY_ROWS_TOOL, COMPANY_PHOTOS_TOOL, GENERATE_IMAGE_TOOL] : []),
     CALL_SUMMARY_TOOL,
   ];
   const system: Anthropic.Beta.BetaTextBlockParam[] = [

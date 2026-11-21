@@ -162,6 +162,28 @@ const initialState: AppState = {
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+/** 서류마감·반입마감·출항일 '하루 전 오전 9시' 로컬 알림을 예약하고 그 id들을 돌려준다(지난 날짜는 건너뜀). */
+async function scheduleSailingReminders(s: Sailing): Promise<string[]> {
+  const ids: string[] = [];
+  const plan: { label: string; date?: string }[] = [
+    { label: '서류마감', date: s.docCutoff },
+    { label: '반입마감', date: s.cyCutoff },
+    { label: '출항(ETD)', date: s.etd },
+  ];
+  for (const p of plan) {
+    if (!p.date || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) continue;
+    const remind = new Date(`${p.date}T09:00:00`);
+    remind.setDate(remind.getDate() - 1);
+    if (remind.getTime() <= Date.now()) continue;
+    const route = [s.from, s.to].filter(Boolean).join('→');
+    const title = `🚢 ${s.carrier}${s.voyageNo ? ' ' + s.voyageNo : ''} ${p.label} 하루 전`;
+    const body = `${p.label} ${p.date}${route ? ` · ${route}` : ''}`;
+    const id = await scheduleReminder(title, body, remind).catch(() => undefined);
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
 // SecureStore is native-only; fall back to AsyncStorage so the web preview still works.
 const secret = {
   get: (k: string) => (Platform.OS === 'web' ? AsyncStorage.getItem(k) : SecureStore.getItemAsync(k)),
@@ -381,30 +403,54 @@ function useStoreValue() {
           (s) => s.carrier === input.carrier && (s.voyageNo ?? '') === (input.voyageNo ?? '') && (s.etd ?? '') === (input.etd ?? ''),
         );
         if (dup) return dup;
-        const sailing: Sailing = { id: newId(), createdAt: new Date().toISOString(), ...input };
+        const sailing: Sailing = { id: newId(), createdAt: new Date().toISOString(), source: 'manual', ...input };
         update('sailings', [...ref.current.sailings, sailing]);
         // 서류마감·반입마감·출항일 '하루 전 오전 9시'에 자동 알림 예약(지난 날짜는 건너뜀). 백그라운드로.
         (async () => {
-          const ids: string[] = [];
-          const plan: { label: string; date?: string }[] = [
-            { label: '서류마감', date: sailing.docCutoff },
-            { label: '반입마감', date: sailing.cyCutoff },
-            { label: '출항(ETD)', date: sailing.etd },
-          ];
-          for (const p of plan) {
-            if (!p.date || !/^\d{4}-\d{2}-\d{2}$/.test(p.date)) continue;
-            const remind = new Date(`${p.date}T09:00:00`);
-            remind.setDate(remind.getDate() - 1); // 하루 전
-            if (remind.getTime() <= Date.now()) continue;
-            const route = [sailing.from, sailing.to].filter(Boolean).join('→');
-            const title = `🚢 ${sailing.carrier}${sailing.voyageNo ? ' ' + sailing.voyageNo : ''} ${p.label} 하루 전`;
-            const body = `${p.label} ${p.date}${route ? ` · ${route}` : ''}`;
-            const id = await scheduleReminder(title, body, remind).catch(() => undefined);
-            if (id) ids.push(id);
-          }
+          const ids = await scheduleSailingReminders(sailing);
           if (ids.length) update('sailings', ref.current.sailings.map((x) => (x.id === sailing.id ? { ...x, reminderIds: ids } : x)));
         })().catch(() => {});
         return sailing;
+      },
+      /**
+       * 선사 사이트에서 자동 수집한 선편들을 Sailing에 공급한다(매일). carrier+voyageNo(없으면 선박명/ETD)로
+       * 중복을 막아, 같은 선편이 날마다 쌓이거나 알림이 중복되지 않게 한다. ETD·마감이 바뀌면 갱신(알림 재예약),
+       * 날짜가 그대로면 선박명·소요일 등만 조용히 갱신. 사진으로 직접 등록한(source='manual') 건은 덮지 않는다.
+       */
+      async upsertAutoSailings(incoming: Omit<Sailing, 'id' | 'createdAt'>[]): Promise<{ added: number; updated: number; unchanged: number }> {
+        const keyOf = (s: { carrier?: string; voyageNo?: string; vessel?: string; etd?: string }) =>
+          `${(s.carrier ?? '').trim().toLowerCase()}|${(s.voyageNo || s.vessel || s.etd || '').trim().toLowerCase()}`;
+        const cur = [...ref.current.sailings];
+        const byKey = new Map<string, number>();
+        cur.forEach((s, i) => byKey.set(keyOf(s), i));
+        let added = 0, updated = 0, unchanged = 0;
+        for (const raw of incoming) {
+          const inc: Sailing = { id: newId(), createdAt: new Date().toISOString(), ...raw, source: 'auto' };
+          const k = keyOf(inc);
+          const idx = byKey.get(k);
+          if (idx == null) {
+            inc.reminderIds = await scheduleSailingReminders(inc);
+            cur.push(inc);
+            byKey.set(k, cur.length - 1);
+            added++;
+          } else {
+            const ex = cur[idx];
+            if (ex.source === 'manual') { unchanged++; continue; } // 수동 등록은 존중(덮지 않음)
+            const datesChanged = (ex.etd ?? '') !== (inc.etd ?? '') || (ex.cyCutoff ?? '') !== (inc.cyCutoff ?? '') || (ex.docCutoff ?? '') !== (inc.docCutoff ?? '');
+            if (datesChanged) {
+              for (const nid of ex.reminderIds ?? []) await cancelReminder(nid);
+              const merged: Sailing = { ...ex, ...raw, id: ex.id, createdAt: ex.createdAt, source: 'auto' };
+              merged.reminderIds = await scheduleSailingReminders(merged);
+              cur[idx] = merged;
+              updated++;
+            } else {
+              cur[idx] = { ...ex, ...raw, id: ex.id, createdAt: ex.createdAt, source: 'auto', reminderIds: ex.reminderIds };
+              unchanged++;
+            }
+          }
+        }
+        update('sailings', cur);
+        return { added, updated, unchanged };
       },
       async deleteSailing(id: string) {
         const s = ref.current.sailings.find((x) => x.id === id);

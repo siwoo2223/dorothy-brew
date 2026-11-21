@@ -282,6 +282,27 @@ export async function fetchCompanyTables(): Promise<string> {
   return getData({ mode: 'tables' });
 }
 
+/**
+ * 선사 사이트에서 매일 수집해 서버 테이블(kf_carrier_schedule)에 적재된 선편 행들을 파싱해 돌려준다.
+ * 자동 Sailing 공급용. 테이블이 아직 없거나 비면 빈 배열.
+ */
+export async function fetchCarrierScheduleRows(): Promise<Record<string, unknown>[]> {
+  let text: string;
+  try {
+    text = await getData({ mode: 'rows', table: 'kf_carrier_schedule', limit: '300' });
+  } catch {
+    return [];
+  }
+  try {
+    const j = JSON.parse(text) as unknown;
+    const obj = j as { rows?: unknown; data?: unknown; items?: unknown };
+    const rows = obj?.rows ?? obj?.data ?? obj?.items ?? (Array.isArray(j) ? j : []);
+    return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Lists one table's columns (name/type). */
 export async function fetchCompanyColumns(table: string): Promise<string> {
   const t = (table || '').trim();
