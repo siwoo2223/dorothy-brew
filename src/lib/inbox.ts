@@ -23,6 +23,8 @@ type NativeInbox = {
   openAccessibilitySettings(): void;
   disableReplyWatch(): boolean;
   getSentReplies(sinceMs: number, limit: number): Promise<SentReply[]>;
+  repliableRooms(maxAgeMs: number): Promise<string[]>;
+  replyToRoom(room: string, text: string): Promise<{ ok: boolean; room?: string; app?: string; error?: string }>;
   clearSentReplies(): void;
   setReplyDebug(on: boolean): void;
   isReplyDebug(): boolean;
@@ -57,6 +59,17 @@ export const disableReplyWatchSupported = () => !!native && typeof native.disabl
 export const clearSentReplies = () => native?.clearSentReplies?.();
 export async function getSentReplies(sinceMs = 0, limit = 200): Promise<SentReply[]> {
   return native?.getSentReplies ? native.getSentReplies(sinceMs, limit) : [];
+}
+
+/** ② 알림 답장: 지금 바로 답장 가능한 방(최근 알림이 있는 방). */
+export const notificationReplySupported = () => !!native && typeof native.replyToRoom === 'function';
+export async function repliableRooms(maxAgeMs = 6 * 60 * 60 * 1000): Promise<string[]> {
+  return native?.repliableRooms ? native.repliableRooms(maxAgeMs).catch(() => []) : [];
+}
+/** 그 방의 알림 빠른답장 액션으로 메시지를 직접 보낸다(최근 알림이 있는 방만 가능). */
+export async function replyToRoom(room: string, text: string): Promise<{ ok: boolean; room?: string; app?: string; error?: string }> {
+  if (!native?.replyToRoom) return { ok: false, error: '이 기기에서는 알림 답장을 쓸 수 없어요.' };
+  return native.replyToRoom(room, text).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
 }
 export const replyDebugSupported = () => !!native && typeof native.setReplyDebug === 'function';
 export const setReplyDebug = (on: boolean) => native?.setReplyDebug?.(on);
