@@ -44,6 +44,15 @@ class DorothyInboxModule : Module() {
     // (GCash/Maya) that refuse to run while accessibility is on can be opened.
     Function("disableReplyWatch") { DorothyReplyListener.disableNow() }
 
+    // --- Send a reply straight into a messenger chat via its notification quick-reply action ---
+    AsyncFunction("repliableRooms") { maxAgeMs: Double ->
+      NotificationReplier.repliableRooms(maxAgeMs.toLong())
+    }
+
+    AsyncFunction("replyToRoom") { room: String, text: String ->
+      NotificationReplier.reply(context, room, text)
+    }
+
     AsyncFunction("getSentReplies") { sinceMs: Double, limit: Int ->
       SentStore.read(context, sinceMs.toLong(), limit)
     }

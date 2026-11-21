@@ -11,6 +11,8 @@ import * as recordings from './recordings';
 import * as sheets from './sheets';
 import { localComplete, LocalMessage } from './localBrain';
 import { serverComplete } from './serverBrain';
+import { Share } from 'react-native';
+
 import { createAndShareFile, saveBase64Image, type FileFormat } from './documents';
 import type { AppState, StoreActions } from './store';
 
@@ -103,6 +105,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
   (5) "영어로" 하면 금액·구조·조건은 그대로 두고 용어만 영어로 번역합니다(예: 해상운임=Ocean freight, 면장=Export declaration, 공급가액=Amount(VAT excl.), 부가세=VAT, 합계=Total(VAT incl.), 불라칸 배송=Bulacan delivery).
   (6) 첨부한 견적서/문서를 바탕으로 만들 때는 그 내용을 충실히 반영하고, 사장이 바꾼 조건(부가세율·통화·정기여부·언어)만 반영합니다.
 - 사용자가 "그림 그려 줘·이미지/로고/포스터 만들어 줘"처럼 새 그림을 원하면 generate_image 도구로 AI 그림을 만들고(회사 서버 Gemini 사용), 받은 파일 경로를 그대로 \`\`\`image 블록에 넣어 보여 줍니다. prompt는 그릴 내용을 구체적으로(화풍·색·구도·분위기) 적습니다. 실패하면 솔직히 알리고 다른 표현을 제안합니다. 회사 서버가 연결돼 있어야 쓸 수 있습니다.
+- 사장이 상대에게 보낼 메시지(답장·안내·공지)를 "카톡으로 보내줘/전달해줘/보내"라고 하면, 보낼 문구를 한국어로 깔끔하게 완성한 뒤 보냅니다. 방법은 두 가지입니다: (1) 기본은 share_message로 공유창을 열어 사장이 카톡에서 방을 골라 한 번 눌러 보냅니다(모든 방 가능, 안전). (2) 상대가 방금 보낸 메시지의 알림이 떠 있는 방이고 사장이 "그 사람/방에 답장 보내줘"처럼 분명히 말하면 send_kakao_reply로 바로 보낼 수 있습니다(먼저 list_repliable_rooms로 가능한지 확인). 단 전송은 되돌릴 수 없으니, 사장이 보낼 내용을 직접 불러줬으면(예: 한아름마트한테 '네 확인했습니다' 보내줘) 바로 보내고 "○○에 보냈어요"라고 확인하며, 내가 문구를 새로 지어야 하면 먼저 "이렇게 보낼게요: …"로 보여주고 동의를 받은 뒤 보냅니다. 카톡은 앱이 임의로 자동 전송하는 것을 막아 두어서, 알림이 떠 있는 방이 아니면 share_message(공유창)로만 보낼 수 있다고 솔직히 안내합니다. send_kakao_reply가 실패하면 share_message로 대신 보냅니다.
 - 사용자가 놓치고 있는 것(기한이 지난 일, 곧 다가오는 기념일, 기억 속 목표와 관련된 일)이 보이면 대화 흐름을 해치지 않는 선에서 한 줄로 짚어 줍니다.
 - Google 계정이 연결되어 있으면 일정은 calendar_list_events / calendar_create_event로, 메일은 gmail_search / gmail_read로 직접 확인합니다. 시간이 정해진 약속은 할 일 대신 캘린더에 넣는 것을 우선합니다.
 - 메일을 보낼 때는: 먼저 받는 사람·제목·내용을 사용자에게 보여주고 "이대로 보낼까요?"라고 물어봅니다. 사용자가 "보내 줘"처럼 분명히 동의하면 그때 gmail_send로 실제 전송합니다. 동의가 없거나 애매하면 gmail_create_draft로 임시보관함에만 저장합니다. 전송은 되돌릴 수 없으니 확인 없이 보내지 않습니다.
@@ -311,6 +314,17 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
     },
   },
   {
+    name: 'share_message',
+    description:
+      '사장이 "카톡으로 보내줘 / 전달해줘 / 공유해줘"라고 하면, 보낼 메시지 문구를 만들어 휴대폰 공유창을 연다(카카오톡·문자·메일 등에서 사장이 방을 골라 전송). 어느 방에든 보낼 수 있지만 전송 자체는 사장이 공유창에서 한 번 눌러 마무리한다. text에 보낼 한국어 문구를 담는다.',
+    input_schema: {
+      type: 'object',
+      properties: { text: { type: 'string', description: '보낼 메시지 문구(한국어, 바로 보낼 수 있게 완성해서).' } },
+      required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'create_file',
     description:
       '사용자가 요청한 내용을 실제 파일로 만들어 공유창(카카오톡·메일·저장 등)을 바로 연다. 견적서·정리표·보고서·목록 등을 "워드/PDF/엑셀 파일로 만들어 줘/보내 줘/다운로드"라고 하면 이 도구를 쓴다. ' +
@@ -461,6 +475,31 @@ const MESSAGE_TOOL: Anthropic.Beta.BetaToolUnion = {
       until: { type: ['string', 'null'], description: '이 시각 이전만(ISO 8601). 아니면 null' },
     },
     required: ['hours', 'keyword', 'room', 'since', 'until'],
+    additionalProperties: false,
+  },
+};
+
+/** Added with read_messages: list the rooms Dorothy can reply into right now (a live notification). */
+const REPLY_LIST_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'list_repliable_rooms',
+  description:
+    '지금 바로 "알림 답장"을 보낼 수 있는 방(최근 메신저 알림이 떠 있는 방) 목록을 가져온다. send_kakao_reply로 직접 답장을 보내기 전에, 그 방이 지금 답장 가능한지 확인할 때 쓴다.',
+  input_schema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+/** Added with read_messages: send a reply straight into a room via its notification quick-reply. */
+const REPLY_SEND_TOOL: Anthropic.Beta.BetaToolUnion = {
+  name: 'send_kakao_reply',
+  description:
+    '카톡 등 메신저에서 "알림이 떠 있는 방"에 사장을 대신해 답장을 직접 보낸다(그 방의 빠른답장 기능 사용). 상대가 최근 보낸 메시지의 알림이 있어야 하며(새 대화를 먼저 시작하지는 못함), 보내면 되돌릴 수 없다. ' +
+    'room에는 방/사람 이름 일부, text에는 보낼 한국어 문구를 넣는다. 보낸 뒤 "○○에 보냈어요: …"처럼 확인한다. 실패하면(알림이 없거나 사라짐) 솔직히 알리고 share_message(공유창)로 대신 보내도록 안내한다.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      room: { type: 'string', description: '보낼 방/사람 이름(부분 일치). 예: 한아름마트, 기나, 손팀장.' },
+      text: { type: 'string', description: '보낼 메시지 문구(한국어, 완성된 문장).' },
+    },
+    required: ['room', 'text'],
     additionalProperties: false,
   },
 };
@@ -765,6 +804,28 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
       } catch (e) {
         return `이미지는 만들었지만 저장에 실패했어요: ${describeError(e)}`;
       }
+    }
+    case 'share_message': {
+      const text = String(input.text ?? '').trim();
+      if (!text) return '보낼 내용이 비어 있어요.';
+      // 공유창을 연다(카카오톡·문자 등 선택). 끝까지 기다리지 않고 바로 알린다.
+      Share.share({ message: text }).catch(() => {});
+      return '공유창을 열었어요. 카카오톡을 고르고 방을 선택하면 보내집니다.';
+    }
+    case 'list_repliable_rooms': {
+      const rooms = await inbox.repliableRooms();
+      return rooms.length
+        ? `지금 바로 답장 가능한 방: ${rooms.join(', ')}`
+        : '지금 바로 답장할 수 있는 방이 없어요(상대가 최근에 보낸 알림이 있어야 해요). 설정 → 내 폰 연결에서 알림 접근을 켜 두면 더 잘 돼요.';
+    }
+    case 'send_kakao_reply': {
+      const room = String(input.room ?? '').trim();
+      const text = String(input.text ?? '').trim();
+      if (!room || !text) return '방 이름과 보낼 내용을 모두 알려주세요.';
+      const r = await inbox.replyToRoom(room, text);
+      return r.ok
+        ? `${r.room ?? room}에 보냈어요: "${text}"`
+        : `보내지 못했어요 — ${r.error ?? '알 수 없는 오류'} 대신 '카톡으로 보내줘'라고 하시면 공유창으로 보낼 수 있어요.`;
     }
     case 'create_file': {
       const format = (['pdf', 'word', 'excel'].includes(String(input.format)) ? input.format : 'pdf') as FileFormat;
@@ -1098,7 +1159,7 @@ export async function chat(
     ...TOOLS,
     webSearchTool(model, 5),
     ...(googleEmails.length ? GOOGLE_TOOLS : []),
-    ...(phone.messages ? [MESSAGE_TOOL] : []),
+    ...(phone.messages ? [MESSAGE_TOOL, REPLY_LIST_TOOL, REPLY_SEND_TOOL] : []),
     ...(phone.calls ? [CALL_TOOL, CALL_HISTORY_TOOL] : []),
     ...(phone.sms ? [SMS_TOOL] : []),
     ...(contactsOn ? [CONTACTS_TOOL] : []),
