@@ -47,58 +47,62 @@ const PROMPT =
   '3) 내가 해야 할 일·회신 (있으면 불릿, 없으면 생략)\n' +
   '녹음에 없는 내용은 지어내지 말고, 잘 안 들리는 부분은 "불명확"이라고 해. 사람 이름/숫자는 들린 그대로.';
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * One generateContent call with retry on transient errors (429 rate limit, 503 overload, 5xx, network).
+ * Permanent errors (bad key, bad request) throw immediately. Returns the text, throwing on real failure.
+ */
+async function postGemini(bodyObj: unknown, attempts = 3): Promise<string> {
+  const key = await getKey();
+  if (!key) throw new Error('Gemini 키가 없어요. 설정에서 넣어 주세요.');
+  let lastErr = '알 수 없는 오류';
+  for (let a = 0; a < attempts; a++) {
+    let res: Response | null = null;
+    try {
+      res = await fetch(ENDPOINT(MODEL, key), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyObj),
+      });
+    } catch {
+      lastErr = 'Gemini 서버에 연결할 수 없어요(인터넷 확인).';
+      await sleep(1500 * (a + 1));
+      continue;
+    }
+    const text = await res.text();
+    if (res.ok) {
+      let json: { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      try { json = JSON.parse(text); } catch { throw new Error('Gemini 응답을 읽지 못했어요.'); }
+      const out = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').filter(Boolean).join('\n').trim();
+      if (!out) throw new Error('Gemini가 빈 요약을 돌려줬어요.');
+      return out;
+    }
+    // Permanent — don't retry.
+    if (res.status === 401 || res.status === 403) throw new Error('Gemini 키가 올바르지 않아요. 설정에서 다시 넣어 주세요.');
+    if (res.status === 400) throw new Error('Gemini가 이 녹음을 처리하지 못했어요(형식/키 확인).');
+    // Transient — back off and retry.
+    if (res.status === 429 || res.status === 503 || res.status >= 500) {
+      lastErr = res.status === 429 ? 'Gemini 무료 한도를 잠시 초과했어요.' : `Gemini 일시 오류 ${res.status}`;
+      await sleep(2000 * (a + 1));
+      continue;
+    }
+    throw new Error(`Gemini 오류 ${res.status}: ${text.slice(0, 160)}`);
+  }
+  throw new Error(`${lastErr} (재시도 ${attempts}회 실패)`);
+}
+
 /** Summarizes a call TRANSCRIPT (text) with Gemini — used when the audio was transcribed on-device
  * first (so formats like m4a that Gemini can't read directly still work). Throws on failure. */
 export async function summarizeCallText(transcript: string): Promise<string> {
-  const key = await getKey();
-  if (!key) throw new Error('Gemini 키가 없어요. 설정에서 넣어 주세요.');
   const body = `${PROMPT}\n\n<통화_녹취>\n${transcript.slice(0, 20000)}\n</통화_녹취>`;
-  let res: Response;
-  try {
-    res = await fetch(ENDPOINT(MODEL, key), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: body }] }], generationConfig: { temperature: 0.2 } }),
-    });
-  } catch {
-    throw new Error('Gemini 서버에 연결할 수 없어요. 인터넷을 확인해 주세요.');
-  }
-  const text = await res.text();
-  if (res.status === 401 || res.status === 403) throw new Error('Gemini 키가 올바르지 않아요. 설정에서 다시 넣어 주세요.');
-  if (res.status === 429) throw new Error('Gemini 무료 한도를 잠시 초과했어요. 잠시 뒤 다시 시도해 주세요.');
-  if (!res.ok) throw new Error(`Gemini 오류 ${res.status}: ${text.slice(0, 160)}`);
-  let json: { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  try { json = JSON.parse(text); } catch { throw new Error('Gemini 응답을 읽지 못했어요.'); }
-  const out = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').filter(Boolean).join('\n').trim();
-  if (!out) throw new Error('Gemini가 빈 요약을 돌려줬어요.');
-  return out;
+  return postGemini({ contents: [{ parts: [{ text: body }] }], generationConfig: { temperature: 0.2 } });
 }
 
 /** Sends the recording audio (base64) to Gemini and returns a Korean summary. Throws on failure. */
 export async function summarizeCallAudio(base64: string, mimeType: string): Promise<string> {
-  const key = await getKey();
-  if (!key) throw new Error('Gemini 키가 없어요. 설정에서 넣어 주세요.');
-  let res: Response;
-  try {
-    res = await fetch(ENDPOINT(MODEL, key), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: PROMPT }] }],
-        generationConfig: { temperature: 0.2 },
-      }),
-    });
-  } catch {
-    throw new Error('Gemini 서버에 연결할 수 없어요. 인터넷을 확인해 주세요.');
-  }
-  const text = await res.text();
-  if (res.status === 400) throw new Error('Gemini가 이 녹음을 처리하지 못했어요(형식/키 확인).');
-  if (res.status === 401 || res.status === 403) throw new Error('Gemini 키가 올바르지 않아요. 설정에서 다시 넣어 주세요.');
-  if (res.status === 429) throw new Error('Gemini 무료 한도를 잠시 초과했어요. 잠시 뒤 다시 시도해 주세요.');
-  if (!res.ok) throw new Error(`Gemini 오류 ${res.status}: ${text.slice(0, 160)}`);
-  let json: { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  try { json = JSON.parse(text); } catch { throw new Error('Gemini 응답을 읽지 못했어요.'); }
-  const out = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').filter(Boolean).join('\n').trim();
-  if (!out) throw new Error('Gemini가 빈 요약을 돌려줬어요.');
-  return out;
+  return postGemini({
+    contents: [{ parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: PROMPT }] }],
+    generationConfig: { temperature: 0.2 },
+  });
 }
