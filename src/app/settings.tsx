@@ -25,6 +25,7 @@ import { ProactiveCard } from '../components/ProactiveCard';
 import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { ServerBrainCard } from '../components/ServerBrainCard';
+import { PricingCard } from '../components/PricingCard';
 import { VoiceCard } from '../components/VoiceCard';
 import { VoicePickerCard } from '../components/VoicePickerCard';
 import { VoiceMatchCard } from '../components/VoiceMatchCard';
@@ -101,6 +102,7 @@ export default function Settings() {
         <BackupCard />
         <SheetsCard />
         <CompanyCard />
+        <PricingCard />
         <WeeklyReportCard />
       </Section>
 

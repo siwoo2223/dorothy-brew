@@ -8,7 +8,7 @@ import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ServerBrainConfig } from './serverBrain';
-import type { ChatTurn, Expense, Followup, Memory, Profile, Routine, Sailing, SavedDoc, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, Memory, PricingProfile, Profile, Routine, Sailing, SavedDoc, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -39,6 +39,7 @@ const KEYS = {
   autoUpgrade: 'dorothy.autoUpgrade',
   serverBrain: 'dorothy.serverBrain',
   documents: 'dorothy.documents',
+  pricing: 'dorothy.pricing',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -105,6 +106,22 @@ export type AppState = {
   serverBrain: ServerBrainConfig;
   /** 도로시가 만들어 보관한 견적서·인보이스 등 문서(거래처별로 다시 찾아봄). */
   documents: SavedDoc[];
+  /** 즉석 견적용 표준 단가(운임·면장·픽업·배송·부가세). */
+  pricing: PricingProfile;
+};
+
+/** 사장님 실제 요율 기준 기본값(설정에서 수정 가능). */
+export const DEFAULT_PRICING: PricingProfile = {
+  cbmOnce: 300000,
+  kgOnce: 1500,
+  cbmRegular: 270000,
+  kgRegular: 1400,
+  exportDecl: 50000,
+  koreaPickup: 135000,
+  phDelivery: 20000,
+  vatKoreaPct: 10,
+  vatPhPct: 12,
+  note: '',
 };
 
 export type VoiceOnOpen = 'off' | 'listen' | 'standby';
@@ -140,6 +157,7 @@ const initialState: AppState = {
   autoUpgrade: true,
   serverBrain: { url: '', model: '', key: '' },
   documents: [],
+  pricing: DEFAULT_PRICING,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -158,7 +176,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents, pricing] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -189,6 +207,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.autoUpgrade),
         AsyncStorage.getItem(KEYS.serverBrain),
         AsyncStorage.getItem(KEYS.documents),
+        AsyncStorage.getItem(KEYS.pricing),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -221,6 +240,7 @@ function useStoreValue() {
         autoUpgrade: autoUpgrade ? JSON.parse(autoUpgrade) : true,
         serverBrain: serverBrain ? JSON.parse(serverBrain) : initialState.serverBrain,
         documents: documents ? JSON.parse(documents) : [],
+        pricing: pricing ? { ...DEFAULT_PRICING, ...JSON.parse(pricing) } : DEFAULT_PRICING,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -407,6 +427,10 @@ function useStoreValue() {
       },
       /** 최신 보관 문서 목록(도구에서 실시간으로 조회). */
       getDocuments: (): SavedDoc[] => ref.current.documents,
+
+      // ── 즉석 견적용 표준 단가 ──
+      setPricing: (p: PricingProfile) => update('pricing', p),
+      getPricing: (): PricingProfile => ref.current.pricing,
 
       // ── 개인 지출 기록(영수증 등) ──
       addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {

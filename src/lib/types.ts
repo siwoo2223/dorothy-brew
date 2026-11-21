@@ -137,3 +137,17 @@ export type SavedDoc = {
   headers?: string[];
   rows?: string[][];
 };
+
+/** 사장님의 표준 운임·부가세 단가. 저장해두면 "세부 20CBM 화장품 견적" 한마디에 즉석 견적을 낸다. */
+export type PricingProfile = {
+  cbmOnce: number;      // 일회성 CBM당 운임(원)
+  kgOnce: number;       // 일회성 kg당 운임(원)
+  cbmRegular: number;   // 정기 CBM당 운임(원)
+  kgRegular: number;    // 정기 kg당 운임(원)
+  exportDecl: number;   // 면장(수출신고) 비용(원)
+  koreaPickup: number;  // 한국 픽업비(원)
+  phDelivery: number;   // 현지(필리핀) 배송비 기본값(페소)
+  vatKoreaPct: number;  // 한국 부가세율(%) 기본 10
+  vatPhPct: number;     // 필리핀 부가세율(%) 기본 12
+  note: string;         // 메모(유의사항 등)
+};
