@@ -61,11 +61,20 @@ class SiteAPI:
         self.timeout = timeout
 
     def _call(self, method: str, **kw) -> requests.Response:
-        try:
-            r = self.session.request(method, self.base + API_PATH, headers={"X-KF-Token": self.token},
-                                     timeout=self.timeout, **kw)
-        except requests.RequestException as exc:
-            raise SiteError(f"사이트에 연결하지 못했습니다: {exc}") from exc
+        # 2026-11-21 - "Connection aborted / 원격 호스트에 의해 강제로 끊겼습니다(10054)"가 가끔 보인다: 서버(호스팅)가 한동안
+        # 쓰지 않은 연결을 먼저 닫았는데 도우미가 그 연결을 다시 쓰려다 끊긴 것. → 연결이 끊기면 연결을 새로 열어 바로 한 번 더 시도한다.
+        for attempt in (1, 2):
+            try:
+                r = self.session.request(method, self.base + API_PATH, headers={"X-KF-Token": self.token},
+                                         timeout=self.timeout, **kw)
+                break
+            except requests.ConnectionError as exc:
+                if attempt == 2:
+                    raise SiteError(f"사이트에 연결하지 못했습니다: {exc}") from exc
+                self.session.close()  # 끊긴 연결을 버리고 다음 요청은 새 연결로
+                time.sleep(2)
+            except requests.RequestException as exc:
+                raise SiteError(f"사이트에 연결하지 못했습니다: {exc}") from exc
         if r.status_code == 403:
             raise SiteError("연결 키가 맞지 않습니다. 관리자 > 카톡 발송 > 설정 의 연결 키를 다시 넣어 주세요.")
         if r.status_code == 404 and "NOT_FOUND" not in r.text:
