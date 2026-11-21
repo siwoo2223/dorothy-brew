@@ -1,8 +1,8 @@
-import { useNavigation } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import { useLayoutEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Body, Card } from '../components/ui';
+import { Body, Button, Card, Input } from '../components/ui';
 import { useStore } from '../lib/store';
 import type { Sailing } from '../lib/types';
 import { useTheme } from '../lib/theme';
@@ -62,10 +62,11 @@ export default function Schedule() {
   if (sailings.length === 0) {
     return (
       <ScrollView contentContainerStyle={styles.container}>
+        <SearchPanel />
         {Toggle}
         <Card>
           <Body muted>
-            아직 저장된 출항 스케줄이 없어요. 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 선사·항차·마감·출항일을 읽어 여기에 저장해요.
+            아직 저장된 출항 스케줄이 없어요. 위에서 출발지·목적지를 넣어 검색하거나, 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 선사·항차·마감·출항일을 읽어 여기에 저장해요.
           </Body>
         </Card>
       </ScrollView>
@@ -74,6 +75,7 @@ export default function Schedule() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <SearchPanel />
       {Toggle}
       {mode === 'list' ? (
         sortedList.map((s) => <SailingCard key={s.id} s={s} t={t} onDelete={() => remove(s)} />)
@@ -81,6 +83,56 @@ export default function Schedule() {
         <CalendarView cursor={cursor} setCursor={setCursor} byDate={byDate} selected={selected} setSelected={setSelected} t={t} onDelete={remove} />
       )}
     </ScrollView>
+  );
+}
+
+/**
+ * 출발지·목적지를 넣어 선적 스케줄을 찾는 검색 패널. 찾은 결과를 화면에 따로 긁어오지 않고,
+ * 이미 튜닝된 도로시 대화(web_search) 경로로 넘긴다(/chat?ask=). 도로시가 무료 스케줄 사이트
+ * (SeaRates·Traqo·Fluent Cargo + 선사공식)에서 찾아 선사·주기·소요일·출항일을 정리하고,
+ * 직항/환적을 구분해 답한 뒤 필요하면 캘린더에 저장(add_sailing)까지 한다.
+ */
+function SearchPanel() {
+  const t = useTheme();
+  const router = useRouter();
+  const [from, setFrom] = useState('부산');
+  const [to, setTo] = useState('마닐라 북항');
+  const [direct, setDirect] = useState(true);
+
+  const search = () => {
+    const f = from.trim();
+    const d = to.trim();
+    const lane = f && d ? `${f}에서 ${d}` : f ? `${f}에서 출발하는` : d ? `${d}로 가는` : '';
+    const q = (direct
+      ? `${lane} 배 스케줄을 직항만 찾아줘. 선사·주기·소요일·보이는 출항일을 정리하고, 환적(T/S)은 빼줘.`
+      : `${lane} 배 스케줄을 찾아줘. 직항과 환적(T/S)을 나눠서 선사·주기·소요일·보이는 출항일을 정리해줘.`
+    ).trim();
+    router.navigate({ pathname: '/chat', params: { ask: q } });
+  };
+
+  const swap = () => { setFrom(to); setTo(from); };
+
+  return (
+    <Card>
+      <Text style={{ color: t.text, fontSize: 16, fontWeight: '800' }}>🔎 선적 스케줄 검색</Text>
+      <View style={styles.searchRow}>
+        <Input value={from} onChangeText={setFrom} placeholder="출발지 (예: 부산)" style={styles.searchInput} />
+        <Pressable onPress={swap} hitSlop={8} style={styles.swap}><Text style={{ color: t.accent, fontSize: 18 }}>⇄</Text></Pressable>
+        <Input value={to} onChangeText={setTo} placeholder="목적지 (예: 마닐라 북항)" style={styles.searchInput} />
+      </View>
+      <View style={[styles.toggle, { borderColor: t.border, alignSelf: 'stretch' }]}>
+        {([['direct', '직항만'], ['all', '직항+환적']] as const).map(([v, label]) => {
+          const on = v === (direct ? 'direct' : 'all');
+          return (
+            <Pressable key={v} onPress={() => setDirect(v === 'direct')} style={[styles.segBtn, on && { backgroundColor: t.accent }]}>
+              <Text style={{ color: on ? t.accentText : t.text, fontWeight: '700', fontSize: 13 }}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Button label="도로시에게 검색" onPress={search} />
+      <Body muted>무료 스케줄 사이트에서 찾아 정리해요. 정확한 이번 출항·마감은 기나 스케줄 사진이 제일 정확해요.</Body>
+    </Card>
   );
 }
 
@@ -177,6 +229,10 @@ const styles = StyleSheet.create({
   container: { padding: 16, gap: 10 },
   toggle: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, padding: 3, alignSelf: 'center', gap: 3 },
   toggleBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 11 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchInput: { flex: 1 },
+  swap: { paddingHorizontal: 2, paddingVertical: 6 },
+  segBtn: { flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center' },
   sail: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 14, gap: 5 },
   sailTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 2 },
