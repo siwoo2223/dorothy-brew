@@ -694,8 +694,8 @@ export default function Chat() {
                 : transcribing
                   ? '✍️ 더 정확히 다듬는 중… (곧 보내요)'
                   : listening
-                    ? (ptt ? '🎙️ 듣고 있어요… 손을 떼면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
-                    : '🎤 버튼을 꾹 눌러 말하거나, 글로 입력하거나, 대기 모드를 켜 보세요'}
+                    ? (ptt ? '🎙️ 듣고 있어요 — 다시 누르면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
+                    : '🎤 버튼을 눌러 말하거나, 글로 입력하거나, 대기 모드를 켜 보세요'}
             </Text>
           )}
           {canListen && (
@@ -807,12 +807,16 @@ export default function Chat() {
             </Pressable>
           ) : (
             <Pressable
-              onPressIn={() => { if (!standby && !listening && !transcribing) { tap(); setPtt(true); voice.pushStart(); } }}
-              onPressOut={() => { if (listening) voice.pushEnd(); setPtt(false); }}
-              accessibilityLabel="꾹 눌러 말하기"
-              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.border, opacity: ptt ? 0.7 : 1 }]}
+              // Claude 앱처럼: 톡 누르면 말하기 시작, 다시 누르면 끝내고 보낸다(꾹 누르고 있지 않아도 됨).
+              onPress={() => {
+                tap();
+                if (listening) { voice.pushEnd(); setPtt(false); }
+                else if (!standby && !transcribing) { setPtt(true); voice.pushStart(); }
+              }}
+              accessibilityLabel={listening ? '말 끝내고 보내기' : '눌러서 말하기'}
+              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.border }]}
             >
-              <Text style={{ fontSize: 18 }}>🎤</Text>
+              <Text style={{ fontSize: 18, color: listening ? '#fff' : t.text }}>{listening ? '⏹' : '🎤'}</Text>
             </Pressable>
           )}
         </View>
