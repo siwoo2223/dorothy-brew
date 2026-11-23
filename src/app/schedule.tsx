@@ -3,7 +3,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Body, Card } from '../components/ui';
-import { companyConfigured } from '../lib/company';
+import { companyConfigured, triggerCarrierFetch } from '../lib/company';
 import { syncCarrierSchedule } from '../lib/sailingSync';
 import { useStore } from '../lib/store';
 import type { Sailing } from '../lib/types';
@@ -35,14 +35,20 @@ export default function Schedule() {
     if (!companyConfigured() || syncing) return;
     setSyncing(true);
     try {
+      // 수동 새로고침이면 먼저 서버에 eKMTC 실시간 수집을 돌려 최신으로 만든 뒤 읽어 온다.
+      // (자동 10분 동기화는 eKMTC를 매번 긁지 않도록 읽기만 한다.)
+      const fetched = silent ? null : await triggerCarrierFetch();
       const r = await syncCarrierSchedule(actions);
       lastSync.current = Date.now();
       if (!silent) {
+        const head = fetched?.ok ? `eKMTC에서 ${fetched.saved ?? 0}건 받아왔어요. ` : '';
         Alert.alert(
           '선사 스케줄 갱신',
           r.total === 0
-            ? '서버에 아직 자동 수집된 선편이 없어요. (PC 수집이 아직 안 돌았을 수 있어요)'
-            : `새로 ${r.added}건 · 변경 ${r.updated}건 반영했어요 (총 ${r.total}건 확인).`,
+            ? (fetched?.ok
+                ? 'eKMTC 수집은 됐어요. 잠시 후 다시 새로고침하면 스케줄이 떠요.'
+                : '서버에 아직 수집된 선편이 없어요. (잠시 후 다시 시도)')
+            : `${head}새로 ${r.added}건 · 변경 ${r.updated}건 반영했어요 (총 ${r.total}건).`,
         );
       }
     } catch (e) {
@@ -104,7 +110,7 @@ export default function Schedule() {
         {Header}
         <Card>
           <Body muted>
-            아직 저장된 출항 스케줄이 없어요. 위 **🔄 선사 새로고침**을 누르면 서버에 매일 자동 수집된 부산→마닐라 선편을 불러와요. 또는 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 선사·항차·마감·출항일을 읽어 여기에 저장해요.
+            아직 저장된 출항 스케줄이 없어요. 위 **🔄 선사 새로고침**을 누르면 eKMTC에서 부산·인천→마닐라 선편을 실시간으로 받아와요(선사·항차·출항·도착·반입마감). 또는 채팅에서 **🚢 부킹 스케줄** 버튼으로 기나글로벌 스케줄 사진을 올리면, 도로시가 읽어 여기에 저장해요.
           </Body>
         </Card>
       </ScrollView>
