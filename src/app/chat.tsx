@@ -584,6 +584,9 @@ export default function Chat() {
         ref={list}
         data={visibleChat}
         keyExtractor={(m) => m.id}
+        // 목록이 화면을 꽉 채워야(flex:1) 입력창이 바닥에 붙는다. 빠지면 짧은 대화에서 입력창이
+        // 위로 뜨고 아래에 빈 공간이 생긴다(contentContainer의 flexGrow:1 은 리스트가 화면을 채울 때만 작동).
+        style={{ flex: 1 }}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           hiddenCount > 0 ? (
