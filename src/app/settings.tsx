@@ -144,6 +144,12 @@ export default function Settings() {
           />
         </Card>
       </Section>
+
+      <Card>
+        <Title>🛠️ 건의 · 버그 신고</Title>
+        <Body muted>도로시 쓰다가 안 되는 것·불편한 것·바라는 것을 적어 주세요. 버전 정보까지 묶어 공유하면, 클로드가 고쳐서 새 빌드로 드려요.</Body>
+        <Button label="🛠️ 건의 · 버그 신고하기" onPress={() => router.navigate('/feedback')} />
+      </Card>
     </ScrollView>
   );
 }
