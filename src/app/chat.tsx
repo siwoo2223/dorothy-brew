@@ -81,6 +81,8 @@ const RECEIPT_PROMPT =
   '이 영수증/결제 사진(여러 장이면 각각)을 읽어줘. 총액·통화(페소/원)·날짜·가게명을 그대로 읽어서 add_expense로 지출 기록에 저장하고, 사진에 없는 값은 비워 둬. 저장 후 한 줄로만 확인해줘.';
 const BOOKING_PROMPT =
   '이 부킹 스케줄 사진(여러 장이면 전부)을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 출항 스케줄에 저장(add_sailing)한 뒤 마감·출항 전 알림도 필요하면 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
+const DOC_PROMPT =
+  '이 서류 사진/파일(여러 장이면 전부)을 읽어서 정리해줘. 먼저 어떤 서류인지 판별하고(선하증권 B/L, 상업송장 Commercial Invoice, 패킹리스트 Packing List, 수출신고필증, 도착통지서 Arrival Notice, D/O, 견적서, 세금계산서 등), 종류에 맞는 핵심 정보를 글자 그대로 뽑아서 보기 좋은 표로 정리해줘. 그다음 이 서류로 할 만한 걸 한 줄로 제안해줘(견적·항차·지출로 저장할지, 워드·엑셀·PDF로 만들지). 사진에 없는 값은 절대 지어내지 말고 비워 둬. 글자가 흐리면 "불명확"이라고 표시해줘.';
 
 export default function Chat() {
   const t = useTheme();
@@ -543,6 +545,7 @@ export default function Chat() {
       { text: '🖼️ 사진 보여주기', onPress: () => chooseImage() },
       { text: '📷 카메라로 찍기', onPress: () => router.push('/camera') },
       { text: '📎 파일 (PDF·엑셀·문서)', onPress: () => pickFile() },
+      { text: '📄 서류 읽기 (B/L·인보이스·패킹)', onPress: () => { setDraft(DOC_PROMPT); chooseImage(); } },
       { text: '🧾 영수증', onPress: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
       { text: '취소', style: 'cancel' },
     ]);
@@ -553,6 +556,7 @@ export default function Chat() {
   const QUICK: { label: string; go: () => void }[] = [
     ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
+    { label: '📄 서류 읽기', go: () => { setDraft(DOC_PROMPT); chooseImage(); } },
     { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '🌙 놓친 거', go: () => send('오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.') },
