@@ -303,6 +303,25 @@ export async function fetchCarrierScheduleRows(): Promise<Record<string, unknown
   }
 }
 
+/**
+ * eKMTC 실시간 수집을 서버에 트리거한다(dorothy_fetch_ekmtc.php). 서버가 eKMTC 공개 스케줄을 긁어
+ * kf_carrier_schedule 에 저장하고, 이어서 syncCarrierSchedule 로 읽어 오면 최신 선편이 들어온다.
+ * 성공 시 { ok, saved, collected }. 서버에 엔드포인트가 없거나 실패하면 ok:false(앱은 조용히 넘어감).
+ */
+export async function triggerCarrierFetch(): Promise<{ ok: boolean; saved?: number; collected?: number }> {
+  if (!endpointUrl || !token) return { ok: false };
+  const base = endpointUrl.includes('dorothy_report.php')
+    ? endpointUrl.replace('dorothy_report.php', 'dorothy_fetch_ekmtc.php')
+    : endpointUrl.replace(/[^/]*(\?.*)?$/, 'dorothy_fetch_ekmtc.php');
+  try {
+    const res = await fetch(base, { method: 'GET', headers: { 'X-Dorothy-Token': token, Accept: 'application/json' } });
+    const j = (await res.json()) as { ok?: boolean; saved?: number; collected?: number };
+    return { ok: !!j.ok, saved: j.saved, collected: j.collected };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Lists one table's columns (name/type). */
 export async function fetchCompanyColumns(table: string): Promise<string> {
   const t = (table || '').trim();
