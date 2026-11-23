@@ -83,6 +83,10 @@ const BOOKING_PROMPT =
   '이 부킹 스케줄 사진(여러 장이면 전부)을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 출항 스케줄에 저장(add_sailing)한 뒤 마감·출항 전 알림도 필요하면 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
 const DOC_PROMPT =
   '이 서류 사진/파일(여러 장이면 전부)을 읽어서 정리해줘. 먼저 어떤 서류인지 판별하고(선하증권 B/L, 상업송장 Commercial Invoice, 패킹리스트 Packing List, 수출신고필증, 도착통지서 Arrival Notice, D/O, 견적서, 세금계산서 등), 종류에 맞는 핵심 정보를 글자 그대로 뽑아서 보기 좋은 표로 정리해줘. 그다음 이 서류로 할 만한 걸 한 줄로 제안해줘(견적·항차·지출로 저장할지, 워드·엑셀·PDF로 만들지). 사진에 없는 값은 절대 지어내지 말고 비워 둬. 글자가 흐리면 "불명확"이라고 표시해줘.';
+const EXCEL_PROMPT =
+  '올려드린 엑셀/표를 정리해줘. ①지저분한 빈 줄·중복·깨진 칸을 정리하고 ②거래처별·월별·품목별 등 의미 있는 기준으로 묶어서 합계·소계를 내고 ③한눈에 보이게 표로 보여줘. 큰 숫자 비교는 그래프도 함께. 그리고 "깔끔한 엑셀 파일로 다시 만들어 보관함에 저장할까요?"라고 물어보고, 원하면 create_file(엑셀)로 만들어줘. 숫자는 파일에 있는 그대로만 쓰고 지어내지 마.';
+const QUOTE_MSG_PROMPT =
+  '거래처가 보낸 견적 요청이에요. 아래 내용(또는 첨부한 사진)에서 품목·물량(CBM)·중량(kg)·목적지(세부/마닐라 등)·정기 여부를 뽑아서, quick_quote 도구로 저장된 표준 단가로 즉석 견적을 내서 표로 보여줘. 빠진 조건은 합리적 기본값(일회성·한국 10%)으로 하되 "정기로 하면/중량 주시면 더 정확히"처럼 한 줄 덧붙여줘. 끝에 "견적서 파일로 만들까요? 거래처 이름 주시면 보관함에도 저장할게요"라고 물어봐. 요청에 없는 값은 지어내지 마. 다음 줄부터가 요청 내용이에요:\n';
 
 export default function Chat() {
   const t = useTheme();
@@ -546,6 +550,7 @@ export default function Chat() {
       { text: '📷 카메라로 찍기', onPress: () => router.push('/camera') },
       { text: '📎 파일 (PDF·엑셀·문서)', onPress: () => pickFile() },
       { text: '📄 서류 읽기 (B/L·인보이스·패킹)', onPress: () => { setDraft(DOC_PROMPT); chooseImage(); } },
+      { text: '📊 엑셀 정리·합계', onPress: () => { setDraft(EXCEL_PROMPT); pickFile(); } },
       { text: '🧾 영수증', onPress: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
       { text: '취소', style: 'cancel' },
     ]);
@@ -557,6 +562,8 @@ export default function Chat() {
     ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
     { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
     { label: '📄 서류 읽기', go: () => { setDraft(DOC_PROMPT); chooseImage(); } },
+    { label: '💬 메시지로 견적', go: () => { setDraft(QUOTE_MSG_PROMPT); } },
+    { label: '📊 엑셀 정리', go: () => { setDraft(EXCEL_PROMPT); pickFile(); } },
     { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
     { label: '🌙 놓친 거', go: () => send('오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.') },
