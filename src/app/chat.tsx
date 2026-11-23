@@ -85,6 +85,8 @@ const DOC_PROMPT =
   '이 서류 사진/파일(여러 장이면 전부)을 읽어서 정리해줘. 먼저 어떤 서류인지 판별하고(선하증권 B/L, 상업송장 Commercial Invoice, 패킹리스트 Packing List, 수출신고필증, 도착통지서 Arrival Notice, D/O, 견적서, 세금계산서 등), 종류에 맞는 핵심 정보를 글자 그대로 뽑아서 보기 좋은 표로 정리해줘. 그다음 이 서류로 할 만한 걸 한 줄로 제안해줘(견적·항차·지출로 저장할지, 워드·엑셀·PDF로 만들지). 사진에 없는 값은 절대 지어내지 말고 비워 둬. 글자가 흐리면 "불명확"이라고 표시해줘.';
 const EXCEL_PROMPT =
   '올려드린 엑셀/표를 정리해줘. ①지저분한 빈 줄·중복·깨진 칸을 정리하고 ②거래처별·월별·품목별 등 의미 있는 기준으로 묶어서 합계·소계를 내고 ③한눈에 보이게 표로 보여줘. 큰 숫자 비교는 그래프도 함께. 그리고 "깔끔한 엑셀 파일로 다시 만들어 보관함에 저장할까요?"라고 물어보고, 원하면 create_file(엑셀)로 만들어줘. 숫자는 파일에 있는 그대로만 쓰고 지어내지 마.';
+const TRIP_PROMPT =
+  '나들이·여행 계획을 세워줘. 내 위치(모르면 물어봐줘)에서 갈 만한 곳을 web_search로 찾아 이동시간·볼거리·입장료·먹거리까지 시간대별 하루 코스로 정리하고(출처 표시, 바뀔 수 있는 값은 "확인 필요"), 원하면 캘린더에 일정으로 넣어주고 PDF로도 만들어줘. 아래가 요청이에요:\n';
 const RESEARCH_PROMPT =
   '이건 깊은 조사 요청이에요. web_search를 각도를 바꿔가며 여러 번 써서 여러 출처를 교차 확인한 뒤, 보고서처럼 정리해줘: ①맨 위 한 줄 결론 ②핵심 정리(불릿/표) ③비교·수치가 있으면 표와 그래프(```chart) ④맨 아래 참고한 출처 목록. 확실하지 않은 건 "확실치 않음"이라고 표시하고 지어내지 마. 필요하면 "이 부분 더 깊게 파드릴까요?"로 끝맺어줘. 아래가 조사할 주제예요:\n';
 const QUOTE_MSG_PROMPT =
@@ -566,6 +568,7 @@ export default function Chat() {
     { label: '📄 서류 읽기', go: () => { setDraft(DOC_PROMPT); chooseImage(); } },
     { label: '💬 메시지로 견적', go: () => { setDraft(QUOTE_MSG_PROMPT); } },
     { label: '🔎 깊은 조사', go: () => { setDraft(RESEARCH_PROMPT); } },
+    { label: '🗺️ 나들이·여행', go: () => { setDraft(TRIP_PROMPT); } },
     { label: '📊 엑셀 정리', go: () => { setDraft(EXCEL_PROMPT); pickFile(); } },
     { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
