@@ -23,7 +23,11 @@ const firstStr = (row: Record<string, unknown>, keys: string[]): string => {
  * 1/03을 내년으로 본다).
  */
 export function mdToIso(md: string, today = new Date()): string {
-  const m = md.trim().match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})/);
+  const s = md.trim();
+  // 서버가 이미 완전한 날짜(YYYY-MM-DD, 또는 'YYYY-MM-DD HH:mm:ss')로 주면 그대로 통과시킨다.
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const m = s.match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})/);
   if (!m) return '';
   const month = Number(m[1]);
   const day = Number(m[2]);
