@@ -7,6 +7,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import '../lib/notifications';
+import { loadEleven } from '../lib/elevenlabs';
 import { ensureProactiveRegistered } from '../lib/proactive';
 import { NotificationRouter } from '../components/NotificationRouter';
 import { VoiceLauncher } from '../components/VoiceLauncher';
@@ -51,6 +52,7 @@ export default function RootLayout() {
   const theme = useTheme();
   useEffect(() => {
     ensureProactiveRegistered();
+    loadEleven(); // ElevenLabs 고급 목소리 키를 캐시에 올려 둔다(설정돼 있으면 speak이 바로 씀)
   }, []);
   return (
     <SafeAreaProvider>

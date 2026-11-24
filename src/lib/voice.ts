@@ -1,4 +1,7 @@
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import * as Speech from 'expo-speech';
+
+import { elevenConfigured, elevenTtsToFile } from './elevenlabs';
 import type { ExpoSpeechRecognitionModule as RecognitionModule } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
@@ -70,19 +73,53 @@ export function setSpeechRate(rate?: number) {
   if (typeof rate === 'number' && rate > 0) speechRate = rate;
 }
 
-export function speak(text: string, onDone?: () => void) {
+// ElevenLabs 고급 목소리 재생 상태. 켜져 있으면 speak()이 성우 목소리를 쓰고, 실패하면 폰 TTS로 되돌아간다.
+let ttsPlayer: AudioPlayer | null = null;
+let ttsSeq = 0; // 빠르게 여러 번 말하면 최신 것만 재생(이전 생성은 버린다)
+let audioModeReady = false;
+
+async function ensureAudioMode() {
+  if (audioModeReady) return;
+  try { await setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'duckOthers' }); audioModeReady = true; } catch { /* noop */ }
+}
+function disposeTtsPlayer() {
+  if (ttsPlayer) { try { ttsPlayer.remove(); } catch { /* noop */ } ttsPlayer = null; }
+}
+
+function speakPhone(clean: string, onDone?: () => void) {
   Speech.stop();
-  Speech.speak(forSpeech(text), {
-    language: LANG,
-    rate: speechRate,
-    voice: speechVoice,
-    onDone,
-    onError: () => onDone?.(),
-  });
+  Speech.speak(clean, { language: LANG, rate: speechRate, voice: speechVoice, onDone, onError: () => onDone?.() });
+}
+
+export function speak(text: string, onDone?: () => void) {
+  stopSpeaking();
+  const clean = forSpeech(text);
+  if (!clean) { onDone?.(); return; }
+  if (!elevenConfigured()) { speakPhone(clean, onDone); return; }
+
+  const seq = ++ttsSeq;
+  (async () => {
+    try {
+      const uri = await elevenTtsToFile(clean);
+      if (seq !== ttsSeq) return; // 그 사이 새 발화가 시작되면 이건 버린다
+      await ensureAudioMode();
+      const player = createAudioPlayer({ uri });
+      ttsPlayer = player;
+      let done = false;
+      const finish = () => { if (done) return; done = true; if (seq === ttsSeq) disposeTtsPlayer(); onDone?.(); };
+      player.addListener('playbackStatusUpdate', (s) => { if (s.didJustFinish) finish(); });
+      player.play();
+    } catch {
+      if (seq !== ttsSeq) return;
+      speakPhone(clean, onDone); // ElevenLabs 실패 → 폰 기본 목소리로 자동 복귀
+    }
+  })();
 }
 
 export function stopSpeaking() {
+  ttsSeq++; // 진행 중인 생성/재생 무효화
   Speech.stop();
+  disposeTtsPlayer();
 }
 
 /** Korean text-to-speech voices available on this phone, for letting the user pick Dorothy's voice. */
