@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-import { detectTodos, triageAlerts } from './assistant';
+import { detectTodos, mineOwnerFacts, triageAlerts } from './assistant';
 import * as company from './company';
 import * as google from './google';
 import * as inbox from './inbox';
@@ -53,6 +53,41 @@ export async function ensureProactiveRegistered(): Promise<void> {
 
 const QUIET_START = 22; // 10pm–7am: gather silently, don't buzz.
 const QUIET_END = 7;
+
+/**
+ * 사장(사용자)이 말로 알려주지 않아도, 최근 메시지·통화 상대·회사 활동패턴을 보고 '사장에 대한 새 사실'을
+ * 스스로 뽑아 (아직 저장하지 않고) 돌려준다. 백그라운드 자동 파악과 설정의 '지금 바로 파악' 버튼이 함께 쓴다.
+ * 이미 기억에 있는 것은 제외한다. 폰 연결·회사 연결이 하나도 없으면 빈 배열.
+ */
+export async function profileOwnerNow(state: AppState): Promise<{ category: string; content: string }[]> {
+  if (!state.apiKey || state.model === 'local') return [];
+  const since = Date.now() - 14 * 24 * 60 * 60 * 1000; // 최근 2주
+  const status = await inbox.inboxStatus();
+  const [messages, calls] = await Promise.all([
+    status.messages ? inbox.getMessages(since, 300) : Promise.resolve([]),
+    status.calls ? inbox.getCalls(since, 80) : Promise.resolve([]),
+  ]);
+  const memRaw = await AsyncStorage.getItem('dorothy.memories');
+  const mem: { content: string }[] = memRaw ? JSON.parse(memRaw) : [];
+  const known = mem.map((m) => `- ${m.content}`).join('\n') || '(없음)';
+  const msgBlob = messages.length ? inbox.formatMessages(messages.slice(-150), 6000) : '';
+  const callBlob = calls
+    .slice(-40)
+    .map((c) => `${c.type === 'missed' ? '[부재중] ' : ''}${c.name || c.number || ''}`.trim())
+    .filter(Boolean)
+    .join(', ');
+  let patternBlob = '';
+  try { if (await company.loadCompanyConfig()) patternBlob = await company.fetchCompanyPattern().catch(() => ''); } catch { /* 회사 미연결은 그냥 넘어감 */ }
+  if (!msgBlob && !callBlob && !patternBlob) return [];
+  const ctx =
+    `<이미_아는_사실>\n${known}\n</이미_아는_사실>\n\n` +
+    (msgBlob ? `<최근_메시지>\n${msgBlob}\n</최근_메시지>\n\n` : '') +
+    (callBlob ? `<최근_통화상대>\n${callBlob}\n</최근_통화상대>\n\n` : '') +
+    (patternBlob ? `<회사_활동패턴>\n${patternBlob.slice(0, 2500)}\n</회사_활동패턴>` : '');
+  const facts = await mineOwnerFacts(state, ctx).catch(() => []);
+  const existing = new Set(mem.map((m) => m.content.replace(/\s/g, '')));
+  return facts.filter((f) => f.content && !existing.has(f.content.replace(/\s/g, '')));
+}
 
 async function runProactiveCheck(): Promise<void> {
   if (!(await isProactiveEnabled())) return;
@@ -146,6 +181,41 @@ async function runProactiveCheck(): Promise<void> {
     // exactly the "오늘 꼭 챙길 것" the owner wants flagged first.
     if (attention) companyBlock += `${report ? '\n\n' : ''}<company_attention>\n${attention}\n</company_attention>`;
     if (companyBlock) await AsyncStorage.setItem('dorothy.proactiveBizDay', today);
+  }
+
+  // ── 사장님 자동 파악: 하루 한 번, 말로 알려주지 않아도 최근 메시지·통화·회사 활동에서 '사장에 대한
+  //    새 사실'을 스스로 뽑아 기억에 쌓는다(기억 탭에서 확인·삭제 가능). 설정의 '나 자동 파악'이 꺼져
+  //    있으면('false') 건너뛴다. 하루 한 번(아침~저녁)만.
+  try {
+    const selfPref = await AsyncStorage.getItem('dorothy.selfProfile'); // 'false'면 꺼짐(기본 켜짐)
+    const selfDay = await AsyncStorage.getItem('dorothy.selfProfileDay');
+    if (selfPref !== 'false' && selfDay !== today && hourNow >= 8 && hourNow < QUIET_START) {
+      const fresh = await profileOwnerNow(state).catch(() => []);
+      await AsyncStorage.setItem('dorothy.selfProfileDay', today); // 새 사실이 없어도 오늘은 했다고 표시
+      if (fresh.length) {
+        const memRaw = await AsyncStorage.getItem('dorothy.memories');
+        const mem = memRaw ? JSON.parse(memRaw) : [];
+        const toAdd = fresh.map((f) => ({
+          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+          category: f.category || '기타',
+          content: f.content,
+          createdAt: new Date().toISOString(),
+        }));
+        await AsyncStorage.setItem('dorothy.memories', JSON.stringify([...mem, ...toAdd]));
+        if (!(QUIET_START <= hourNow || hourNow < QUIET_END)) {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '🧠 사장님에 대해 몇 가지 알게 됐어요',
+              body: toAdd.map((x) => x.content).slice(0, 3).join(' · ') + ' — 기억 탭에서 확인·수정하세요',
+              data: { url: '/memory' },
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 1, channelId: 'reminders' },
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // 자동 파악 오류로 배경 작업을 깨뜨리지 않는다
   }
 
   // ── 저녁 '놓친 것' 정리: 하루 끝에 아직 열려 있는 할 일·회신·등록 안 한 후보를 한 번만 모아 알린다. ──
