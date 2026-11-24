@@ -22,6 +22,7 @@ import { ReplyWatchCard } from '../components/ReplyWatchCard';
 import { RecordingBackupCard } from '../components/RecordingBackupCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
+import { SelfProfileCard } from '../components/SelfProfileCard';
 import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { ServerBrainCard } from '../components/ServerBrainCard';
@@ -128,6 +129,7 @@ export default function Settings() {
           </View>
         </Card>
         <ProactiveCard />
+        <SelfProfileCard />
       </Section>
 
       <Section icon="📂" title="데이터">
