@@ -28,6 +28,7 @@ import { ServerBrainCard } from '../components/ServerBrainCard';
 import { PricingCard } from '../components/PricingCard';
 import { VoiceCard } from '../components/VoiceCard';
 import { VoicePickerCard } from '../components/VoicePickerCard';
+import { ElevenLabsCard } from '../components/ElevenLabsCard';
 import { VoiceMatchCard } from '../components/VoiceMatchCard';
 import { cancelDailyBriefing, scheduleDailyBriefing } from '../lib/notifications';
 import { useStore } from '../lib/store';
@@ -84,6 +85,7 @@ export default function Settings() {
       <Section icon="🎙️" title="음성">
         <VoiceCard />
         <VoicePickerCard />
+        <ElevenLabsCard />
         <VoiceMatchCard />
       </Section>
 
