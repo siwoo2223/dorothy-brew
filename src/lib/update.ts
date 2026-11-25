@@ -7,6 +7,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
 
+import { checkUpdateViaCompany, companyConfigured, resolveUpdateUrlViaCompany } from './company';
+
+// 비공개 레포일 때, 설치 주소는 다운로드 직전에 회사 서버에서 새로 받는다(서명 URL은 금방 만료되므로).
+// url 자리에 이 표식을 넣어 두고, 설치 시 실제 주소로 바꾼다.
+const COMPANY_SENTINEL = 'company://latest-apk';
+
 const REPO = 'siwoo2223/dorothy-brew';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
@@ -72,6 +78,18 @@ async function fetchLatestRelease(retries = 3): Promise<Response> {
 
 /** Ask GitHub for the newest release and whether it is newer than this app. */
 export async function checkForUpdate(): Promise<UpdateCheck> {
+  // 회사 서버가 연결돼 있으면 그쪽으로 확인한다(비공개 레포 지원 — GitHub 토큰은 서버에만, 폰엔 없음).
+  if (companyConfigured()) {
+    try {
+      const info = await checkUpdateViaCompany();
+      if (info && info.build > 0) {
+        const latest: UpdateInfo = { build: info.build, tag: info.tag, name: info.name || info.tag, url: COMPANY_SENTINEL, notes: info.notes };
+        return { available: info.build > CURRENT_BUILD, current: CURRENT_BUILD, latest };
+      }
+    } catch {
+      // 회사 경로 실패 시 공개 레포 경로로 폴백(공개였을 때·개발용). 비공개면 아래가 실패해 오류 안내로 이어진다.
+    }
+  }
   const res = await fetchLatestRelease();
   if (!res.ok) throw new Error(`업데이트 확인 실패 (${res.status})`);
   const data = await res.json();
@@ -98,7 +116,9 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
  */
 export async function downloadAndInstall(url: string, onProgress?: (fraction: number) => void): Promise<void> {
   if (Platform.OS !== 'android') throw new Error('안드로이드에서만 앱 설치가 가능해요.');
-  if (!url) throw new Error('설치 파일 주소를 찾지 못했어요.');
+  // 비공개 레포면 다운로드 직전에 회사 서버에서 새 서명 URL을 받아 온다(폰엔 토큰이 없다).
+  const realUrl = url === COMPANY_SENTINEL ? await resolveUpdateUrlViaCompany() : url;
+  if (!realUrl) throw new Error('설치 파일 주소를 찾지 못했어요.');
 
   const target = `${FileSystem.cacheDirectory}dorothy-update.apk`;
   try {
@@ -107,7 +127,7 @@ export async function downloadAndInstall(url: string, onProgress?: (fraction: nu
     // a leftover file is fine; downloadResumable overwrites
   }
 
-  const task = FileSystem.createDownloadResumable(url, target, {}, (p) => {
+  const task = FileSystem.createDownloadResumable(realUrl, target, {}, (p) => {
     if (onProgress && p.totalBytesExpectedToWrite > 0) {
       onProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
     }
