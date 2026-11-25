@@ -8,7 +8,7 @@ import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ServerBrainConfig } from './serverBrain';
-import type { ChatTurn, Expense, Followup, Memory, PricingProfile, Profile, Routine, Sailing, SavedDoc, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, Memory, PricingProfile, Profile, Routine, Sailing, SavedDoc, StyleProfile, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -40,6 +40,7 @@ const KEYS = {
   serverBrain: 'dorothy.serverBrain',
   documents: 'dorothy.documents',
   pricing: 'dorothy.pricing',
+  styleProfile: 'dorothy.styleProfile',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -108,7 +109,12 @@ export type AppState = {
   documents: SavedDoc[];
   /** 즉석 견적용 표준 단가(운임·면장·픽업·배송·부가세). */
   pricing: PricingProfile;
+  /** 사장님 말투·성격 프로필(도로시가 실제 메시지를 보고 스스로 학습). guide가 비면 아직 학습 전. */
+  styleProfile: StyleProfile;
 };
+
+/** 말투 학습 전 기본값: 비어 있고, 켜지면 사장님 말투를 흉내 내도록 mirror는 true. */
+export const DEFAULT_STYLE: StyleProfile = { guide: '', mirror: true, learnedAt: '' };
 
 /** 사장님 실제 요율 기준 기본값(설정에서 수정 가능). */
 export const DEFAULT_PRICING: PricingProfile = {
@@ -158,6 +164,7 @@ const initialState: AppState = {
   serverBrain: { url: '', model: '', key: '' },
   documents: [],
   pricing: DEFAULT_PRICING,
+  styleProfile: DEFAULT_STYLE,
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -198,7 +205,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents, pricing] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents, pricing, styleProfile] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -230,6 +237,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.serverBrain),
         AsyncStorage.getItem(KEYS.documents),
         AsyncStorage.getItem(KEYS.pricing),
+        AsyncStorage.getItem(KEYS.styleProfile),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -263,6 +271,7 @@ function useStoreValue() {
         serverBrain: serverBrain ? JSON.parse(serverBrain) : initialState.serverBrain,
         documents: documents ? JSON.parse(documents) : [],
         pricing: pricing ? { ...DEFAULT_PRICING, ...JSON.parse(pricing) } : DEFAULT_PRICING,
+        styleProfile: styleProfile ? { ...DEFAULT_STYLE, ...JSON.parse(styleProfile) } : DEFAULT_STYLE,
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -477,6 +486,10 @@ function useStoreValue() {
       // ── 즉석 견적용 표준 단가 ──
       setPricing: (p: PricingProfile) => update('pricing', p),
       getPricing: (): PricingProfile => ref.current.pricing,
+
+      // ── 사장님 말투·성격 프로필 ──
+      setStyleProfile: (p: Partial<StyleProfile>) => update('styleProfile', { ...ref.current.styleProfile, ...p }),
+      getStyleProfile: (): StyleProfile => ref.current.styleProfile,
 
       // ── 개인 지출 기록(영수증 등) ──
       addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {

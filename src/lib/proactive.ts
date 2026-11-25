@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-import { detectTodos, mineOwnerFacts, triageAlerts } from './assistant';
+import { detectTodos, mineOwnerFacts, mineOwnerStyle, triageAlerts } from './assistant';
 import * as company from './company';
 import * as google from './google';
 import * as inbox from './inbox';
@@ -87,6 +87,60 @@ export async function profileOwnerNow(state: AppState): Promise<{ category: stri
   const facts = await mineOwnerFacts(state, ctx).catch(() => []);
   const existing = new Set(mem.map((m) => m.content.replace(/\s/g, '')));
   return facts.filter((f) => f.content && !existing.has(f.content.replace(/\s/g, '')));
+}
+
+/**
+ * 사장님의 '말투·성격'을 학습한다. 사장님이 실제로 쓴 글만 재료로 쓴다: (1) 도로시에게 직접 쓴 말,
+ * (2) 사장님이 보낸 문자(SMS sent). 받은 메시지(남의 말투)는 섞지 않는다. 이전 설명서가 있으면 보완한다.
+ * 결과는 "사장님처럼 쓰는 법" 설명서 문자열(없으면 ''). 설정의 '지금 학습'과 백그라운드 자동 학습이 함께 쓴다.
+ */
+export async function learnOwnerStyleNow(state: AppState): Promise<string> {
+  if (!state.apiKey || state.model === 'local') return '';
+  const since = Date.now() - 60 * 24 * 60 * 60 * 1000; // 최근 2달
+
+  // 1) 사장님이 도로시에게 직접 쓴 말 — 가장 확실한 본인 글. 메모리의 chat을 먼저, 없으면 저장소에서.
+  let mine: { text: string }[] = (state.chat ?? []).filter((c) => c.role === 'user' && c.text?.trim());
+  if (!mine.length) {
+    try {
+      const raw = await AsyncStorage.getItem('dorothy.chat');
+      const chat: { role: string; text: string }[] = raw ? JSON.parse(raw) : [];
+      mine = chat.filter((c) => c.role === 'user' && c.text?.trim());
+    } catch { /* ignore */ }
+  }
+  const chatBlob = mine
+    .slice(-60)
+    .map((c) => `- ${c.text.replace(/\s+/g, ' ').trim().slice(0, 300)}`)
+    .join('\n');
+
+  // 2) 사장님이 보낸 문자(SMS sent) — 본인이 밖으로 쓴 글.
+  let smsBlob = '';
+  try {
+    const status = await inbox.inboxStatus();
+    if (status.sms) {
+      const sms = await inbox.getSms(since, 200);
+      smsBlob = sms
+        .filter((s) => s.type === 'sent' && s.body?.trim() && s.body.trim().length > 1)
+        .slice(-60)
+        .map((s) => `- ${s.body.replace(/\s+/g, ' ').trim().slice(0, 300)}`)
+        .join('\n');
+    }
+  } catch { /* ignore */ }
+
+  if (!chatBlob && !smsBlob) return '';
+
+  let prev = '';
+  try {
+    prev = state.styleProfile?.guide || '';
+    if (!prev) {
+      const raw = await AsyncStorage.getItem('dorothy.styleProfile');
+      prev = raw ? (JSON.parse(raw).guide ?? '') : '';
+    }
+  } catch { /* ignore */ }
+
+  const ctx =
+    (chatBlob ? `<도로시에게_쓴_말>\n${chatBlob}\n</도로시에게_쓴_말>\n\n` : '') +
+    (smsBlob ? `<보낸_문자>\n${smsBlob}\n</보낸_문자>` : '');
+  return (await mineOwnerStyle(state, ctx, prev).catch(() => '')).trim();
 }
 
 async function runProactiveCheck(): Promise<void> {
@@ -216,6 +270,28 @@ async function runProactiveCheck(): Promise<void> {
     }
   } catch {
     // 자동 파악 오류로 배경 작업을 깨뜨리지 않는다
+  }
+
+  // ── 사장님 말투 학습: 하루 한 번, 사장님이 쓴 글(도로시에게 쓴 말·보낸 문자)을 보고 말투·성격
+  //    설명서를 스스로 갱신한다. 설정의 '말투 따라하기'가 꺼져('false') 있으면 건너뛴다. 조용히 쌓고
+  //    알리지 않는다(기능이 조용히 좋아지는 쪽이 자연스럽다). 설정 카드에서 확인·수정 가능.
+  try {
+    const stylePref = await AsyncStorage.getItem('dorothy.styleLearn'); // 'false'면 꺼짐(기본 켜짐)
+    const styleDay = await AsyncStorage.getItem('dorothy.styleLearnDay');
+    if (stylePref !== 'false' && styleDay !== today && hourNow >= 8 && hourNow < QUIET_START) {
+      const guide = await learnOwnerStyleNow(state).catch(() => '');
+      await AsyncStorage.setItem('dorothy.styleLearnDay', today); // 재료가 없어도 오늘은 했다고 표시
+      if (guide) {
+        const raw = await AsyncStorage.getItem('dorothy.styleProfile');
+        const cur = raw ? JSON.parse(raw) : { guide: '', mirror: true, learnedAt: '' };
+        await AsyncStorage.setItem(
+          'dorothy.styleProfile',
+          JSON.stringify({ ...cur, guide, learnedAt: new Date().toISOString() }),
+        );
+      }
+    }
+  } catch {
+    // 말투 학습 오류로 배경 작업을 깨뜨리지 않는다
   }
 
   // ── 저녁 '놓친 것' 정리: 하루 끝에 아직 열려 있는 할 일·회신·등록 안 한 후보를 한 번만 모아 알린다. ──
