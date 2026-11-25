@@ -33,11 +33,46 @@ function parseBuild(tag: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * GitHub에 최신 릴리스를 묻되, 일시적 오류(요청 타임아웃, 502/503/504, 네트워크 끊김)면 잠깐 쉬고
+ * 몇 번 다시 시도한다. GitHub가 순간적으로 느려 504가 떠도 사용자에게 바로 실패로 보이지 않게 한다.
+ * 429(요청 과다)·4xx 같은 '다시 해도 같은' 오류는 재시도하지 않고 바로 알린다.
+ */
+async function fetchLatestRelease(retries = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    if (attempt > 0) await sleep(800 * attempt); // 0 → 0.8s → 1.6s
+    try {
+      // 15초 안에 응답이 없으면 끊고 재시도(멈춘 요청을 하염없이 기다리지 않게).
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      let res: Response;
+      try {
+        res = await fetch(LATEST_RELEASE_API, {
+          headers: { Accept: 'application/vnd.github+json' },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      // 일시적 서버 오류는 재시도, 그 외(성공·4xx 등)는 그대로 반환.
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        lastErr = new Error(`업데이트 확인 실패 (${res.status})`);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e; // 네트워크 끊김·타임아웃(abort) → 재시도
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('업데이트 확인 실패 (네트워크)');
+}
+
 /** Ask GitHub for the newest release and whether it is newer than this app. */
 export async function checkForUpdate(): Promise<UpdateCheck> {
-  const res = await fetch(LATEST_RELEASE_API, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
+  const res = await fetchLatestRelease();
   if (!res.ok) throw new Error(`업데이트 확인 실패 (${res.status})`);
   const data = await res.json();
   const tag: string = data.tag_name ?? '';
