@@ -65,6 +65,43 @@ async function get(params: Record<string, string>): Promise<string> {
 }
 
 /**
+ * 비공개 레포 업데이트: GitHub 토큰은 회사 서버(dorothy_update.php)에만 두고, 앱은 서버에 물어본다.
+ * 그래서 폰(APK)에는 열쇠가 없다. dorothy_report.php 자리를 dorothy_update.php로 바꿔 쓴다.
+ */
+function updateEndpoint(): string {
+  return endpointUrl.includes('dorothy_report.php')
+    ? endpointUrl.replace('dorothy_report.php', 'dorothy_update.php')
+    : endpointUrl.replace(/[^/]*$/, 'dorothy_update.php');
+}
+
+/** 회사 서버를 통해 최신 빌드 정보를 받는다(비공개 레포 지원). 미연결이면 null. */
+export async function checkUpdateViaCompany(): Promise<{ build: number; tag: string; name: string; notes: string } | null> {
+  if (!endpointUrl || !token) return null;
+  const sep = updateEndpoint().includes('?') ? '&' : '?';
+  const res = await fetch(`${updateEndpoint()}${sep}action=check`, {
+    headers: { 'X-Dorothy-Token': token, Accept: 'application/json' },
+  });
+  if (res.status === 403) throw new Error('회사 서버가 접근을 거부했어요(토큰 불일치).');
+  if (!res.ok) throw new Error(`업데이트 확인 실패 (${res.status})`);
+  const j = JSON.parse(await res.text());
+  return { build: Number(j.build) || 0, tag: String(j.tag ?? ''), name: String(j.name ?? ''), notes: String(j.notes ?? '') };
+}
+
+/** 회사 서버에서 '지금만 쓸 수 있는' 설치파일(APK) 다운로드 주소를 받아 온다(짧게 유효한 서명 URL). */
+export async function resolveUpdateUrlViaCompany(): Promise<string> {
+  if (!endpointUrl || !token) throw new Error('회사 서버가 연결되어 있지 않아요.');
+  const sep = updateEndpoint().includes('?') ? '&' : '?';
+  const res = await fetch(`${updateEndpoint()}${sep}action=download`, {
+    headers: { 'X-Dorothy-Token': token, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`설치 파일 주소를 받지 못했어요 (${res.status}).`);
+  const j = JSON.parse(await res.text());
+  const url = String(j.url ?? '');
+  if (!url) throw new Error('설치 파일 주소가 비어 있어요.');
+  return url;
+}
+
+/**
  * 받아쓰기 정확도용 용어 힌트: 사장님이 자주 쓰는 물류·업무 고유명사. Gemini에 함께 넘겨
  * 비슷하게 들리는 말(예: '출항'을 '차량'으로)을 맞는 단어로 인식하게 한다.
  */
