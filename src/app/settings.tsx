@@ -23,6 +23,7 @@ import { RecordingBackupCard } from '../components/RecordingBackupCard';
 import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { SelfProfileCard } from '../components/SelfProfileCard';
+import { StyleLearnCard } from '../components/StyleLearnCard';
 import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { ServerBrainCard } from '../components/ServerBrainCard';
@@ -130,6 +131,7 @@ export default function Settings() {
         </Card>
         <ProactiveCard />
         <SelfProfileCard />
+        <StyleLearnCard />
       </Section>
 
       <Section icon="📂" title="데이터">

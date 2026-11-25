@@ -119,6 +119,20 @@ export type Profile = {
   about: string;
 };
 
+/**
+ * 사장님의 '말투·성격' 프로필. 도로시가 사장님의 실제 메시지·대화를 보고 스스로 뽑아낸,
+ * "사장님처럼 쓰고 말하는 법" 설명서다. 대신 메시지를 쓸 때 이 말투로 쓰고, mirror가 켜져
+ * 있으면 도로시가 사장님에게 답할 때도 이 말투·성격을 흉내 낸다. 모두 이 폰에만 저장된다.
+ */
+export type StyleProfile = {
+  /** 학습한 말투·성격 설명(한국어, 편집 가능). 비어 있으면 아직 학습 전. */
+  guide: string;
+  /** 켜면 도로시가 사장님에게 답할 때도 이 말투·성격을 따라 한다(대신 쓰는 메시지는 항상 따라 함). */
+  mirror: boolean;
+  /** 마지막으로 학습한 시각(ISO). 비면 아직 학습 안 함. */
+  learnedAt: string;
+};
+
 /** Persisted chat turns are text-only: tool calls and thinking blocks stay inside a single turn. */
 export type ChatTurn = {
   id: string;
