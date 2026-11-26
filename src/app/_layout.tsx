@@ -1,4 +1,5 @@
 import type { ErrorBoundaryProps } from 'expo-router';
+import { router } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -77,12 +78,29 @@ export default function RootLayout() {
               sceneStyle: { backgroundColor: theme.bg },
             }}
           >
-            <Tabs.Screen name="index" options={{ title: '오늘', headerShown: false, tabBarIcon: icon('🏠') }} />
-            <Tabs.Screen name="chat" options={{ title: '도로시', tabBarIcon: icon('💬') }} />
-            <Tabs.Screen name="tasks" options={{ title: '할 일', tabBarIcon: icon('✅') }} />
+            {/* 홈은 '대화'. index는 대화로 보내는 리다이렉트라 탭에 안 보인다. */}
+            <Tabs.Screen name="index" options={{ href: null, headerShown: false }} />
+            {/* 1단계 재구성: 탭 4개 — 대화(홈) · 회사 · 할일·기억 · 설정 */}
+            <Tabs.Screen
+              name="chat"
+              options={{
+                title: '대화',
+                tabBarIcon: icon('💬'),
+                // 왼쪽 🏠 버튼으로 '오늘' 대시보드를 연다(탭에서 뺀 대신).
+                headerLeft: () => (
+                  <Pressable onPress={() => router.push('/today')} hitSlop={10} style={{ paddingLeft: 16, paddingRight: 8 }}>
+                    <Text style={{ fontSize: 20 }}>🏠</Text>
+                  </Pressable>
+                ),
+              }}
+            />
             <Tabs.Screen name="company" options={{ title: '회사', tabBarIcon: icon('🏢') }} />
-            <Tabs.Screen name="memory" options={{ title: '기억', tabBarIcon: icon('🧠') }} />
+            <Tabs.Screen name="work" options={{ title: '할 일·기억', tabBarIcon: icon('✅') }} />
             <Tabs.Screen name="settings" options={{ title: '설정', tabBarIcon: icon('⚙️') }} />
+            {/* 아래는 탭에 안 뜨는 화면들(href: null) — 다른 화면에서 열려 들어간다. */}
+            <Tabs.Screen name="today" options={{ href: null, title: '오늘' }} />
+            <Tabs.Screen name="tasks" options={{ href: null, title: '할 일' }} />
+            <Tabs.Screen name="memory" options={{ href: null, title: '기억' }} />
             {/* Full-screen camera mode: not a tab (href: null), no header, no tab bar. */}
             <Tabs.Screen name="camera" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
             {/* Shipment list drill-down: not a tab, has a header (title set per group). */}
