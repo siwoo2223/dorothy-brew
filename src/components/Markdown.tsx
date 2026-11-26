@@ -10,10 +10,20 @@ import { useTheme } from '../lib/theme';
 
 type Seg = { text: string; bold?: boolean; code?: boolean; url?: string };
 
-/** Splits one line into styled spans (**bold**, `code`, [label](url)). */
+/** 맨 URL을 보기 좋은 탭 라벨로. 지도·길안내 링크는 "지도/길안내 열기"로 바꿔 누르기 쉽게 한다. */
+function linkLabel(url: string): string {
+  if (/google\.[^/]*\/maps|maps\.app\.goo\.gl|maps\.google|goo\.gl\/maps/.test(url)) {
+    return /\/dir\/|[?&]destination=/.test(url) ? '🗺️ 길안내 열기' : '🗺️ 지도에서 열기';
+  }
+  const bare = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return bare.length > 40 ? bare.slice(0, 38) + '…' : bare;
+}
+
+/** Splits one line into styled spans (**bold**, `code`, [label](url), and bare http(s) URLs). */
 function parseInline(s: string): Seg[] {
   const segs: Seg[] = [];
-  const re = /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\(([^)]+)\))/g;
+  // 마지막 대안: 맨 URL(http/https)도 탭 가능한 링크로. ( ) 같은 괄호·공백 앞까지만.
+  const re = /(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\(([^)]+)\))|(https?:\/\/[^\s<>)\]]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
@@ -21,6 +31,7 @@ function parseInline(s: string): Seg[] {
     if (m[2] != null) segs.push({ text: m[2], bold: true });
     else if (m[4] != null) segs.push({ text: m[4], code: true });
     else if (m[6] != null) segs.push({ text: m[6], url: m[7] });
+    else if (m[8] != null) segs.push({ text: linkLabel(m[8]), url: m[8] });
     last = re.lastIndex;
   }
   if (last < s.length) segs.push({ text: s.slice(last) });
