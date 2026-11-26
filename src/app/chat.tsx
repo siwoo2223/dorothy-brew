@@ -575,6 +575,7 @@ export default function Chat() {
     { label: '💬 메시지로 견적', go: () => { setDraft(QUOTE_MSG_PROMPT); } },
     { label: '🔎 깊은 조사', go: () => { setDraft(RESEARCH_PROMPT); } },
     { label: '🗺️ 나들이·여행', go: () => { setDraft(TRIP_PROMPT); } },
+    { label: '📔 여행 일지', go: () => router.push('/journal') },
     { label: '📊 엑셀 정리', go: () => { setDraft(EXCEL_PROMPT); pickFile(); } },
     { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
     { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },

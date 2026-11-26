@@ -8,7 +8,7 @@ import { setCompanyConfig } from './company';
 import { setSpeechRate, setSpeechVoice } from './voice';
 import type { ModelChoice } from './assistant';
 import type { ServerBrainConfig } from './serverBrain';
-import type { ChatTurn, Expense, Followup, Memory, PricingProfile, Profile, Routine, Sailing, SavedDoc, StyleProfile, Task, TodoCandidate } from './types';
+import type { ChatTurn, Expense, Followup, JournalEntry, Memory, PricingProfile, Profile, Routine, Sailing, SavedDoc, StyleProfile, Task, TodoCandidate } from './types';
 
 const KEYS = {
   tasks: 'dorothy.tasks',
@@ -41,6 +41,7 @@ const KEYS = {
   documents: 'dorothy.documents',
   pricing: 'dorothy.pricing',
   styleProfile: 'dorothy.styleProfile',
+  journal: 'dorothy.journal',
 };
 const API_KEY = 'dorothy.anthropicApiKey';
 const COMPANY_TOKEN = 'dorothy.companyToken';
@@ -111,6 +112,8 @@ export type AppState = {
   pricing: PricingProfile;
   /** 사장님 말투·성격 프로필(도로시가 실제 메시지를 보고 스스로 학습). guide가 비면 아직 학습 전. */
   styleProfile: StyleProfile;
+  /** 여행·생활 일지(날짜별). '작년 오늘 뭐 했는지'를 되살려 준다. */
+  journal: JournalEntry[];
 };
 
 /** 말투 학습 전 기본값: 비어 있고, 켜지면 사장님 말투를 흉내 내도록 mirror는 true. */
@@ -165,6 +168,7 @@ const initialState: AppState = {
   documents: [],
   pricing: DEFAULT_PRICING,
   styleProfile: DEFAULT_STYLE,
+  journal: [],
 };
 
 export const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -205,7 +209,7 @@ function useStoreValue() {
 
   useEffect(() => {
     (async () => {
-      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents, pricing, styleProfile] = await Promise.all([
+      const [tasks, followups, memories, profile, chat, hour, apiKey, voiceOnOpen, workspaceId, model, planHour, speakerMatch, voiceId, companyUrl, companyToken, weeklyReportDay, speechRate, routines, standbyShortcut, voiceHiAccuracy, sailings, todoRooms, todoCandidates, fxRooms, expenses, chatSummary, chatSummaryUpto, autoUpgrade, serverBrain, documents, pricing, styleProfile, journal] = await Promise.all([
         AsyncStorage.getItem(KEYS.tasks),
         AsyncStorage.getItem(KEYS.followups),
         AsyncStorage.getItem(KEYS.memories),
@@ -238,6 +242,7 @@ function useStoreValue() {
         AsyncStorage.getItem(KEYS.documents),
         AsyncStorage.getItem(KEYS.pricing),
         AsyncStorage.getItem(KEYS.styleProfile),
+        AsyncStorage.getItem(KEYS.journal),
       ]);
       ref.current = {
         tasks: tasks ? JSON.parse(tasks) : [],
@@ -272,6 +277,7 @@ function useStoreValue() {
         documents: documents ? JSON.parse(documents) : [],
         pricing: pricing ? { ...DEFAULT_PRICING, ...JSON.parse(pricing) } : DEFAULT_PRICING,
         styleProfile: styleProfile ? { ...DEFAULT_STYLE, ...JSON.parse(styleProfile) } : DEFAULT_STYLE,
+        journal: journal ? JSON.parse(journal) : [],
       };
       setSpeechVoice(ref.current.voiceId);
       setSpeechRate(ref.current.speechRate);
@@ -490,6 +496,16 @@ function useStoreValue() {
       // ── 사장님 말투·성격 프로필 ──
       setStyleProfile: (p: Partial<StyleProfile>) => update('styleProfile', { ...ref.current.styleProfile, ...p }),
       getStyleProfile: (): StyleProfile => ref.current.styleProfile,
+
+      // ── 여행·생활 일지 ──
+      addJournalEntry(input: { date?: string; title: string; place?: string; note?: string }): JournalEntry {
+        const date = (input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date)) ? input.date : new Date().toISOString().slice(0, 10);
+        const entry: JournalEntry = { id: newId(), date, title: input.title, place: input.place, note: input.note, createdAt: new Date().toISOString() };
+        update('journal', [...ref.current.journal, entry]);
+        return entry;
+      },
+      deleteJournalEntry: (id: string) => update('journal', ref.current.journal.filter((j) => j.id !== id)),
+      getJournal: (): JournalEntry[] => ref.current.journal,
 
       // ── 개인 지출 기록(영수증 등) ──
       addExpense(input: Omit<Expense, 'id' | 'createdAt'>): Expense {

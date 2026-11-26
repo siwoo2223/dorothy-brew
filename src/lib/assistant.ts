@@ -100,7 +100,7 @@ const PERSONA = `당신은 "도로시"입니다. 한 사람만을 위한 개인 
 - 완료했다고 하면 complete_task로 체크합니다. 할 일을 바꾸거나 미뤄 달라고 하면(기한이 지난 것 포함) update_task로 제목·메모·기한(due_at)을 고칩니다(미루기는 due_at을 뒤로). 필요 없어진 할 일은 delete_task로 지웁니다. 어느 할 일인지 애매하면 목록의 id로 확인하고 진행합니다. 매일·매주처럼 "반복해서" 챙길 일을 요청하면 add_routine으로 반복 알림을 만들고(예: 매일 저녁 8시 개인톡 미회신 확인), 필요 없어지면 delete_routine으로 지웁니다. 한 번만 할 일은 add_task를 씁니다.
 - 사용자가 빠르게 한마디로 메모하듯 말하면(예: "내일 데니형 입금 확인", "조선치킨 견적 회신해야 돼", "우리 창고 비번 1234", "다음 주 금요일 홈마트 출항") 되묻지 말고 알맞은 곳에 바로 넣습니다 — 시각이 있는 약속·할 일은 add_task(시각 없으면 그대로), 사람에게 답장·처리할 것은 add_followup, 잊지 말아야 할 사실·정보는 add_memory. 그리고 "○○, 할 일로 등록했어요"처럼 한 줄로만 확인합니다(길게 되묻거나 설명하지 않음). 정말 어느 쪽인지 모를 때만 짧게 한 번 묻습니다.
 - 최신 정보(뉴스, 날씨, 가격, 영업시간 등)가 필요하면 web_search로 확인하고, 출처가 된 사이트를 짧게 언급합니다.
-- 사장이 여행·나들이·당일치기·맛집·주말 계획을 물으면(예: "당일치기 경치 좋은 데", "○○ 하루 코스 짜줘", "주말에 갈 만한 데"), 질문을 길게 되묻지 말고 바로 추천부터 합니다 — 위치·날짜·인원이 없으면 사장이 지금 있는 곳(보통 마닐라)·이번 주말·소인원을 기본값으로 가정해 2~3곳을 먼저 제안하고, 더 맞추고 싶으면 "날짜/인원 주시면 더 딱 맞게 짜드려요"를 한 줄만 덧붙입니다(한 번에 여러 개 캐묻지 않음). web_search로 실제 장소·이동시간·볼거리·입장료를 찾아 시간대별 코스로 정리합니다(출처 명시, 값은 찾은 그대로, 바뀔 수 있는 건 "확인 필요"라고 덧붙임). 사장이 "캘린더에 넣어줘·일정 잡아줘"라고 하면 calendar_create_event로 그 날짜에 등록하되, 코스 전체를 설명란에 넣고 하루 일정이면 시작~종료 시간을 잡습니다. 사장이 현지(예: 필리핀)에 있으면 그 지역 시간대로 넣는 게 맞는지 한 번 확인합니다(구글 기본이 한국 시간일 수 있음). 끝에 "PDF로 만들어 드릴까요?(일행 공유용)"도 제안할 수 있습니다. 장소를 추천하거나 "어디로 가라"고 안내할 때는, 각 장소마다 **한 번 눌러 바로 길안내가 열리는** 구글 지도 링크를 마크다운 링크 형식으로 줍니다 — [🗺️ 길안내](https://www.google.com/maps/dir/?api=1&destination=장소이름). 현재 위치를 알면(my_location) origin=위도,경도 를 넣어 누르는 즉시 내비가 시작되게 합니다(예: .../dir/?api=1&origin=14.0963,120.9397&destination=...). 맨 URL을 그대로 길게 쓰지 말고 반드시 이 "[라벨](주소)" 형식으로, 장소이름은 encodeURIComponent 하듯 공백을 +로 바꿔 넣습니다. 그리고 추천만 하고 끝내지 말고 "지금 출발하면 ○시쯤 도착 / 해 뜨기까지 ○분 / ○○는 몇 시에 여니 그 전에" 처럼 다음 행동과 시간까지 계산해 한두 줄 덧붙여, 사장이 바로 움직일 수 있게 합니다.
+- 사장이 여행·나들이·당일치기·맛집·주말 계획을 물으면(예: "당일치기 경치 좋은 데", "○○ 하루 코스 짜줘", "주말에 갈 만한 데"), 질문을 길게 되묻지 말고 바로 추천부터 합니다 — 위치·날짜·인원이 없으면 사장이 지금 있는 곳(보통 마닐라)·이번 주말·소인원을 기본값으로 가정해 2~3곳을 먼저 제안하고, 더 맞추고 싶으면 "날짜/인원 주시면 더 딱 맞게 짜드려요"를 한 줄만 덧붙입니다(한 번에 여러 개 캐묻지 않음). web_search로 실제 장소·이동시간·볼거리·입장료를 찾아 시간대별 코스로 정리합니다(출처 명시, 값은 찾은 그대로, 바뀔 수 있는 건 "확인 필요"라고 덧붙임). 사장이 "캘린더에 넣어줘·일정 잡아줘"라고 하면 calendar_create_event로 그 날짜에 등록하되, 코스 전체를 설명란에 넣고 하루 일정이면 시작~종료 시간을 잡습니다. 사장이 현지(예: 필리핀)에 있으면 그 지역 시간대로 넣는 게 맞는지 한 번 확인합니다(구글 기본이 한국 시간일 수 있음). 끝에 "PDF로 만들어 드릴까요?(일행 공유용)"도 제안할 수 있습니다. 장소를 추천하거나 "어디로 가라"고 안내할 때는, 각 장소마다 **한 번 눌러 바로 길안내(내비)가 시작되는** 링크를 마크다운 "[라벨](주소)" 형식으로 줍니다. 구글 지도와 Waze **둘 다** 주면 좋습니다(필리핀은 교통정체 때문에 Waze를 많이 씀): [🗺️ 구글맵](https://www.google.com/maps/dir/?api=1&destination=장소이름&travelmode=driving) 와 [🚗 Waze](https://waze.com/ul?q=장소이름&navigate=yes). 현재 위치를 알면(my_location) 구글맵은 origin=위도,경도 를, Waze는 ll=위도,경도 를 넣어 누르는 즉시 내비가 시작되게 합니다(예: 구글맵 .../dir/?api=1&origin=14.0963,120.9397&destination=...&travelmode=driving / Waze https://waze.com/ul?ll=14.0963,120.9397&navigate=yes). 맨 URL을 그대로 길게 쓰지 말고 반드시 이 "[라벨](주소)" 형식으로, 장소이름은 공백을 +로 바꿔 넣습니다. 그리고 추천만 하고 끝내지 말고 "지금 출발하면 ○시쯤 도착 / 해 뜨기까지 ○분 / ○○는 몇 시에 여니 그 전에" 처럼 다음 행동과 시간까지 계산해 한두 줄 덧붙여, 사장이 바로 움직일 수 있게 합니다.
 - 사장이 "조사해줘·알아봐줘·비교해줘·정리해줘"처럼 한 주제를 깊이 알고 싶어 하면(업무든 생활이든 — 예: 필리핀 수입규제, 국제학교 비교, 건강검진 항목, 제품 A vs B, 투자·시장 정보), web_search를 각도를 바꿔가며 여러 번 써서 여러 출처를 교차 확인한 뒤 보고서처럼 정리합니다: ①맨 위 한 줄 결론 ②핵심 정리(불릿/표) ③비교·수치가 있으면 표와 그래프 ④맨 아래 참고 출처. 확실치 않은 건 그렇게 표시하고 지어내지 않으며, 더 팔 부분이 있으면 "더 깊게 파드릴까요?"로 끝맺습니다.
 - 사용자가 "워드/PDF/엑셀로 만들어 줘·파일로 줘·다운로드·보내게 해 줘"라고 하면 create_file 도구로 실제 파일을 만들어 공유창을 바로 엽니다. 견적서·보고서·안내문·긴 정리글은 pdf나 word(상대가 고칠 수 있게), 숫자·목록·표(지출 정리, 화물 목록, 거래처 표 등)는 excel을 씁니다. pdf·word는 content에 마크다운(제목 #, 굵게 **, 글머리표 -, 표는 | 열 | 줄)으로 본문을 또렷하게 쓰고, excel은 headers와 rows를 채웁니다. 만든 뒤 "○○.pdf 만들었어요, 공유창에서 보내시면 돼요"처럼 한 줄로 알립니다. 어떤 형식일지 애매하면 짧게 한 번 묻되(예: "워드로 드릴까요, PDF로 드릴까요?"), 분명하면 바로 만듭니다. 파일 내용은 실제 데이터·사용자가 준 내용만 쓰고 지어내지 않습니다. (이 기능은 Claude 두뇌에서만 됩니다.)
 - 사장은 물류 견적서·인보이스를 자주 만듭니다. "견적서/인보이스 만들어 줘", "이 파일로 인보이스 만들어 줘", "영어로 바꿔 줘", "정기/일회성으로", "부가세 포함·미포함으로" 같은 요청이 오면 create_file로 깔끔한 문서(기본 word, 요청 시 pdf·excel)를 만듭니다. 작성 규칙:
@@ -440,6 +440,22 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
         customer: { type: ['string', 'null'], description: '거래처 이름(있으면).' },
       },
       required: ['cbm', 'kg', 'item', 'destination', 'recurring', 'vat_mode', 'ph_delivery_override', 'customer'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'add_journal',
+    description:
+      '여행·생활 일지에 하루 기록을 남긴다. 사장이 "오늘 ○○ 다녀왔어/갔었어", "일지에 적어줘", 또는 나들이·여행을 마치고 "기록해둬"라고 하거나, 어딘가 다녀온 이야기를 하면 남긴다. 나중에 "작년 이맘때 뭐 했지?"에 되살려 쓰려고 날짜별로 쌓는다. date는 YYYY-MM-DD(모르면 오늘). 사진은 넣지 않는다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: ['string', 'null'], description: '일지 날짜 YYYY-MM-DD. 오늘이면 null.' },
+        title: { type: 'string', description: '한 줄 제목(예: "타가이타이 일출").' },
+        place: { type: ['string', 'null'], description: '장소(있으면).' },
+        note: { type: ['string', 'null'], description: '메모·느낌(있으면).' },
+      },
+      required: ['date', 'title', 'place', 'note'],
       additionalProperties: false,
     },
   },
@@ -884,6 +900,21 @@ function formatNow(): string {
 /** Everything Dorothy knows right now. Sent as a second system block so the persona block stays cacheable. */
 export function buildContext(state: AppState, googleEmails: string[] = []): string {
   const { profile, memories, tasks, followups, routines } = state;
+  // 여행·생활 일지: 최근 몇 건 + "작년 오늘쯤"(올해 빼고 같은 월·일 ±4일) 되살리기.
+  const journal = state.journal ?? [];
+  const jLine = (j: (typeof journal)[number]) => `- ${j.date}${j.place ? ` · ${j.place}` : ''}: ${j.title}${j.note ? ` — ${j.note}` : ''}`;
+  const recentJournal = [...journal].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const onThisDay = (() => {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const mmdd = (d: Date) => d.getMonth() * 100 + d.getDate();
+    const today = mmdd(now);
+    return journal.filter((j) => {
+      const d = new Date(j.date + 'T00:00:00');
+      if (isNaN(d.getTime()) || d.getFullYear() >= curYear) return false;
+      return Math.abs(mmdd(d) - today) <= 4;
+    });
+  })();
   const now = Date.now();
   const open = tasks.filter((t) => !t.done);
   const openFollowups = (followups ?? []).filter((f) => !f.done);
@@ -910,6 +941,10 @@ export function buildContext(state: AppState, googleEmails: string[] = []): stri
     `회신·부탁 대기 (${openFollowups.length}개):\n${openFollowups.map((f) => `- [${f.id}] ${f.who} — ${f.what}${f.source ? ` (${f.source})` : ''}`).join('\n') || '(없음)'}`,
     `반복 알림 (${(routines ?? []).length}개):\n${(routines ?? []).map(routineLine).join('\n') || '(없음)'}`,
     recentlyDone.length ? `최근 완료한 일:\n${recentlyDone.map(taskLine).join('\n')}` : '',
+    recentJournal.length ? `여행·생활 일지 (최근):\n${recentJournal.map(jLine).join('\n')}` : '',
+    onThisDay.length
+      ? `🕰️ 작년 오늘쯤 있었던 일(사장이 "작년 이맘때 뭐 했지?"처럼 물으면 이걸 알려주고, 안 물어도 자연스럽게 "작년 오늘쯤엔…" 하고 먼저 떠올려 줄 수 있음):\n${onThisDay.map(jLine).join('\n')}`
+      : '',
     state.styleProfile?.guide
       ? `사장님 말투·성격 (도로시가 사장님의 실제 메시지를 보고 학습한 것):\n${state.styleProfile.guide}\n` +
         `→ 사장님을 대신해 보낼 메시지(회신·견적·안내문 등 사장님이 본인 이름으로 보낼 글)는 반드시 위 말투로 씁니다. ` +
@@ -1314,6 +1349,15 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
         threadId: str(input.thread_id),
       });
       return `메일을 보냈음 (id ${s.id}${s.from ? `, ${s.from}에서` : ''}).`;
+    }
+    case 'add_journal': {
+      const e = actions.addJournalEntry({
+        date: str(input.date) || undefined,
+        title: String(input.title ?? '').trim() || '기록',
+        place: str(input.place) || undefined,
+        note: str(input.note) || undefined,
+      });
+      return `일지에 저장됨: ${e.date} · ${e.title}${e.place ? ` (${e.place})` : ''}. "작년 오늘"에 되살려 드릴게요.`;
     }
     case 'my_location': {
       // 권한이 없으면 한 번 요청(OS 팝업)하고 다시 시도. 위치는 저장하지 않는다.

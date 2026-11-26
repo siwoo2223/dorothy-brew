@@ -162,6 +162,23 @@ export type SavedDoc = {
   rows?: string[][];
 };
 
+/**
+ * 여행·생활 일지 한 건. 사장님이 "오늘 ○○ 다녀왔어" 하거나 나들이·여행을 마치면 날짜별로 남긴다.
+ * date(YYYY-MM-DD)로 "작년 오늘 뭐 했는지"를 되살려 준다. 모두 이 폰에만 저장.
+ */
+export type JournalEntry = {
+  id: string;
+  /** 일지 날짜 YYYY-MM-DD (그 날 있었던 일 기준). '작년 오늘' 비교에 쓴다. */
+  date: string;
+  /** 한 줄 제목(예: "타가이타이 일출"). */
+  title: string;
+  /** 장소(있으면). */
+  place?: string;
+  /** 메모·느낌(있으면). */
+  note?: string;
+  createdAt: string;
+};
+
 /** 사장님의 표준 운임·부가세 단가. 저장해두면 "세부 20CBM 화장품 견적" 한마디에 즉석 견적을 낸다. */
 export type PricingProfile = {
   cbmOnce: number;      // 일회성 CBM당 운임(원)
