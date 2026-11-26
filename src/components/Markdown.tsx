@@ -12,8 +12,9 @@ type Seg = { text: string; bold?: boolean; code?: boolean; url?: string };
 
 /** 맨 URL을 보기 좋은 탭 라벨로. 지도·길안내 링크는 "지도/길안내 열기"로 바꿔 누르기 쉽게 한다. */
 function linkLabel(url: string): string {
+  if (/waze\.com|waze:\/\//.test(url)) return '🚗 Waze로 길안내';
   if (/google\.[^/]*\/maps|maps\.app\.goo\.gl|maps\.google|goo\.gl\/maps/.test(url)) {
-    return /\/dir\/|[?&]destination=/.test(url) ? '🗺️ 길안내 열기' : '🗺️ 지도에서 열기';
+    return /\/dir\/|[?&]destination=/.test(url) ? '🗺️ 구글맵 길안내' : '🗺️ 지도에서 열기';
   }
   const bare = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
   return bare.length > 40 ? bare.slice(0, 38) + '…' : bare;

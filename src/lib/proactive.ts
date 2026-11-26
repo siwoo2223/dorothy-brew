@@ -294,6 +294,36 @@ async function runProactiveCheck(): Promise<void> {
     // 말투 학습 오류로 배경 작업을 깨뜨리지 않는다
   }
 
+  // ── 작년 오늘: 하루 한 번(아침), 작년 이맘때(같은 월·일 ±4일, 올해 제외) 일지가 있으면 떠올려 준다. ──
+  try {
+    const onDay = await AsyncStorage.getItem('dorothy.onThisDayDay');
+    if (onDay !== today && hourNow >= 8 && hourNow < QUIET_START) {
+      const raw = await AsyncStorage.getItem('dorothy.journal');
+      const journal: { date: string; title: string; place?: string }[] = raw ? JSON.parse(raw) : [];
+      const now = new Date();
+      const curYear = now.getFullYear();
+      const mmdd = (d: Date) => d.getMonth() * 100 + d.getDate();
+      const todayMd = mmdd(now);
+      const hits = journal.filter((j) => {
+        const d = new Date(j.date + 'T00:00:00');
+        return !isNaN(d.getTime()) && d.getFullYear() < curYear && Math.abs(mmdd(d) - todayMd) <= 4;
+      });
+      await AsyncStorage.setItem('dorothy.onThisDayDay', today); // 해당 일지 없어도 오늘은 했다고 표시
+      if (hits.length && !(QUIET_START <= hourNow || hourNow < QUIET_END)) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '🕰️ 작년 이맘때',
+            body: hits.map((h) => `${h.date.slice(0, 4)}년 · ${h.title}${h.place ? ` (${h.place})` : ''}`).slice(0, 3).join(' · ') + ' — 여행 일지에서 다시 볼 수 있어요',
+            data: { url: '/journal' },
+          },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: 1, channelId: 'reminders' },
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    // 작년 오늘 오류로 배경 작업을 깨뜨리지 않는다
+  }
+
   // ── 저녁 '놓친 것' 정리: 하루 끝에 아직 열려 있는 할 일·회신·등록 안 한 후보를 한 번만 모아 알린다. ──
   // 숫자는 저장된 실제 항목에서 센다(추측 금지). 저녁 20~22시 사이 하루 한 번만.
   try {

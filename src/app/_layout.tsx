@@ -99,6 +99,7 @@ export default function RootLayout() {
             <Tabs.Screen name="settings" options={{ title: '설정', tabBarIcon: icon('⚙️') }} />
             {/* 아래는 탭에 안 뜨는 화면들(href: null) — 다른 화면에서 열려 들어간다. */}
             <Tabs.Screen name="today" options={{ href: null, title: '오늘' }} />
+            <Tabs.Screen name="journal" options={{ href: null, title: '여행 일지' }} />
             <Tabs.Screen name="tasks" options={{ href: null, title: '할 일' }} />
             <Tabs.Screen name="memory" options={{ href: null, title: '기억' }} />
             {/* Full-screen camera mode: not a tab (href: null), no header, no tab bar. */}
