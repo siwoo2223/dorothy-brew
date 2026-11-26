@@ -79,6 +79,23 @@
           "cameraPermission": "카메라로 보여주며 도로시와 대화하려면 카메라가 필요해요.",
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "Today",
+              "label": "도로시 · 오늘",
+              "minWidth": "180dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "description": "오늘 할 일·회신 한눈에",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
       ]
     ]
   }

@@ -1,7 +1,7 @@
 {
   "name": "dorothy",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -41,6 +41,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-android-widget": "^0.26.0",
     "react-native-keyboard-controller": "1.21.9",
     "react-native-reanimated": "~4.5.1",
     "react-native-safe-area-context": "~5.7.0",
@@ -59,8 +60,8 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint"
