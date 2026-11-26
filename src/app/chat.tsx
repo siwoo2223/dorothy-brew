@@ -91,6 +91,13 @@ const TRIP_PROMPT =
 const RESEARCH_PROMPT = '깊게 조사해줘 (여러 출처 교차확인해서 결론·핵심·표·출처로 정리): ';
 const QUOTE_MSG_PROMPT = '거래처 견적 요청이에요. 품목·물량(CBM)·목적지 뽑아서 즉석 견적 내줘:\n';
 
+/** 새 대화 첫 화면 인사: 시간대 + 사장님 이름(있으면). 클로드처럼 이름으로 맞아 준다. */
+function greetLine(name: string): string {
+  const h = new Date().getHours();
+  const g = h < 5 ? '늦은 밤이에요' : h < 12 ? '좋은 아침이에요' : h < 18 ? '좋은 오후예요' : '좋은 저녁이에요';
+  return name ? `${g}, ${name}님 👋` : `${g} 👋`;
+}
+
 export default function Chat() {
   const t = useTheme();
   const { state, actions, getState } = useStore();
@@ -614,8 +621,9 @@ export default function Chat() {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={[styles.emptyTitle, { color: t.text }]}>무엇을 도와드릴까요?</Text>
-            <Text style={{ color: t.subtext, textAlign: 'center' }}>나에 대해 이야기해 주시면 기억해 두고, 할 일은 알림으로 챙겨 드려요.</Text>
+            <Text style={[styles.emptyTitle, { color: t.text }]}>{greetLine(state.profile.name)}</Text>
+            <Text style={[styles.emptySub, { color: t.subtext }]}>무엇을 도와드릴까요?</Text>
+            <Text style={{ color: t.subtext, textAlign: 'center', fontSize: 13, lineHeight: 19 }}>나에 대해 이야기해 주시면 기억해 두고, 할 일은 알림으로 챙겨 드려요.</Text>
             {emptyPicks.map((s) => (
               <Pressable key={s} onPress={() => { tap(); send(s); }} style={[styles.chip, { borderColor: t.border, backgroundColor: t.card }]}>
                 <Text style={{ color: t.text }}>{s}</Text>
@@ -831,9 +839,10 @@ export default function Chat() {
 }
 
 const styles = StyleSheet.create({
-  list: { padding: 16, gap: 10, flexGrow: 1 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, paddingTop: 40 },
-  emptyTitle: { fontSize: 20, fontWeight: '700' },
+  list: { padding: 16, gap: 11, flexGrow: 1 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingTop: 40, paddingHorizontal: 8 },
+  emptyTitle: { fontSize: 25, fontWeight: '800', letterSpacing: -0.4 },
+  emptySub: { fontSize: 16, fontWeight: '600', marginTop: -2, marginBottom: 2 },
   chip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
   copyBtn: { alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 6, marginTop: 3 },
