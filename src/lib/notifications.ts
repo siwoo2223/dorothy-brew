@@ -69,7 +69,7 @@ export async function scheduleDailyBriefing(hour: number): Promise<boolean> {
     content: {
       title: '좋은 아침이에요 ☀️',
       body: '밤사이 온 메시지·문자·부재중 전화와 오늘 일정·회사 현황을 정리했어요. 눌러서 확인하세요.',
-      data: { url: '/?brief=1' },
+      data: { url: '/today?brief=1' },
     },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0, channelId: 'reminders' },
   });
