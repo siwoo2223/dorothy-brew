@@ -24,6 +24,7 @@ import { InboxCard } from '../components/InboxCard';
 import { ProactiveCard } from '../components/ProactiveCard';
 import { SelfProfileCard } from '../components/SelfProfileCard';
 import { StyleLearnCard } from '../components/StyleLearnCard';
+import { LocationCard } from '../components/LocationCard';
 import { UpdateCard } from '../components/UpdateCard';
 import { LocalBrainPanel } from '../components/LocalBrainPanel';
 import { ServerBrainCard } from '../components/ServerBrainCard';
@@ -132,6 +133,7 @@ export default function Settings() {
         <ProactiveCard />
         <SelfProfileCard />
         <StyleLearnCard />
+        <LocationCard />
       </Section>
 
       <Section icon="📂" title="데이터">

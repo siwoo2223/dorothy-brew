@@ -443,6 +443,17 @@ const TOOLS: Anthropic.Beta.BetaToolUnion[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'my_location',
+    description:
+      '휴대폰의 현재 위치(GPS)를 읽어 "지역명 + 좌표"로 돌려준다. 사장이 "내 위치", "지금 여기서 가까운", "근처 ○○", "여기서 어디로 가면", "현재 위치 기준 추천/길안내", "일출 어디서 봐" 처럼 지금 있는 곳을 기준으로 뭔가를 물으면 먼저 이걸 호출한다. 권한이 없으면 권한을 요청한다. 거부/실패하면 사용자에게 지금 어디에 있는지 직접 물어본다. 위치는 이 요청에만 쓰고 저장하지 않는다.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
 ];
 
 const ISO_DESC = '현지 시간대 오프셋을 포함한 ISO 8601 시각(예: 2026-10-10T08:00:00+09:00)';
@@ -1303,6 +1314,18 @@ async function runTool(name: string, input: Record<string, unknown>, actions: St
         threadId: str(input.thread_id),
       });
       return `메일을 보냈음 (id ${s.id}${s.from ? `, ${s.from}에서` : ''}).`;
+    }
+    case 'my_location': {
+      // 권한이 없으면 한 번 요청(OS 팝업)하고 다시 시도. 위치는 저장하지 않는다.
+      let place = await location.currentPlace().catch(() => null);
+      if (!place) {
+        const ok = await location.requestLocation().catch(() => false);
+        if (ok) place = await location.currentPlace().catch(() => null);
+      }
+      if (!place) {
+        return '위치를 가져오지 못했어요(권한 거부 또는 GPS 꺼짐). 사용자에게 지금 어디에 있는지 직접 물어보고, 설정 → 위치에서 권한을 켤 수 있다고 안내하세요.';
+      }
+      return `현재 위치: ${place.label} (위도 ${place.latitude.toFixed(4)}, 경도 ${place.longitude.toFixed(4)}). 이 위치를 기준으로 답하세요. 지명이 애매하면 좌표로 판단하고, 이동 시간·거리도 이 위치에서 계산하세요.`;
     }
     default:
       throw new Error(`알 수 없는 도구: ${name}`);
