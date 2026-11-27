@@ -144,12 +144,14 @@ type VoiceState = 'idle' | 'listening' | 'error';
 
 // lastText/delivered: some recognizers (seen on Samsung with Google's service) stream partial
 // results but finish with an empty or missing final result, so the last partial is sent on 'end'.
-function newSession(quiet = false, startedAt = Date.now(), record = false, pushToTalk = false) {
+function newSession(quiet = false, startedAt = Date.now(), record = false, pushToTalk = false, dictate = false) {
   // started: this hook owns the current recognition. Enrollment (recordUtterance) drives the shared
   // recognizer directly, so the hook ignores those events instead of sending them to the chat.
   // pushToTalk/holding/finals: in 꾹-눌러-말하기, nothing is sent until the finger is lifted; the
   // recognizer auto-finalizing on a pause just appends to `finals` (and we keep listening while held).
-  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet, record, pushToTalk, holding: false, finals: [] as string[], audioUri: null as string | null, started: false };
+  // dictate: 탭으로 켜고 끄는 '받아쓰기'. pushToTalk처럼 모아 두었다가 멈출 때 한 번 전달하지만,
+  // 바로 전송하지 않고 입력칸(draft)에 넣어 고칠 수 있게 한다(서버 받아쓰기 없이 빠르게).
+  return { startedAt, error: undefined as string | undefined, heardSpeech: false, lastText: '', delivered: false, quiet, record, pushToTalk, dictate, holding: false, finals: [] as string[], audioUri: null as string | null, started: false };
 }
 
 // Fixed path so each standby recording overwrites the last one (no buildup in the cache).
@@ -178,7 +180,7 @@ export function extractWakeCommand(text: string): string | null {
 export type SessionEnd = { error?: string; durationMs: number; heardSpeech: boolean };
 
 export function useVoiceInput(
-  onFinal: (text: string, audioUri?: string | null) => void,
+  onFinal: (text: string, audioUri?: string | null, dictation?: boolean) => void,
   onEnd?: (info: SessionEnd) => void,
   // When set and a session is started with { record: true }, the finished sentence is delivered
   // only if this returns true — used in standby to accept the owner's voice and ignore others.
@@ -215,7 +217,7 @@ export function useVoiceInput(
         if (!current.started) return; // not our session (e.g. enrollment)
         // 꾹 눌러 말하기: 손가락이 아직 눌려 있는데 인식기가 (잠깐의 침묵으로) 멈춘 것뿐이면,
         // 전송하지 말고 계속 듣는다. 이미 모은 말(finals)은 그대로 둔다.
-        if (current.pushToTalk && current.holding && !current.error && startOptsRef.current) {
+        if ((current.pushToTalk || current.dictate) && current.holding && !current.error && startOptsRef.current) {
           const opts = startOptsRef.current;
           setTimeout(() => {
             if (session.current === current && current.holding && current.started) {
@@ -230,14 +232,17 @@ export function useVoiceInput(
           const { startedAt, error, heardSpeech } = current;
           onEndRef.current?.({ error, heardSpeech, durationMs: startedAt ? Date.now() - startedAt : 0 });
         };
-        // 꾹 눌러 말하기: 손을 뗀 지금, 모은 말 전체 + 녹음 파일을 한 번만 전달(서버 받아쓰기용 uri 포함).
-        if (current.pushToTalk) {
+        // 꾹 눌러 말하기 / 받아쓰기: 멈춘 지금, 모은 말 전체를 한 번만 전달.
+        // pushToTalk는 녹음 uri도 함께(서버 받아쓰기용), dictate는 입력칸에 바로 넣도록 플래그로 알린다.
+        if (current.pushToTalk || current.dictate) {
           const text = (current.finals.join(' ').trim() || current.lastText.trim());
           const uri = current.audioUri;
           current.delivered = true;
           setTranscript('');
-          if (text || uri) onFinalRef.current(text, uri);
-          else if (!current.quiet) setError('잘 못 들었어요. 입력칸을 꾹 누르고 다시 말해 주세요.');
+          if (current.dictate) {
+            if (text) onFinalRef.current(text, null, true);
+          } else if (text || uri) onFinalRef.current(text, uri);
+          else if (!current.quiet) setError('잘 못 들었어요. 🎤를 눌러 다시 말해 주세요.');
           finish();
           return;
         }
@@ -269,8 +274,8 @@ export function useVoiceInput(
         const text = event.results[0]?.transcript ?? '';
         const trimmed = text.trim();
         if (trimmed) { cur.heardSpeech = true; setError(''); }
-        // 꾹 눌러 말하기: 전송하지 않고, 지금까지 모은 말 + 현재 말을 화면에만 보여준다.
-        if (cur.pushToTalk) {
+        // 꾹 눌러 말하기 / 받아쓰기: 전송하지 않고, 지금까지 모은 말 + 현재 말을 화면(입력칸)에만 보여준다.
+        if (cur.pushToTalk || cur.dictate) {
           const live = [cur.finals.join(' '), trimmed].filter(Boolean).join(' ').trim();
           setTranscript(live);
           cur.lastText = live;
@@ -330,16 +335,16 @@ export function useVoiceInput(
   }, []);
 
   /** `continuous` keeps listening across pauses (Android 13+; also silences the start beep). `record` saves the audio for the voiceprint check. `pushToTalk` holds everything until the finger lifts. */
-  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean; record?: boolean; pushToTalk?: boolean } = {}) => {
+  const start = useCallback(async (opts: { continuous?: boolean; quiet?: boolean; record?: boolean; pushToTalk?: boolean; dictate?: boolean } = {}) => {
     if (!recognizer) return;
     stopSpeaking();
     // In standby a failed restart is handled by the caller; don't flash an error for every retry.
     if (!opts.quiet) setError('');
     setTranscript('');
-    const record = !!opts.record || !!opts.pushToTalk; // 꾹 눌러 말하기는 서버 받아쓰기용으로 항상 녹음한다.
-    session.current = newSession(!!opts.quiet, Date.now(), record, !!opts.pushToTalk);
+    const record = !!opts.record || !!opts.pushToTalk; // 꾹 눌러 말하기는 서버 받아쓰기용으로 녹음(받아쓰기는 녹음 안 함 → 더 빠름).
+    session.current = newSession(!!opts.quiet, Date.now(), record, !!opts.pushToTalk, !!opts.dictate);
     session.current.started = true;
-    if (opts.pushToTalk) session.current.holding = true;
+    if (opts.pushToTalk || opts.dictate) session.current.holding = true;
     const permission = await recognizer.requestPermissionsAsync();
     if (!permission.granted) {
       session.current.started = false;
@@ -350,8 +355,8 @@ export function useVoiceInput(
     const sro = {
       lang: LANG,
       interimResults: true,
-      // 꾹 눌러 말하기는 손을 뗄 때까지 계속 들어야 하므로 항상 연속 모드.
-      continuous: !!opts.continuous || !!opts.pushToTalk,
+      // 꾹 눌러 말하기·받아쓰기는 멈출 때까지 계속 들어야 하므로 항상 연속 모드.
+      continuous: !!opts.continuous || !!opts.pushToTalk || !!opts.dictate,
       addsPunctuation: true,
       androidRecognitionServicePackage: androidService(),
       // Wait longer through pauses so Dorothy doesn't cut in while the user is still speaking.
@@ -382,6 +387,16 @@ export function useVoiceInput(
     }
   }, []);
 
+  /** 받아쓰기 시작: 탭하면 말이 입력칸에 실시간으로 뜨고(전송 안 함), 다시 탭하면 멈춘다. */
+  const dictateStart = useCallback(() => start({ dictate: true }), [start]);
+  /** 받아쓰기 멈춤: 'end'에서 모은 말을 입력칸(draft)에 한 번 넣는다(서버 왕복 없이 바로). */
+  const dictateStop = useCallback(() => {
+    if (session.current.dictate && session.current.started) {
+      session.current.holding = false;
+      recognizer?.stop();
+    }
+  }, []);
+
   const stop = useCallback(() => recognizer?.stop(), []);
   const cancel = useCallback(() => {
     // A cancelled session must not send whatever was half-heard.
@@ -390,7 +405,7 @@ export function useVoiceInput(
     setTranscript('');
   }, []);
 
-  return { state, transcript, error, start, stop, cancel, showError, pushStart, pushEnd };
+  return { state, transcript, error, start, stop, cancel, showError, pushStart, pushEnd, dictateStart, dictateStop };
 }
 
 /**
