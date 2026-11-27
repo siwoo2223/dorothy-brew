@@ -75,21 +75,14 @@ function sniffMedia(b64: string): string {
 }
 
 const COMPANY_REQUEST = '회사 현황 요약해줘. 통관·배송중·입고 상태별 건수랑 이번 달 손익을 그래프로 보여줘.';
-/** Pre-filled prompt for the 🚢 부킹 스케줄 chip: read the forwarder's schedule photo and organize it. */
-/** Pre-filled prompt for the 🧾 영수증 chip: read a receipt/payment photo and record it as an expense. */
+// 아래 상수들은 '+' 첨부 메뉴에서 사진/파일을 고를 때 미리 채우는 안내문이다.
+// (빠른 버튼 줄은 없앴다 — 무엇을 보냈는지 보고 도로시가 스스로 의도를 알아챈다.)
 const RECEIPT_PROMPT =
   '이 영수증/결제 사진(여러 장이면 각각)을 읽어줘. 총액·통화(페소/원)·날짜·가게명을 그대로 읽어서 add_expense로 지출 기록에 저장하고, 사진에 없는 값은 비워 둬. 저장 후 한 줄로만 확인해줘.';
-const BOOKING_PROMPT =
-  '이 부킹 스케줄 사진(여러 장이면 전부)을 읽어줘. 각 배마다 선사(HMM·KMTC·ONE 등)·항차/부킹번호·루트(부산·인천 → 마닐라 노스포트)·서류마감·반입마감(CY/closing)·출항일(ETD)·도착일(ETA)을 표로 정리하고, 출항 스케줄에 저장(add_sailing)한 뒤 마감·출항 전 알림도 필요하면 등록해줘. 사진에 없는 값은 비워 두고 지어내지 마.';
 const DOC_PROMPT =
   '이 서류 사진/파일(여러 장이면 전부)을 읽어서 정리해줘. 먼저 어떤 서류인지 판별하고(선하증권 B/L, 상업송장 Commercial Invoice, 패킹리스트 Packing List, 수출신고필증, 도착통지서 Arrival Notice, D/O, 견적서, 세금계산서 등), 종류에 맞는 핵심 정보를 글자 그대로 뽑아서 보기 좋은 표로 정리해줘. 그다음 이 서류로 할 만한 걸 한 줄로 제안해줘(견적·항차·지출로 저장할지, 워드·엑셀·PDF로 만들지). 사진에 없는 값은 절대 지어내지 말고 비워 둬. 글자가 흐리면 "불명확"이라고 표시해줘.';
 const EXCEL_PROMPT =
   '올려드린 엑셀/표를 정리해줘. ①지저분한 빈 줄·중복·깨진 칸을 정리하고 ②거래처별·월별·품목별 등 의미 있는 기준으로 묶어서 합계·소계를 내고 ③한눈에 보이게 표로 보여줘. 큰 숫자 비교는 그래프도 함께. 그리고 "깔끔한 엑셀 파일로 다시 만들어 보관함에 저장할까요?"라고 물어보고, 원하면 create_file(엑셀)로 만들어줘. 숫자는 파일에 있는 그대로만 쓰고 지어내지 마.';
-// 버튼을 탭하면 '바로 보낼 수 있는' 요청이 들어가야 한다(되묻지 않게). 세부 처리법은 페르소나가 안다.
-const TRIP_PROMPT =
-  '당일치기로 갈 만한 경치 좋은 곳 2~3곳 추천해줘. 이동시간·볼거리·입장료·먹거리까지 간단한 코스로. 날짜·인원 안 정했으면 이번 주말 기준으로 바로 추천하고(캐묻지 말고), 캘린더 등록이나 PDF는 원할 때 해줘.';
-const RESEARCH_PROMPT = '깊게 조사해줘 (여러 출처 교차확인해서 결론·핵심·표·출처로 정리): ';
-const QUOTE_MSG_PROMPT = '거래처 견적 요청이에요. 품목·물량(CBM)·목적지 뽑아서 즉석 견적 내줘:\n';
 
 /** 새 대화 첫 화면 인사: 시간대 + 사장님 이름(있으면). 클로드처럼 이름으로 맞아 준다. */
 function greetLine(name: string): string {
@@ -566,25 +559,6 @@ export default function Chat() {
     ]);
   };
 
-  // Quick-action chips above the composer (matches the home hub): one tap to the most-used asks.
-  // 📝 빠른 기록: start listening right away; a short spoken memo gets auto-filed as a task/followup/memory.
-  const QUICK: { label: string; go: () => void }[] = [
-    ...(canListen && !standby ? [{ label: '📝 빠른 기록', go: () => { if (!listening) voice.start(); } }] : []),
-    { label: '🚢 부킹 스케줄', go: () => { setDraft(BOOKING_PROMPT); chooseImage(); } },
-    { label: '📄 서류 읽기', go: () => { setDraft(DOC_PROMPT); chooseImage(); } },
-    { label: '💬 메시지로 견적', go: () => { setDraft(QUOTE_MSG_PROMPT); } },
-    { label: '🔎 깊은 조사', go: () => { setDraft(RESEARCH_PROMPT); } },
-    { label: '🗺️ 나들이·여행', go: () => { setDraft(TRIP_PROMPT); } },
-    { label: '📔 여행 일지', go: () => router.push('/journal') },
-    { label: '📊 엑셀 정리', go: () => { setDraft(EXCEL_PROMPT); pickFile(); } },
-    { label: '🧾 영수증', go: () => { setDraft(RECEIPT_PROMPT); chooseImage(); } },
-    { label: '☀️ 브리핑', go: () => send('오늘 브리핑 해줘. 오늘 꼭 챙길 일만 급한 순서로 짧게 정리해줘.') },
-    { label: '🌙 놓친 거', go: () => send('오늘 내가 놓친 게 있는지 점검해줘. 기한이 오늘이거나 지난 할 일, 아직 회신 안 한 사람, 등록 안 한 할 일 후보, 부재중 전화를 짧게 모아서 내일로 넘길지 지금 처리할지 알려줘. 없으면 "오늘 놓친 건 없어요"라고만 해줘.') },
-    { label: '📮 회신할 거', go: () => send('회신할 거 뭐 있어?') },
-    { label: '🏢 회사 현황', go: () => send(COMPANY_REQUEST) },
-    { label: '📸 카메라', go: () => router.push('/camera') },
-  ];
-
   return (
     // automaticOffset measures where the screen sits (below the header), so no hand-tuned offset is needed.
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" automaticOffset>
@@ -634,24 +608,23 @@ export default function Chat() {
         }
         renderItem={({ item }) => {
           const mine = item.role === 'user';
-          // 길게 누르면 그 메시지에 답글(카톡처럼). 입력칸 위에 인용이 뜬다.
-          const onReply = () => { tap(); setReplyTo({ role: item.role, text: shareText(item.text).slice(0, 300) }); inputRef.current?.focus(); };
+          // 말풍선을 길게 누르면 OS가 글자를 선택하게 둔다(원하는 부분만 복사). 따로 답장 가로채기 없음.
           if (mine) {
             return (
-              <Pressable onLongPress={onReply} delayLongPress={250} style={{ alignSelf: 'flex-end', maxWidth: '86%' }}>
+              <View style={{ alignSelf: 'flex-end', maxWidth: '86%' }}>
                 <View style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.userBubble }]}>
                   {item.replyTo ? <QuoteBar reply={item.replyTo} onLight /> : null}
                   <Text selectable style={{ color: '#fff', fontSize: 15, lineHeight: 22 }}>{item.text}</Text>
                 </View>
-              </Pressable>
+              </View>
             );
           }
           return (
             <View style={{ alignSelf: 'flex-start', maxWidth: '92%' }}>
-              <Pressable onLongPress={onReply} delayLongPress={250} style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+              <View style={[styles.bubble, { maxWidth: '100%', backgroundColor: t.assistantBubble, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
                 {item.replyTo ? <QuoteBar reply={item.replyTo} /> : null}
                 <RichMessage text={item.text} color={t.text} />
-              </Pressable>
+              </View>
               <View style={{ flexDirection: 'row' }}>
                 <Pressable onPress={() => { tap(); copyOrSend(item.text); }} hitSlop={6} style={styles.copyBtn}>
                   <Text style={{ color: t.subtext, fontSize: 12, fontWeight: '600' }}>📋 복사 · 보내기</Text>
@@ -751,20 +724,6 @@ export default function Chat() {
           <Text style={{ color: t.subtext, fontSize: 12 }}>파일 {files.length}개 · 전송하면 읽어요</Text>
         </View>
       )}
-      {images.length === 0 && !listening && (
-        <View style={[styles.quickRow, { backgroundColor: t.bg }]}>
-          {QUICK.map((q) => (
-            <Pressable
-              key={q.label}
-              onPress={() => { tap(); q.go(); }}
-              disabled={busy}
-              style={[styles.quickChip, { borderColor: t.border, backgroundColor: t.card, opacity: busy ? 0.5 : 1 }]}
-            >
-              <Text style={{ color: t.text, fontSize: 13 }}>{q.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
       {replyTo && (
         <View style={[styles.replyPreview, { borderTopColor: t.border, backgroundColor: t.bg }]}>
           <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: t.accent }} />
@@ -859,7 +818,6 @@ const styles = StyleSheet.create({
   thumbX: { position: 'absolute', top: -5, right: -5, width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
   thumb: { width: 44, height: 44, borderRadius: 8 },
   voiceBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 10, paddingTop: 8 },
   quickChip: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
   modePill: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   clear: { position: 'absolute', top: 6, right: 12 },
