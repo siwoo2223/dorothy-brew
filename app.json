@@ -93,6 +93,26 @@
               "targetCellHeight": 2,
               "description": "오늘 할 일·회신 한눈에",
               "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Company",
+              "label": "도로시 · 회사",
+              "minWidth": "180dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "description": "회사 현황(미수금·출항 등)",
+              "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Fx",
+              "label": "도로시 · 환율",
+              "minWidth": "150dp",
+              "minHeight": "70dp",
+              "targetCellWidth": 3,
+              "targetCellHeight": 1,
+              "description": "오늘 환율 KRW↔PHP",
+              "updatePeriodMillis": 1800000
             }
           ]
         }
