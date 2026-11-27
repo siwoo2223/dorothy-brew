@@ -100,7 +100,6 @@ export default function Chat() {
   const [phIdx, setPhIdx] = useState(0);
   const [transcribing, setTranscribing] = useState(false); // 손 뗀 뒤 서버로 받아쓰는 중
   const [pendingVoice, setPendingVoice] = useState(''); // 받아쓰는 동안 먼저 보여줄 폰 인식 결과
-  const [ptt, setPtt] = useState(false); // 지금 '꾹 눌러 말하기' 중(손을 떼면 전송)
   const inputRef = useRef<TextInput>(null);
   const [aiSuggest, setAiSuggest] = useState<string[]>([]);
   const ruleSuggest = useMemo(
@@ -182,7 +181,14 @@ export default function Chat() {
   const sendRef = useRef<(text: string, spoken?: boolean, extra?: string) => void>(() => {});
 
   const voice = useVoiceInput(
-    (text, audioUri) => {
+    (text, audioUri, dictation) => {
+      // 받아쓰기(탭으로 말하기): 전송하지 말고 입력칸에 넣어 고칠 수 있게 한다(서버 왕복 없이 바로).
+      if (dictation) {
+        const said = text.trim();
+        if (said) setDraft((d) => (d.trim() ? d.replace(/\s*$/, '') + ' ' : '') + said);
+        setTimeout(() => inputRef.current?.focus?.(), 50);
+        return;
+      }
       if (phase.current === 'wake') {
         const command = extractWakeCommand(text);
         if (command === null) return; // not for Dorothy; keep waiting
@@ -673,11 +679,9 @@ export default function Chat() {
                   : listeningFor.current === 'command'
                     ? '🎙️ 말씀하세요'
                     : '👂 대기 중 — "도로시야"라고 불러 주세요'
-                : transcribing
-                  ? '✍️ 더 정확히 다듬는 중… (곧 보내요)'
-                  : listening
-                    ? (ptt ? '🎙️ 듣고 있어요… 손을 떼면 보내요' : '🎙️ 듣고 있어요… 말을 마치면 자동으로 보내요')
-                    : '🎤 버튼을 꾹 눌러 말하거나, 글로 입력하거나, 대기 모드를 켜 보세요'}
+                : listening
+                  ? '🎙️ 듣고 있어요… 다 말하면 🎤를 다시 눌러요 (입력칸에 들어가 고칠 수 있어요)'
+                  : '🎤를 눌러 말하면 글로 적혀요. 고친 뒤 ↑로 보내거나, 바로 글로 입력하세요'}
             </Text>
           )}
           {canListen && (
@@ -759,9 +763,14 @@ export default function Chat() {
             multiline
             onSubmitEditing={() => send(draft)}
           />
-          {/* 오른쪽: 생성 중 ⏹ 정지 · 글이 있으면 ↑ 전송 · 비어 있으면 🎤 꾹 눌러 말하기 */}
+          {/* 오른쪽: 생성 중 ⏹ 정지 · 받아쓰는 중 ⏹ 완료 · 글이 있으면 ↑ 전송 · 비어 있으면 🎤 말하기 */}
           {busy ? (
             <Pressable onPress={stop} accessibilityLabel="정지" style={[styles.round, { backgroundColor: t.danger }]}>
+              <View style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' }} />
+            </Pressable>
+          ) : listening && !standby ? (
+            // 받아쓰기 중: 탭하면 멈춘다(모은 말이 입력칸에 들어가 고칠 수 있음).
+            <Pressable onPress={() => { tap(); voice.dictateStop(); }} accessibilityLabel="받아쓰기 완료" style={[styles.round, { backgroundColor: t.danger }]}>
               <View style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: '#fff' }} />
             </Pressable>
           ) : draft.trim() || images.length > 0 || files.length > 0 || !canListen ? (
@@ -775,11 +784,10 @@ export default function Chat() {
             </Pressable>
           ) : (
             <Pressable
-              // 클로드 앱처럼 '길게 눌러 말하세요': 꾹 누르고 있는 동안 듣고, 떼면 보낸다.
-              onPressIn={() => { if (!standby && !listening && !transcribing) { tap(); setPtt(true); voice.pushStart(); } }}
-              onPressOut={() => { if (listening) voice.pushEnd(); setPtt(false); }}
-              accessibilityLabel="꾹 눌러 말하기"
-              style={[styles.round, { backgroundColor: listening ? t.danger : t.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.border, opacity: ptt ? 0.7 : 1 }]}
+              // 클로드처럼: 🎤를 한 번 탭하면 말이 입력칸에 실시간으로 뜨고, 다시 탭하면 멈춘다(바로 고쳐서 전송).
+              onPress={() => { if (!standby && !listening) { tap(); voice.dictateStart(); } }}
+              accessibilityLabel="말하기"
+              style={[styles.round, { backgroundColor: t.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.border }]}
             >
               <Text style={{ fontSize: 18 }}>🎤</Text>
             </Pressable>
